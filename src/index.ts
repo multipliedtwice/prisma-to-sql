@@ -1,4 +1,3 @@
-import { Prisma } from '@prisma/client'
 import {
   convertDMMFToModels,
   type Model,
@@ -18,14 +17,7 @@ import {
   generateSQL as generateSQLInternal,
   SQLDirective,
 } from './sql-generator'
-
-type PrismaMethod =
-  | 'findMany'
-  | 'findFirst'
-  | 'findUnique'
-  | 'count'
-  | 'aggregate'
-  | 'groupBy'
+import { transformQueryResults, type PrismaMethod } from './result-transformers'
 
 interface SqlResult {
   sql: string
@@ -224,54 +216,6 @@ async function executeWithTiming(
   return results
 }
 
-function parseAggregateValue(value: unknown): unknown {
-  if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value)) {
-    return parseFloat(value)
-  }
-  return value
-}
-
-function transformCountResults(results: unknown[]): unknown {
-  const result = results[0] as any
-  const count = result?.['_count._all'] || result?.count || 0
-  return typeof count === 'string' ? parseInt(count, 10) : count
-}
-
-function transformAggregateResults(results: unknown[]): unknown {
-  const raw = (results[0] || {}) as Record<string, unknown>
-  const parsed: any = {}
-
-  for (const [key, value] of Object.entries(raw)) {
-    const parts = key.split('.')
-    if (parts.length === 2) {
-      const [group, field] = parts
-      if (!parsed[group]) parsed[group] = {}
-      parsed[group][field] = parseAggregateValue(value)
-    } else {
-      parsed[key] = value
-    }
-  }
-
-  return parsed
-}
-
-const RESULT_TRANSFORMERS: Partial<
-  Record<PrismaMethod, (results: unknown[]) => unknown>
-> = {
-  findFirst: (results) => results[0] || null,
-  findUnique: (results) => results[0] || null,
-  count: transformCountResults,
-  aggregate: transformAggregateResults,
-}
-
-function transformQueryResults(
-  method: PrismaMethod,
-  results: unknown[],
-): unknown {
-  const transformer = RESULT_TRANSFORMERS[method]
-  return transformer ? transformer(results) : results
-}
-
 function resolveModelName(ctx: any): string {
   return ctx?.name || ctx?.$name
 }
@@ -412,14 +356,11 @@ export function speedExtension(config: SpeedExtensionConfig) {
 
   setGlobalDialect(dialect)
 
-  return Prisma.defineExtension((prisma) => {
+  return (prisma: any) => {
     let dmmf = providedDmmf
 
     if (!dmmf) {
-      dmmf =
-        (prisma as any)._dmmf ||
-        (prisma as any)._engineConfig?.document ||
-        (prisma as any)._baseDmmf
+      dmmf = prisma._dmmf || prisma._engineConfig?.document || prisma._baseDmmf
 
       if (!dmmf?.datamodel) {
         throw new Error(
@@ -464,7 +405,7 @@ export function speedExtension(config: SpeedExtensionConfig) {
         $allModels: methodHandlers,
       },
     })
-  })
+  }
 }
 
 function createToSQLFunction(
@@ -577,3 +518,15 @@ export function generateSQLByModel(
 
   return byModel
 }
+
+export type {
+  SpeedExtensionConfig,
+  QueryInfo,
+  SqlResult,
+  PrismaMethod,
+  PrismaSQLConfig,
+}
+
+export type { SqlDialect, SQLDirective }
+export { setGlobalDialect, getGlobalDialect } from './sql-builder-dialect'
+export type { Model, Field, PrismaQueryArgs } from './types'
