@@ -3,6 +3,7 @@
 import { generatorHandler, GeneratorOptions } from '@prisma/generator-helper'
 import { generateClient } from './code-emitter'
 import { logger } from '@prisma/internals'
+import { dirname, join, resolve } from 'path'
 
 const { version } = require('../package.json')
 
@@ -19,11 +20,28 @@ function getDialectFromProvider(provider: string): 'postgres' | 'sqlite' {
   )
 }
 
+function getOutputDir(options: GeneratorOptions): string {
+  if (options.generator.output?.value) {
+    return options.generator.output.value
+  }
+
+  const clientGenerator = options.otherGenerators.find(
+    (g) => g.provider.value === 'prisma-client-js',
+  )
+
+  if (clientGenerator?.output?.value) {
+    const clientOutput = clientGenerator.output.value
+    return join(resolve(dirname(clientOutput), '..'), 'sql')
+  }
+
+  return '../node_modules/.prisma/sql'
+}
+
 generatorHandler({
   onManifest() {
     return {
       version,
-      defaultOutput: '../node_modules/.prisma/client/sql',
+      defaultOutput: '../node_modules/.prisma/sql',
       prettyName: 'prisma-sql-generator',
       requiresGenerators: ['prisma-client-js'],
     }
@@ -55,8 +73,7 @@ generatorHandler({
       skipInvalid: generator.config.skipInvalid === 'true',
     }
 
-    const outputDir =
-      generator.output?.value || '../node_modules/.prisma/client/sql'
+    const outputDir = getOutputDir(options)
 
     logger.info(`Generating SQL client to ${outputDir}`)
     logger.info(`Datasource: ${datasources[0].provider}`)
