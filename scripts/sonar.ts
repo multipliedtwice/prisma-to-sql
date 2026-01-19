@@ -69,7 +69,7 @@ function compareIssue(a: CompactIssue, b: CompactIssue): number {
 
 async function fetchAndLogSonarIssues(
   token: string,
-  projectKey: string = 'prisma-to-sql',
+  projectKey: string = 'prisma-sql',
 ) {
   const url = `http://localhost:9000/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&ps=500`
   const auth = btoa(`${token}:`)

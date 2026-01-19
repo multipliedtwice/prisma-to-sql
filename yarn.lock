@@ -40,9 +40,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@dee-wan/prisma-to-sql@workspace:.":
+"@dee-wan/prisma-sql@workspace:.":
   version: 0.0.0-use.local
-  resolution: "@dee-wan/prisma-to-sql@workspace:."
+  resolution: "@dee-wan/prisma-sql@workspace:."
   dependencies:
     "@dee-wan/schema-parser": 1.1.0
     "@faker-js/faker": ^10.2.0

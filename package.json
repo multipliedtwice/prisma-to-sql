@@ -1,7 +1,7 @@
 {
-  "name": "@dee-wan/prisma-to-sql",
+  "name": "@dee-wan/prisma-sql",
   "version": "1.0.0",
-  "description": "Convert Prisma queries to optimized SQL with type safety. 2.5-7.6x faster than Prisma Client.",
+  "description": "Convert Prisma queries to optimized SQL with type safety. 2-7x faster than Prisma Client.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -19,7 +19,7 @@
     "prisma:migrate": "npx prisma migrate dev --schema=tests/prisma/schema.prisma",
     "prisma:reset": "npx prisma db push --force-reset --skip-generate --schema=tests/prisma/schema.prisma",
     "prepublishOnly": "npm run build && npm run test",
-    "sonar-cli": "sonar-scanner   -Dsonar.projectKey=prisma-to-sql   -Dsonar.sources=./src   -Dsonar.host.url=http://localhost:9000   -Dsonar.login=sqp_9fe07460d0aa83f711d0edf4f317f05019d0613b",
+    "sonar-cli": "sonar-scanner   -Dsonar.projectKey=prisma-sql   -Dsonar.sources=./src   -Dsonar.host.url=http://localhost:9000   -Dsonar.login=sqp_9fe07460d0aa83f711d0edf4f317f05019d0613b",
     "sonar": "yarn sonar-cli && npx tsx scripts/sonar.ts"
   },
   "keywords": [
@@ -36,13 +36,13 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/prisma-to-sql.git"
+    "url": "https://github.com/multipliedtwice/prisma-sql.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/prisma-to-sql/issues"
+    "url": "https://github.com/multipliedtwice/prisma-sql/issues"
   },
-  "homepage": "https://github.com/yourusername/prisma-to-sql#readme",
-  "author": "Your Name <your.email@example.com>",
+  "homepage": "https://github.com/multipliedtwice/prisma-sql#readme",
+  "author": "multipliedtwice <multipliedtwice@gmail.com>",
   "license": "MIT",
   "dependencies": {
     "@dee-wan/schema-parser": "1.1.0",
