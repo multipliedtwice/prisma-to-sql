@@ -196,13 +196,10 @@ function extractDynamicParams(args: any, dynamicKeys: string[]): unknown[] {
   
   for (const key of dynamicKeys) {
     const parts = key.split(':')
-    const path = parts[0].split('.')
-    let value: any = args
+
+    const lookupKey = parts.length === 2 ? parts[1] : key
     
-    for (const part of path) {
-      if (value === null || value === undefined) break
-      value = value[part]
-    }
+    const value = args[lookupKey]
     
     if (value === undefined) {
       throw new Error(\`Missing required parameter: \${key}\`)
