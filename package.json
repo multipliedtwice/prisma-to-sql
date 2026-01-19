@@ -10,7 +10,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsx src/index.ts",
+    "build": "tsup",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "test:e2e": "vitest run tests/e2e",
