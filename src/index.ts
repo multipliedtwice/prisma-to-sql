@@ -27,9 +27,9 @@ interface SqlResult {
 interface SpeedExtensionConfig {
   postgres?: any
   sqlite?: any
-  dmmf?: any
+  models: Model[]
   debug?: boolean
-  models?: string[]
+  allowedModels?: string[]
   onQuery?: (info: QueryInfo) => void
 }
 
@@ -335,9 +335,9 @@ export function speedExtension(config: SpeedExtensionConfig) {
   const {
     postgres,
     sqlite,
-    dmmf: providedDmmf,
+    models,
     debug = false,
-    models: allowedModels,
+    allowedModels,
     onQuery,
   } = config
 
@@ -351,26 +351,20 @@ export function speedExtension(config: SpeedExtensionConfig) {
     )
   }
 
+  if (!models || !Array.isArray(models) || models.length === 0) {
+    throw new Error(
+      'speedExtension requires models parameter. ' +
+        'Convert DMMF first: speedExtension({ models: convertDMMFToModels(Prisma.dmmf.datamodel) })',
+    )
+  }
+
   const dialect: SqlDialect = postgres ? 'postgres' : 'sqlite'
   const client = postgres || sqlite
 
   setGlobalDialect(dialect)
 
   return (prisma: any) => {
-    let dmmf = providedDmmf
-
-    if (!dmmf) {
-      dmmf = prisma._dmmf || prisma._engineConfig?.document || prisma._baseDmmf
-
-      if (!dmmf?.datamodel) {
-        throw new Error(
-          'Cannot access Prisma DMMF. Please provide dmmf in config: speedExtension({ postgres: sql, dmmf: Prisma.dmmf })',
-        )
-      }
-    }
-
-    const allModels = convertDMMFToModels(dmmf.datamodel)
-    const modelMap = new Map(allModels.map((m) => [m.name, m]))
+    const modelMap = new Map(models.map((m) => [m.name, m]))
     const executeQuery = createExecuteQuery(client, dialect)
 
     const deps: AccelerationDeps = {
@@ -378,7 +372,7 @@ export function speedExtension(config: SpeedExtensionConfig) {
       debug,
       onQuery,
       allowedModels,
-      allModels,
+      allModels: models,
       modelMap,
       executeQuery,
     }
@@ -416,6 +410,10 @@ function createToSQLFunction(
   method: PrismaMethod,
   args?: Record<string, unknown>,
 ) => SqlResult {
+  if (!models || !Array.isArray(models) || models.length === 0) {
+    throw new Error('createToSQL requires non-empty models array')
+  }
+
   const modelMap = new Map(models.map((m) => [m.name, m]))
 
   setGlobalDialect(dialect)
@@ -435,14 +433,13 @@ function createToSQLFunction(
   }
 }
 
-export function createToSQL(dmmf: any, dialect: SqlDialect) {
-  const models = convertDMMFToModels(dmmf.datamodel)
+export function createToSQL(models: Model[], dialect: SqlDialect) {
   return createToSQLFunction(models, dialect)
 }
 
 interface PrismaSQLConfig<TClient> {
   client: TClient
-  dmmf: any
+  models: Model[]
   dialect: SqlDialect
   execute: (
     client: TClient,
@@ -452,8 +449,12 @@ interface PrismaSQLConfig<TClient> {
 }
 
 export function createPrismaSQL<TClient>(config: PrismaSQLConfig<TClient>) {
-  const { client, dmmf, dialect, execute } = config
-  const models = convertDMMFToModels(dmmf.datamodel)
+  const { client, models, dialect, execute } = config
+
+  if (!models || !Array.isArray(models) || models.length === 0) {
+    throw new Error('createPrismaSQL requires non-empty models array')
+  }
+
   const toSQL = createToSQLFunction(models, dialect)
 
   async function query<T = unknown[]>(
@@ -530,3 +531,4 @@ export type {
 export type { SqlDialect, SQLDirective }
 export { setGlobalDialect, getGlobalDialect } from './sql-builder-dialect'
 export type { Model, Field, PrismaQueryArgs } from './types'
+export { convertDMMFToModels } from '@dee-wan/schema-parser'

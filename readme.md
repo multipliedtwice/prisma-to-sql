@@ -3,10 +3,15 @@
 Speed up Prisma reads **2-7x** by executing queries via postgres.js instead of Prisma's query engine.
 
 ```typescript
-const sql = postgres(DATABASE_URL)
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+import { convertDMMFToModels } from 'prisma-sql'
+import { Prisma } from '@prisma/client'
 
-// Same Prisma API, 2-7x faster reads
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+const sql = postgres(DATABASE_URL)
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql, models }),
+)
+
 const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
 ```
 
@@ -42,14 +47,16 @@ npm install prisma-sql better-sqlite3
 ### PostgreSQL
 
 ```typescript
-import { PrismaClient } from '@prisma/client'
-import { speedExtension } from 'prisma-sql'
+import { PrismaClient, Prisma } from '@prisma/client'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
 import postgres from 'postgres'
 
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql, models }),
+)
 
-// All reads now execute via postgres.js
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
   include: { posts: true },
@@ -59,32 +66,17 @@ const users = await prisma.user.findMany({
 ### SQLite
 
 ```typescript
-import { PrismaClient } from '@prisma/client'
-import { speedExtension } from 'prisma-sql'
+import { PrismaClient, Prisma } from '@prisma/client'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
 import Database from 'better-sqlite3'
 
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const db = new Database('./data.db')
-const prisma = new PrismaClient().$extends(speedExtension({ sqlite: db }))
+const prisma = new PrismaClient().$extends(
+  speedExtension({ sqlite: db, models }),
+)
 
 const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
-```
-
-### Explicit DMMF (Edge Runtimes)
-
-In some environments (Cloudflare Workers, Vercel Edge, bundlers), Prisma's DMMF may not be auto-detectable. Provide it explicitly:
-
-```typescript
-import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension } from 'prisma-sql'
-import postgres from 'postgres'
-
-const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(
-  speedExtension({
-    postgres: sql,
-    dmmf: Prisma.dmmf, // Required in edge runtimes
-  }),
-)
 ```
 
 ## What Gets Faster
@@ -271,22 +263,18 @@ Benchmarks from 137 E2E tests comparing identical queries against Prisma v6, Pri
 
 ```typescript
 import { Prisma } from '@prisma/client'
+import { convertDMMFToModels } from 'prisma-sql'
+
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 
 speedExtension({
-  // Database client (required - choose one)
-  postgres: sql, // For PostgreSQL via postgres.js
-  sqlite: db, // For SQLite via better-sqlite3
+  postgres: sql,
+  models,
 
-  // DMMF (optional - auto-detected in most cases)
-  dmmf: Prisma.dmmf, // Required in edge runtimes/bundled apps
+  debug: true,
 
-  // Debug mode (optional)
-  debug: true, // Log all generated SQL
+  allowedModels: ['User', 'Post'],
 
-  // Selective models (optional)
-  models: ['User', 'Post'], // Only accelerate these models
-
-  // Performance monitoring (optional)
   onQuery: (info) => {
     console.log(`${info.model}.${info.method}: ${info.duration}ms`)
   },
@@ -298,15 +286,16 @@ speedExtension({
 See generated SQL for every query:
 
 ```typescript
+import { convertDMMFToModels } from 'prisma-sql'
+import { Prisma } from '@prisma/client'
+
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
 speedExtension({
   postgres: sql,
+  models,
   debug: true,
 })
-
-// Logs:
-// [postgres] User.findMany
-// SQL: SELECT ... FROM users WHERE status = $1
-// Params: ['ACTIVE']
 ```
 
 ### Selective Models
@@ -314,12 +303,13 @@ speedExtension({
 Only accelerate specific models:
 
 ```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
 speedExtension({
   postgres: sql,
-  models: ['User', 'Post'], // Only User and Post get accelerated
+  models,
+  allowedModels: ['User', 'Post'],
 })
-
-// Order, Product, etc. still use Prisma
 ```
 
 ### Performance Monitoring
@@ -327,8 +317,11 @@ speedExtension({
 Track query performance:
 
 ```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
 speedExtension({
   postgres: sql,
+  models,
   onQuery: (info) => {
     console.log(`${info.model}.${info.method} completed in ${info.duration}ms`)
 
@@ -343,24 +336,6 @@ speedExtension({
 })
 ```
 
-### When to Provide DMMF Explicitly
-
-Provide `dmmf: Prisma.dmmf` if:
-
-- Using Cloudflare Workers, Vercel Edge, or similar edge runtimes
-- Bundling with webpack, esbuild, or Rollup
-- In a monorepo with complex Prisma setup
-- You see "Cannot access Prisma DMMF" error
-
-```typescript
-import { Prisma } from '@prisma/client'
-
-speedExtension({
-  postgres: sql,
-  dmmf: Prisma.dmmf, // Explicit DMMF
-})
-```
-
 ## Advanced Usage
 
 ### Read Replicas
@@ -368,18 +343,20 @@ speedExtension({
 Send writes to primary, reads to replica:
 
 ```typescript
-// Primary database for writes
+import { convertDMMFToModels } from 'prisma-sql'
+import { Prisma } from '@prisma/client'
+
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
 const primary = new PrismaClient()
 
-// Replica for fast reads
 const replica = postgres(process.env.REPLICA_URL)
 const fastPrisma = new PrismaClient().$extends(
-  speedExtension({ postgres: replica })
+  speedExtension({ postgres: replica, models })
 )
 
-// Use appropriately
-await primary.user.create({ data: { ... } })      // → Primary
-const users = await fastPrisma.user.findMany()    // → Replica
+await primary.user.create({ data: { ... } })
+const users = await fastPrisma.user.findMany()
 ```
 
 ### Connection Pooling
@@ -387,14 +364,18 @@ const users = await fastPrisma.user.findMany()    // → Replica
 Configure postgres.js connection pool:
 
 ```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
 const sql = postgres(process.env.DATABASE_URL, {
-  max: 20, // Pool size
-  idle_timeout: 20, // Close idle connections after 20s
-  connect_timeout: 10, // Connection timeout
-  ssl: 'require', // Force SSL
+  max: 20,
+  idle_timeout: 20,
+  connect_timeout: 10,
+  ssl: 'require',
 })
 
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql, models }),
+)
 ```
 
 ### Gradual Rollout
@@ -402,28 +383,27 @@ const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 Feature-flag the extension for safe rollout:
 
 ```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const USE_FAST_READS = process.env.FAST_READS === 'true'
 
 const sql = postgres(DATABASE_URL)
 const prisma = new PrismaClient()
 
 const db = USE_FAST_READS
-  ? prisma.$extends(speedExtension({ postgres: sql }))
+  ? prisma.$extends(speedExtension({ postgres: sql, models }))
   : prisma
-
-// Disable in production if issues arise:
-// FAST_READS=false pm2 restart app
 ```
 
 ### Access Original Prisma
 
 ```typescript
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql, models }),
+)
 
-// Use extension (fast)
 const fast = await prisma.user.findMany()
 
-// Bypass extension (original Prisma)
 const slow = await prisma.$original.user.findMany()
 ```
 
@@ -433,15 +413,13 @@ const slow = await prisma.$original.user.findMany()
 
 ```typescript
 import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension } from 'prisma-sql'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
 import postgres from 'postgres'
 
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(process.env.DATABASE_URL)
 const prisma = new PrismaClient().$extends(
-  speedExtension({
-    postgres: sql,
-    dmmf: Prisma.dmmf, // Explicit dmmf required in edge runtime
-  }),
+  speedExtension({ postgres: sql, models }),
 )
 
 export const config = { runtime: 'edge' }
@@ -457,10 +435,11 @@ export default async function handler(req: Request) {
 For Cloudflare Workers, use the standalone SQL generation API instead of the extension:
 
 ```typescript
-import { createToSQL } from 'prisma-sql'
+import { createToSQL, convertDMMFToModels } from 'prisma-sql'
 import { Prisma } from '@prisma/client'
 
-const toSQL = createToSQL(Prisma.dmmf, 'sqlite')
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+const toSQL = createToSQL(models, 'sqlite')
 
 export default {
   async fetch(request: Request, env: Env) {
@@ -483,23 +462,19 @@ export default {
 ### Filters
 
 ```typescript
-// Comparison operators
 { age: { gt: 18, lte: 65 } }
 { status: { in: ['ACTIVE', 'PENDING'] } }
 { status: { notIn: ['DELETED'] } }
 
-// String operations
 { email: { contains: '@example.com' } }
 { email: { startsWith: 'user' } }
 { email: { endsWith: '.com' } }
 { email: { contains: 'EXAMPLE', mode: 'insensitive' } }
 
-// Logical operators
 { AND: [{ status: 'ACTIVE' }, { verified: true }] }
 { OR: [{ role: 'ADMIN' }, { role: 'MODERATOR' }] }
 { NOT: { status: 'DELETED' } }
 
-// Null checks
 { deletedAt: null }
 { deletedAt: { not: null } }
 ```
@@ -507,7 +482,6 @@ export default {
 ### Relations
 
 ```typescript
-// Include relations
 {
   include: {
     posts: true,
@@ -515,7 +489,6 @@ export default {
   }
 }
 
-// Nested includes
 {
   include: {
     posts: {
@@ -527,7 +500,6 @@ export default {
   }
 }
 
-// Relation filters
 {
   where: {
     posts: {
@@ -556,22 +528,19 @@ export default {
 ### Pagination & Ordering
 
 ```typescript
-// Limit/offset
 {
   take: 10,
   skip: 20,
   orderBy: { createdAt: 'desc' }
 }
 
-// Cursor-based pagination
 {
   cursor: { id: 100 },
   take: 10,
-  skip: 1,  // Skip cursor itself
+  skip: 1,
   orderBy: { id: 'asc' }
 }
 
-// Multiple ordering
 {
   orderBy: [
     { status: 'asc' },
@@ -580,7 +549,6 @@ export default {
   ]
 }
 
-// Null positioning (PostgreSQL)
 {
   orderBy: {
     name: {
@@ -594,10 +562,8 @@ export default {
 ### Aggregations
 
 ```typescript
-// Count
 await prisma.user.count({ where: { status: 'ACTIVE' } })
 
-// Multiple aggregations
 await prisma.task.aggregate({
   where: { status: 'DONE' },
   _count: { _all: true },
@@ -607,7 +573,6 @@ await prisma.task.aggregate({
   _max: { completedAt: true },
 })
 
-// Group by
 await prisma.task.groupBy({
   by: ['status', 'priority'],
   _count: { _all: true },
@@ -623,13 +588,11 @@ await prisma.task.groupBy({
 ### Distinct
 
 ```typescript
-// Single field (PostgreSQL uses DISTINCT ON)
 {
   distinct: ['status'],
   orderBy: { status: 'asc' }
 }
 
-// Multiple fields (SQLite uses window functions)
 {
   distinct: ['status', 'priority'],
   orderBy: [
@@ -654,12 +617,16 @@ const users = await prisma.user.findMany()
 
 ```typescript
 import postgres from 'postgres'
-import { speedExtension } from 'prisma-sql'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { Prisma } from '@prisma/client'
 
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(DATABASE_URL)
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql, models }),
+)
 
-const users = await prisma.user.findMany() // Same code, 2-7x faster
+const users = await prisma.user.findMany()
 ```
 
 ### From Drizzle
@@ -682,12 +649,15 @@ const users = await db
 **After:**
 
 ```typescript
-import { speedExtension } from 'prisma-sql'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { Prisma } from '@prisma/client'
 
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(DATABASE_URL)
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql, models }),
+)
 
-// Use Prisma's familiar API instead
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
 })
@@ -724,13 +694,34 @@ If you encounter unsupported queries, enable `debug: true` to see which queries 
 
 ## Troubleshooting
 
+### "speedExtension requires models parameter"
+
+Convert DMMF at module level:
+
+```typescript
+import { Prisma } from '@prisma/client'
+import { convertDMMFToModels } from 'prisma-sql'
+
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
+const prisma = new PrismaClient().$extends(
+  speedExtension({
+    postgres: sql,
+    models,
+  }),
+)
+```
+
 ### "Results don't match Prisma Client"
 
 Enable debug mode to inspect generated SQL:
 
 ```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
 speedExtension({
   postgres: sql,
+  models,
   debug: true,
 })
 ```
@@ -749,37 +740,9 @@ Increase postgres.js pool size:
 
 ```typescript
 const sql = postgres(DATABASE_URL, {
-  max: 50, // Increase from default 10
+  max: 50,
 })
 ```
-
-### "Cannot access Prisma DMMF" Error
-
-If you see this error:
-
-```
-Cannot access Prisma DMMF. Please provide dmmf in config
-```
-
-Explicitly provide the DMMF:
-
-```typescript
-import { Prisma } from '@prisma/client'
-
-const prisma = new PrismaClient().$extends(
-  speedExtension({
-    postgres: sql,
-    dmmf: Prisma.dmmf, // Add this
-  }),
-)
-```
-
-This is required in:
-
-- Edge runtimes (Cloudflare Workers, Vercel Edge)
-- Bundled applications (webpack, esbuild)
-- Some monorepo setups
-- When using Prisma Client programmatically
 
 ### "Type errors after extending"
 
@@ -801,8 +764,11 @@ Some queries won't see dramatic improvements:
 Use `onQuery` to measure actual speedup:
 
 ```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
 speedExtension({
   postgres: sql,
+  models,
   onQuery: (info) => {
     console.log(`${info.method} took ${info.duration}ms`)
   },
@@ -831,20 +797,6 @@ A: The extension runs after middlewares. If you need middleware to see the actua
 
 **Q: Can I still use `$queryRaw` and `$executeRaw`?**  
 A: Yes. Those methods are unaffected. You also still have direct access to the postgres.js client.
-
-**Q: Do I need to provide `dmmf` in the config?**  
-A: Usually no - it's auto-detected from Prisma Client. However, in edge runtimes (Cloudflare Workers, Vercel Edge) or bundled applications, you must provide it explicitly:
-
-```typescript
-import { Prisma } from '@prisma/client'
-
-speedExtension({
-  postgres: sql,
-  dmmf: Prisma.dmmf, // Required in edge runtimes
-})
-```
-
-If you see "Cannot access Prisma DMMF" error, add this parameter.
 
 **Q: What's the overhead of SQL generation?**  
 A: ~0.03-0.04ms per query. Even with this overhead, total time is 2-7x faster than Prisma.
@@ -875,13 +827,16 @@ npm test
 Benchmark your own queries:
 
 ```typescript
-import { speedExtension } from 'prisma-sql'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { Prisma } from '@prisma/client'
 
 const queries: { name: string; duration: number }[] = []
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
     postgres: sql,
+    models,
     onQuery: (info) => {
       queries.push({
         name: `${info.model}.${info.method}`,
@@ -891,11 +846,9 @@ const prisma = new PrismaClient().$extends(
   }),
 )
 
-// Run your queries
 await prisma.user.findMany({ where: { status: 'ACTIVE' } })
 await prisma.post.findMany({ include: { author: true } })
 
-// Analyze
 console.table(queries)
 ```
 
@@ -906,13 +859,10 @@ git clone https://github.com/dee-see/prisma-sql
 cd prisma-sql
 npm install
 
-# Setup test database
 npx prisma db push
 
-# Run PostgreSQL benchmarks
 DATABASE_URL="postgresql://..." npm run test:e2e:postgres
 
-# Run SQLite benchmarks
 npm run test:e2e:sqlite
 ```
 
