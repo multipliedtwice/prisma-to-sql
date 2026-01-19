@@ -321,7 +321,16 @@ function buildOperator(
   }
 
   if (fieldType && isJsonType(fieldType)) {
-    return buildJsonOperator(expr, op, val, ctx.params, ctx.dialect)
+    const JSON_OPS = new Set([
+      Ops.PATH,
+      Ops.STRING_CONTAINS,
+      Ops.STRING_STARTS_WITH,
+      Ops.STRING_ENDS_WITH,
+    ])
+
+    if (JSON_OPS.has(op as any)) {
+      return buildJsonOperator(expr, op, val, ctx.params, ctx.dialect)
+    }
   }
 
   return buildScalarOperator(
