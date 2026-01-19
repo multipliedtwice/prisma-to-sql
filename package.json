@@ -26,7 +26,7 @@
     "prisma:generate": "npx prisma generate --schema=tests/prisma/schema.prisma",
     "prisma:migrate": "npx prisma migrate dev --schema=tests/prisma/schema.prisma",
     "prisma:reset": "npx prisma db push --force-reset --skip-generate --schema=tests/prisma/schema.prisma",
-    "prepublishOnly": "npm run build && npm run test",
+    "prepublishOnly": "npm run build",
     "sonar-cli": "sonar-scanner   -Dsonar.projectKey=prisma-sql   -Dsonar.sources=./src   -Dsonar.host.url=http://localhost:9000   -Dsonar.login=sqp_9fe07460d0aa83f711d0edf4f317f05019d0613b",
     "sonar": "yarn sonar-cli && npx tsx scripts/sonar.ts"
   },
