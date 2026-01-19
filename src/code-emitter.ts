@@ -128,9 +128,58 @@ const QUERIES: Record<string, Record<string, Record<string, {
 
 const DIALECT = ${JSON.stringify(dialect)}
 
+function isDynamicParam(key: string): boolean {
+  // Common dynamic parameters that should be replaced with markers
+  return key === 'skip' || key === 'take' || key === 'cursor'
+}
+
 function normalizeQuery(args: any): string {
   if (!args) return '{}'
-  return JSON.stringify(args, (key, value) => {
+  
+  // Clone and normalize the args
+  const normalized = JSON.parse(JSON.stringify(args))
+  
+  // Replace dynamic params with markers to match prebaked keys
+  function replaceDynamicParams(obj: any): any {
+    if (!obj || typeof obj !== 'object') return obj
+    
+    if (Array.isArray(obj)) {
+      return obj.map(replaceDynamicParams)
+    }
+    
+    const result: any = {}
+    for (const [key, value] of Object.entries(obj)) {
+      // Replace top-level dynamic params with markers
+      if (isDynamicParam(key)) {
+        result[key] = \`__DYNAMIC_\${key}__\`
+      } else {
+        result[key] = replaceDynamicParams(value)
+      }
+    }
+    return result
+  }
+  
+  const withMarkers = replaceDynamicParams(normalized)
+  
+  // Remove empty objects to match prebaked keys
+  function removeEmptyObjects(obj: any): any {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj
+    
+    const result: any = {}
+    for (const [key, value] of Object.entries(obj)) {
+      // Skip empty objects (but keep empty arrays)
+      if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) {
+        continue
+      }
+      result[key] = removeEmptyObjects(value)
+    }
+    return result
+  }
+  
+  const cleaned = removeEmptyObjects(withMarkers)
+  
+  // Sort keys recursively for deterministic matching
+  return JSON.stringify(cleaned, (key, value) => {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const sorted: Record<string, unknown> = {}
       for (const k of Object.keys(value).sort()) {
