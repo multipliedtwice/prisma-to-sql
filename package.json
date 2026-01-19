@@ -1,9 +1,17 @@
 {
-  "name": "@dee-wan/prisma-sql",
+  "name": "prisma-sql",
   "version": "1.0.0",
   "description": "Convert Prisma queries to optimized SQL with type safety. 2-7x faster than Prisma Client.",
-  "main": "dist/index.js",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
   "files": [
     "dist",
     "README.md",
@@ -36,36 +44,41 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/multipliedtwice/prisma-sql.git"
+    "url": "https://github.com/multipliedtwice/prisma-to-sql.git"
   },
   "bugs": {
-    "url": "https://github.com/multipliedtwice/prisma-sql/issues"
+    "url": "https://github.com/multipliedtwice/prisma-to-sql/issues"
   },
-  "homepage": "https://github.com/multipliedtwice/prisma-sql#readme",
+  "homepage": "https://github.com/multipliedtwice/prisma-to-sql#readme",
   "author": "multipliedtwice <multipliedtwice@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@dee-wan/schema-parser": "1.1.0",
-    "@prisma/client": "7.2.0",
-    "prisma": "7.2.0"
+    "@dee-wan/schema-parser": "1.1.0"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.2.0",
     "@prisma/adapter-better-sqlite3": "^7.2.0",
     "@prisma/adapter-pg": "^7.2.0",
+    "@prisma/client": "7.2.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.0.0",
     "better-sqlite3": "^12.6.2",
     "drizzle-kit": "^0.31.8",
     "drizzle-orm": "^0.45.1",
     "postgres": "^3.4.8",
+    "prisma": "7.2.0",
     "tsup": "^8.5.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^4.0.14"
   },
   "peerDependencies": {
-    "@prisma/client": "^4.0.0 || ^5.0.0 || ^6.0.0"
+    "@prisma/client": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": false
+    }
   },
   "engines": {
     "node": ">=16.0.0"
