@@ -1,6 +1,6 @@
 # prisma-sql
 
-Speed up Prisma reads **2-7x** by executing queries via postgres.js instead of Prisma's query engine.
+Speed up Prisma reads **2-7x** by executing queries via postgres.js or better-sqlite3 instead of Prisma's query engine.
 
 ```typescript
 import { convertDMMFToModels } from 'prisma-sql'
@@ -44,7 +44,82 @@ npm install prisma-sql better-sqlite3
 
 ## Quick Start
 
-### PostgreSQL
+You can use prisma-sql in two ways:
+
+### 1. Generator Mode (Recommended - Fastest)
+
+Prebake SQL queries at build time for maximum performance.
+
+**Add generator to schema:**
+
+```prisma
+// schema.prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+generator sql {
+  provider = "prisma-sql-generator"
+  // Dialect auto-detected from datasource.provider
+}
+
+model User {
+  id     Int     @id @default(autoincrement())
+  email  String  @unique
+  status String
+  posts  Post[]
+
+  /// @sql.findMany({ where: { status: "ACTIVE" } })
+  /// @sql.findMany({ where: { status: "PENDING" } })
+  /// @sql.count({ where: { status: "ACTIVE" } })
+}
+
+model Post {
+  id        Int     @id @default(autoincrement())
+  title     String
+  published Boolean
+  authorId  Int
+  author    User    @relation(fields: [authorId], references: [id])
+
+  /// @sql.findMany({ where: { published: true }, include: { author: true } })
+}
+```
+
+**Generate and use:**
+
+```bash
+npx prisma generate
+```
+
+```typescript
+import { PrismaClient } from '@prisma/client'
+import { createExtension } from '.prisma/client/sql'
+import postgres from 'postgres'
+
+const sql = postgres(process.env.DATABASE_URL)
+const prisma = new PrismaClient().$extends(createExtension({ postgres: sql }))
+
+// ⚡ PREBAKED - Uses pre-generated SQL (instant)
+const activeUsers = await prisma.user.findMany({
+  where: { status: 'ACTIVE' },
+})
+
+// 🔨 RUNTIME - Generates SQL on-the-fly (still fast)
+const searchUsers = await prisma.user.findMany({
+  where: { email: { contains: '@example.com' } },
+})
+```
+
+### 2. Runtime Mode (Simpler, No Build Step)
+
+Generate SQL on-the-fly without code generation.
+
+**PostgreSQL:**
 
 ```typescript
 import { PrismaClient, Prisma } from '@prisma/client'
@@ -63,7 +138,7 @@ const users = await prisma.user.findMany({
 })
 ```
 
-### SQLite
+**SQLite:**
 
 ```typescript
 import { PrismaClient, Prisma } from '@prisma/client'
@@ -77,6 +152,167 @@ const prisma = new PrismaClient().$extends(
 )
 
 const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
+```
+
+## Generator Mode vs Runtime Mode
+
+### Generator Mode (Recommended)
+
+**Pros:**
+
+- ⚡ **Fastest** - SQL pre-generated at build time
+- 🎯 **Zero overhead** for known queries
+- 🔨 **Auto-fallback** to runtime for unknown queries
+- 📊 **Track performance** with `prebaked` flag
+
+**Cons:**
+
+- Requires `npx prisma generate` step
+- Need to define common queries upfront
+
+**When to use:**
+
+- ✅ Production applications
+- ✅ Known query patterns (dashboards, APIs)
+- ✅ Want maximum performance
+- ✅ Build step is acceptable
+
+### Runtime Mode
+
+**Pros:**
+
+- 🚀 **Simple** - no build step
+- 🔧 **Flexible** - handles any query
+- 📝 **Easy prototyping**
+
+**Cons:**
+
+- Small overhead (~0.2ms) for SQL generation
+- Still 2-7x faster than Prisma
+
+**When to use:**
+
+- ✅ Rapid prototyping
+- ✅ Fully dynamic queries
+- ✅ No build step desired
+- ✅ Query patterns unknown
+
+## Generator Mode Details
+
+### How It Works
+
+```
+Build Time:
+  schema.prisma
+       ↓
+  /// @sql.findMany({ where: { status: "ACTIVE" } })
+       ↓
+  npx prisma generate
+       ↓
+  .prisma/client/sql/index.ts
+       ↓
+  QUERIES = {
+    User: {
+      '{"where":{"status":"ACTIVE"}}': {
+        sql: 'SELECT * FROM users WHERE status = $1',
+        params: ['ACTIVE'],
+        dynamicKeys: []
+      }
+    }
+  }
+
+Runtime:
+  prisma.user.findMany({ where: { status: 'ACTIVE' } })
+       ↓
+  Normalize query → '{"where":{"status":"ACTIVE"}}'
+       ↓
+  QUERIES.User[query] found?
+       ↓
+  YES → ⚡ Use prebaked SQL (0.03ms overhead)
+       ↓
+  NO → 🔨 Generate SQL runtime (0.2ms overhead)
+       ↓
+  Execute via postgres.js/better-sqlite3
+```
+
+### Generator Configuration
+
+```prisma
+generator sql {
+  provider = "prisma-sql-generator"
+
+  // Optional: Override auto-detected dialect (rarely needed)
+  // dialect = "postgres"  // or "sqlite"
+
+  // Optional: Output directory (default: ../node_modules/.prisma/client/sql)
+  // output = "./generated/sql"
+
+  // Optional: Skip invalid directives instead of failing (default: false)
+  // skipInvalid = "true"
+}
+```
+
+### Supported Directive Patterns
+
+```prisma
+model User {
+  // Simple queries
+  /// @sql.findMany({ where: { status: "ACTIVE" } })
+  /// @sql.findFirst({ where: { email: "test@example.com" } })
+  /// @sql.findUnique({ where: { id: 1 } })
+
+  // With relations
+  /// @sql.findMany({ include: { posts: true } })
+  /// @sql.findMany({ include: { posts: { where: { published: true } } } })
+
+  // With pagination
+  /// @sql.findMany({ take: 10, skip: 20, orderBy: { createdAt: "desc" } })
+
+  // Aggregations
+  /// @sql.count({ where: { status: "ACTIVE" } })
+  /// @sql.aggregate({ _count: { _all: true }, _avg: { age: true } })
+  /// @sql.groupBy({ by: ["status"], _count: { _all: true } })
+
+  // Dynamic parameters
+  /// @sql.findMany({ where: { status: { $param: "status" } } })
+  /// @sql.findMany({ where: { age: { gte: { $param: "minAge" } } } })
+}
+```
+
+### Dynamic Parameters
+
+Use `$param` for runtime values:
+
+```prisma
+model User {
+  /// @sql.findMany({ where: { status: { $param: "status" } } })
+  /// @sql.findMany({ where: { age: { gte: { $param: "minAge" } } } })
+}
+```
+
+```typescript
+// Prebaked SQL with runtime parameters
+const users = await prisma.user.findMany({
+  where: { status: 'ACTIVE' }, // Matches directive with $param
+})
+
+// SQL: SELECT * FROM users WHERE status = $1
+// Params: ['ACTIVE']
+```
+
+### Performance Tracking
+
+```typescript
+const prisma = new PrismaClient().$extends(
+  createExtension({
+    postgres: sql,
+    debug: true,
+    onQuery: (info) => {
+      console.log(`${info.model}.${info.method}: ${info.duration}ms`)
+      console.log(info.prebaked ? '⚡ PREBAKED' : '🔨 RUNTIME')
+    },
+  }),
+)
 ```
 
 ## What Gets Faster
@@ -613,7 +849,30 @@ const prisma = new PrismaClient()
 const users = await prisma.user.findMany()
 ```
 
-**After:**
+**After (Generator Mode):**
+
+```prisma
+// schema.prisma
+generator sql {
+  provider = "prisma-sql-generator"
+}
+
+model User {
+  /// @sql.findMany({ where: { status: "ACTIVE" } })
+}
+```
+
+```typescript
+import { createExtension } from '.prisma/client/sql'
+import postgres from 'postgres'
+
+const sql = postgres(DATABASE_URL)
+const prisma = new PrismaClient().$extends(createExtension({ postgres: sql }))
+
+const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
+```
+
+**After (Runtime Mode):**
 
 ```typescript
 import postgres from 'postgres'
@@ -661,6 +920,48 @@ const prisma = new PrismaClient().$extends(
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
 })
+```
+
+## Local Development
+
+### Testing the Generator Locally
+
+**1. Build the package:**
+
+```bash
+cd prisma-sql
+npm install
+npm run build
+```
+
+**2. Link globally:**
+
+```bash
+npm link
+```
+
+**3. Use in your project:**
+
+```bash
+cd your-project
+npm link prisma-sql
+npx prisma generate
+```
+
+**Alternative: Use file path directly in schema:**
+
+```prisma
+generator sql {
+  provider = "node ../path/to/prisma-sql/dist/generator.cjs"
+}
+```
+
+**Unlink when done:**
+
+```bash
+npm unlink prisma-sql  # In your project
+cd prisma-sql
+npm unlink              # In prisma-sql directory
 ```
 
 ## Limitations
@@ -712,6 +1013,20 @@ const prisma = new PrismaClient().$extends(
 )
 ```
 
+### "Generator: Cannot find module"
+
+The package hasn't been built or linked:
+
+```bash
+# In prisma-sql directory
+npm run build
+npm link
+
+# In your project
+npm link prisma-sql
+npx prisma generate
+```
+
 ### "Results don't match Prisma Client"
 
 Enable debug mode to inspect generated SQL:
@@ -732,7 +1047,7 @@ Compare with Prisma's query log:
 new PrismaClient({ log: ['query'] })
 ```
 
-File an issue if results differ: https://github.com/dee-see/prisma-sql/issues
+File an issue if results differ: https://github.com/multipliedtwice/prisma-sql/issues
 
 ### "Connection pool exhausted"
 
@@ -799,7 +1114,7 @@ A: The extension runs after middlewares. If you need middleware to see the actua
 A: Yes. Those methods are unaffected. You also still have direct access to the postgres.js client.
 
 **Q: What's the overhead of SQL generation?**  
-A: ~0.03-0.04ms per query. Even with this overhead, total time is 2-7x faster than Prisma.
+A: Generator mode: ~0.03ms (prebaked queries). Runtime mode: ~0.2ms. Even with this overhead, total time is 2-7x faster than Prisma.
 
 **Q: How do I benchmark my own queries?**  
 A: Use the `onQuery` callback to measure each query, or see the [Benchmarking](#benchmarking) section below.
@@ -807,8 +1122,12 @@ A: Use the `onQuery` callback to measure each query, or see the [Benchmarking](#
 **Q: How does performance compare to Prisma v7?**  
 A: Prisma v7 introduced significant improvements (~39% faster than v6 on PostgreSQL, ~24% on SQLite), but this extension still provides 2-7x additional speedup over v7 depending on query complexity.
 
+**Q: Should I use generator mode or runtime mode?**  
+A: Generator mode is recommended for production (faster). Runtime mode is better for prototyping or fully dynamic queries.
+
 ## Examples
 
+- [Generator Mode Example](./examples/generator-mode) - Complete working example
 - [PostgreSQL E2E Tests](./tests/e2e/postgres.test.ts) - Comprehensive query examples
 - [SQLite E2E Tests](./tests/e2e/sqlite.e2e.test.ts) - SQLite-specific queries
 - [Runtime API Tests](./tests/e2e/runtime-api.test.ts) - All three APIs
@@ -816,7 +1135,7 @@ A: Prisma v7 introduced significant improvements (~39% faster than v6 on Postgre
 To run examples locally:
 
 ```bash
-git clone https://github.com/dee-see/prisma-sql
+git clone https://github.com/multipliedtwice/prisma-sql
 cd prisma-sql
 npm install
 npm test
@@ -855,7 +1174,7 @@ console.table(queries)
 Or run the full test suite benchmarks:
 
 ```bash
-git clone https://github.com/dee-see/prisma-sql
+git clone https://github.com/multipliedtwice/prisma-sql
 cd prisma-sql
 npm install
 
@@ -881,10 +1200,10 @@ PRs welcome! Priority areas:
 Setup:
 
 ```bash
-git clone https://github.com/dee-see/prisma-sql
+git clone https://github.com/multipliedtwice/prisma-sql
 cd prisma-sql
 npm install
-npm run generate
+npm run build
 npm test
 ```
 
@@ -936,8 +1255,8 @@ MIT
 ## Links
 
 - [NPM Package](https://www.npmjs.com/package/prisma-sql)
-- [GitHub Repository](https://github.com/dee-see/prisma-sql)
-- [Issue Tracker](https://github.com/dee-see/prisma-sql/issues)
+- [GitHub Repository](https://github.com/multipliedtwice/prisma-sql)
+- [Issue Tracker](https://github.com/multipliedtwice/prisma-sql/issues)
 
 ---
 
