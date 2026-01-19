@@ -21,8 +21,10 @@ function getDialectFromProvider(provider: string): 'postgres' | 'sqlite' {
 }
 
 function getOutputDir(options: GeneratorOptions): string {
+  const schemaDir = dirname(options.schemaPath)
+
   if (options.generator.output?.value) {
-    return options.generator.output.value
+    return resolve(schemaDir, options.generator.output.value)
   }
 
   const clientGenerator = options.otherGenerators.find(
@@ -30,18 +32,18 @@ function getOutputDir(options: GeneratorOptions): string {
   )
 
   if (clientGenerator?.output?.value) {
-    const clientOutput = clientGenerator.output.value
+    const clientOutput = resolve(schemaDir, clientGenerator.output.value)
     return join(resolve(dirname(clientOutput), '..'), 'sql')
   }
 
-  return '../node_modules/.prisma/sql'
+  return resolve(schemaDir, './generated/sql')
 }
 
 generatorHandler({
   onManifest() {
     return {
       version,
-      defaultOutput: '../node_modules/.prisma/sql',
+      defaultOutput: './generated/sql',
       prettyName: 'prisma-sql-generator',
       requiresGenerators: ['prisma-client-js'],
     }
