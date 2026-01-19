@@ -22,7 +22,6 @@ export interface SQLDirective {
   staticParams: any[]
   dynamicKeys: string[]
   paramMappings: readonly ParamMap[]
-  cache: DirectiveProps['cache']
   originalDirective: DirectiveProps
 }
 
@@ -279,7 +278,6 @@ function finalizeDirective(args: {
     staticParams,
     dynamicKeys,
     paramMappings: normalizedMappings,
-    cache: directive.cache,
     originalDirective: directive,
   }
 }

@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./generator": {
+      "types": "./dist/generator.d.ts",
+      "import": "./dist/generator.js",
+      "require": "./dist/generator.cjs"
     }
   },
   "files": [
@@ -40,7 +45,8 @@
     "cloudflare",
     "d1",
     "performance",
-    "typescript"
+    "typescript",
+    "generator"
   ],
   "repository": {
     "type": "git",
@@ -53,7 +59,9 @@
   "author": "multipliedtwice <multipliedtwice@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@dee-wan/schema-parser": "1.1.0"
+    "@dee-wan/schema-parser": "1.1.0",
+    "@prisma/generator-helper": "^7.2.0",
+    "@prisma/internals": "^7.2.0"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.2.0",
