@@ -274,7 +274,7 @@ export function createExtension(config: {
           return this.$parent[modelName][method](args)
         }
 
-        const result = buildSQL(model, MODELS, method, args, DIALECT)
+        const result = buildSQL(model, MODELS, method, args || {}, DIALECT)
         sql = result.sql
         params = result.params
       }

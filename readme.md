@@ -73,20 +73,28 @@ model User {
   email  String  @unique
   status String
   posts  Post[]
-
-  /// @sql.findMany({ where: { status: "ACTIVE" } })
-  /// @sql.findMany({ where: { status: "PENDING" } })
-  /// @sql.count({ where: { status: "ACTIVE" } })
 }
+```
 
-model Post {
-  id        Int     @id @default(autoincrement())
-  title     String
-  published Boolean
-  authorId  Int
-  author    User    @relation(fields: [authorId], references: [id])
+**Add optimize directives to models:**
 
-  /// @sql.findMany({ where: { published: true }, include: { author: true } })
+```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "skip": "$skip",
+///     "take": "$take",
+///     "orderBy": { "createdAt": "desc" },
+///     "where": { "status": "ACTIVE" }
+///   }
+/// }
+/// @optimize { "method": "count", "query": {} }
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  status    String
+  createdAt DateTime @default(now())
+  posts     Post[]
 }
 ```
 
@@ -98,7 +106,7 @@ npx prisma generate
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { createExtension } from '.prisma/client/sql'
+import { createExtension } from '../path/to/generated/sql' // Adjust path to your generated code
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
@@ -107,6 +115,9 @@ const prisma = new PrismaClient().$extends(createExtension({ postgres: sql }))
 // ⚡ PREBAKED - Uses pre-generated SQL (instant)
 const activeUsers = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
+  skip: 0,
+  take: 10,
+  orderBy: { createdAt: 'desc' },
 })
 
 // 🔨 RUNTIME - Generates SQL on-the-fly (still fast)
@@ -114,6 +125,11 @@ const searchUsers = await prisma.user.findMany({
   where: { email: { contains: '@example.com' } },
 })
 ```
+
+**Note on output location:** By default, the generated code is placed next to your Prisma Client:
+
+- If Prisma Client is at `./node_modules/.prisma/client`, generated SQL goes to `./node_modules/.prisma/client/sql`
+- You can customize with the `output` option in the generator config
 
 ### 2. Runtime Mode (Simpler, No Build Step)
 
@@ -160,15 +176,15 @@ const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
 
 **Pros:**
 
-- ⚡ **Fastest** - SQL pre-generated at build time
+- ⚡ **Fastest** - SQL pre-generated at build time (~0.03ms overhead)
 - 🎯 **Zero overhead** for known queries
 - 🔨 **Auto-fallback** to runtime for unknown queries
-- 📊 **Track performance** with `prebaked` flag
+- 📊 **Track performance** with `prebaked` flag in `onQuery` callback
 
 **Cons:**
 
 - Requires `npx prisma generate` step
-- Need to define common queries upfront
+- Need to define common queries upfront with `@optimize` directives
 
 **When to use:**
 
@@ -205,18 +221,20 @@ const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
 Build Time:
   schema.prisma
        ↓
-  /// @sql.findMany({ where: { status: "ACTIVE" } })
+  /// @optimize { "method": "findMany", "query": { "where": { "status": "ACTIVE" } } }
        ↓
   npx prisma generate
        ↓
-  .prisma/client/sql/index.ts
+  generated/sql/index.ts
        ↓
   QUERIES = {
     User: {
-      '{"where":{"status":"ACTIVE"}}': {
-        sql: 'SELECT * FROM users WHERE status = $1',
-        params: ['ACTIVE'],
-        dynamicKeys: []
+      findMany: {
+        '{"where":{"status":"ACTIVE"}}': {
+          sql: 'SELECT * FROM users WHERE status = $1',
+          params: ['ACTIVE'],
+          dynamicKeys: []
+        }
       }
     }
   }
@@ -226,7 +244,7 @@ Runtime:
        ↓
   Normalize query → '{"where":{"status":"ACTIVE"}}'
        ↓
-  QUERIES.User[query] found?
+  QUERIES.User.findMany[query] found?
        ↓
   YES → ⚡ Use prebaked SQL (0.03ms overhead)
        ↓
@@ -244,7 +262,7 @@ generator sql {
   // Optional: Override auto-detected dialect (rarely needed)
   // dialect = "postgres"  // or "sqlite"
 
-  // Optional: Output directory (default: ../node_modules/.prisma/client/sql)
+  // Optional: Output directory (default: next to Prisma Client)
   // output = "./generated/sql"
 
   // Optional: Skip invalid directives instead of failing (default: false)
@@ -252,57 +270,114 @@ generator sql {
 }
 ```
 
-### Supported Directive Patterns
+### Optimize Directive Syntax
+
+The `@optimize` directive tells the generator which queries to prebake:
 
 ```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "skip": "$skip",
+///     "take": "$take",
+///     "where": { "status": "ACTIVE" }
+///   }
+/// }
 model User {
-  // Simple queries
-  /// @sql.findMany({ where: { status: "ACTIVE" } })
-  /// @sql.findFirst({ where: { email: "test@example.com" } })
-  /// @sql.findUnique({ where: { id: 1 } })
-
-  // With relations
-  /// @sql.findMany({ include: { posts: true } })
-  /// @sql.findMany({ include: { posts: { where: { published: true } } } })
-
-  // With pagination
-  /// @sql.findMany({ take: 10, skip: 20, orderBy: { createdAt: "desc" } })
-
-  // Aggregations
-  /// @sql.count({ where: { status: "ACTIVE" } })
-  /// @sql.aggregate({ _count: { _all: true }, _avg: { age: true } })
-  /// @sql.groupBy({ by: ["status"], _count: { _all: true } })
-
-  // Dynamic parameters
-  /// @sql.findMany({ where: { status: { $param: "status" } } })
-  /// @sql.findMany({ where: { age: { gte: { $param: "minAge" } } } })
+  id     Int    @id
+  status String
 }
 ```
 
 ### Dynamic Parameters
 
-Use `$param` for runtime values:
+Use `$paramName` for runtime values:
 
 ```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "skip": "$skip",
+///     "take": "$take",
+///     "where": { "status": "$status" }
+///   }
+/// }
 model User {
-  /// @sql.findMany({ where: { status: { $param: "status" } } })
-  /// @sql.findMany({ where: { age: { gte: { $param: "minAge" } } } })
+  id     Int    @id
+  status String
 }
 ```
 
-```typescript
-// Prebaked SQL with runtime parameters
-const users = await prisma.user.findMany({
-  where: { status: 'ACTIVE' }, // Matches directive with $param
-})
+At runtime, dynamic parameters are extracted from your query args:
 
-// SQL: SELECT * FROM users WHERE status = $1
-// Params: ['ACTIVE']
+```typescript
+// The generator extracts dynamic params from these positions
+await prisma.user.findMany({
+  skip: 0, // → fills $skip
+  take: 10, // → fills $take
+  where: {
+    status: 'ACTIVE', // → fills $status
+  },
+})
+```
+
+### Supported Methods
+
+```prisma
+/// @optimize { "method": "findMany", "query": { ... } }
+/// @optimize { "method": "findFirst", "query": { ... } }
+/// @optimize { "method": "findUnique", "query": { ... } }
+/// @optimize { "method": "count", "query": { ... } }
+/// @optimize { "method": "aggregate", "query": { ... } }
+/// @optimize { "method": "groupBy", "query": { ... } }
+```
+
+### Example: Complex Query
+
+```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "skip": "$skip",
+///     "take": "$take",
+///     "orderBy": { "createdAt": "desc" },
+///     "include": {
+///       "company": {
+///         "where": { "deletedAt": null },
+///         "select": { "id": true, "name": true, "website": true }
+///       },
+///       "matches": {
+///         "where": { "deletedAt": null },
+///         "select": {
+///           "id": true,
+///           "totalScore": true,
+///           "createdAt": true,
+///           "freelancer": {
+///             "select": { "id": true, "name": true, "username": true }
+///           }
+///         }
+///       }
+///     }
+///   }
+/// }
+/// @optimize { "method": "count", "query": {} }
+model job {
+  id          String   @id
+  title       String
+  companyId   String?
+  company     company? @relation(fields: [companyId], references: [id])
+  matches     match[]
+  createdAt   DateTime @default(now())
+}
 ```
 
 ### Performance Tracking
 
 ```typescript
+import { createExtension } from '../path/to/generated/sql'
+import postgres from 'postgres'
+
+const sql = postgres(process.env.DATABASE_URL)
 const prisma = new PrismaClient().$extends(
   createExtension({
     postgres: sql,
@@ -313,6 +388,19 @@ const prisma = new PrismaClient().$extends(
     },
   }),
 )
+```
+
+The `onQuery` callback receives:
+
+```typescript
+interface QueryInfo {
+  model: string // e.g., "User"
+  method: string // e.g., "findMany"
+  sql: string // The executed SQL
+  params: unknown[] // Parameters passed to SQL
+  duration: number // Query duration in ms
+  prebaked: boolean // true if using generated SQL, false if runtime
+}
 ```
 
 ## What Gets Faster
@@ -857,30 +945,45 @@ generator sql {
   provider = "prisma-sql-generator"
 }
 
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "where": { "status": "$status" }
+///   }
+/// }
 model User {
-  /// @sql.findMany({ where: { status: "ACTIVE" } })
+  id     Int    @id
+  status String
 }
 ```
 
+```bash
+npx prisma generate
+```
+
 ```typescript
-import { createExtension } from '.prisma/client/sql'
+import { PrismaClient } from '@prisma/client'
+import { createExtension } from '../path/to/generated/sql'
 import postgres from 'postgres'
 
-const sql = postgres(DATABASE_URL)
+const sql = postgres(process.env.DATABASE_URL)
 const prisma = new PrismaClient().$extends(createExtension({ postgres: sql }))
 
-const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
+// ⚡ Prebaked query
+const users = await prisma.user.findMany({
+  where: { status: 'ACTIVE' },
+})
 ```
 
 **After (Runtime Mode):**
 
 ```typescript
-import postgres from 'postgres'
+import { PrismaClient, Prisma } from '@prisma/client'
 import { speedExtension, convertDMMFToModels } from 'prisma-sql'
-import { Prisma } from '@prisma/client'
+import postgres from 'postgres'
 
 const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-const sql = postgres(DATABASE_URL)
+const sql = postgres(process.env.DATABASE_URL)
 const prisma = new PrismaClient().$extends(
   speedExtension({ postgres: sql, models }),
 )
