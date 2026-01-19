@@ -1,0 +1,9 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/postgres-v7"
+  previewFeatures = []
+}
+
+datasource db {
+  provider = "postgresql"
+}

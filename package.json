@@ -1,0 +1,73 @@
+{
+  "name": "@dee-wan/prisma-to-sql",
+  "version": "1.0.0",
+  "description": "Convert Prisma queries to optimized SQL with type safety. 2.5-7.6x faster than Prisma Client.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsx src/index.ts",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "test:e2e": "vitest run tests/e2e",
+    "bench": "npx tsx tests/helpers/run-benchmarks.ts",
+    "prisma:generate": "npx prisma generate --schema=tests/prisma/schema.prisma",
+    "prisma:migrate": "npx prisma migrate dev --schema=tests/prisma/schema.prisma",
+    "prisma:reset": "npx prisma db push --force-reset --skip-generate --schema=tests/prisma/schema.prisma",
+    "prepublishOnly": "npm run build && npm run test",
+    "sonar-cli": "sonar-scanner   -Dsonar.projectKey=prisma-to-sql   -Dsonar.sources=./src   -Dsonar.host.url=http://localhost:9000   -Dsonar.login=sqp_9fe07460d0aa83f711d0edf4f317f05019d0613b",
+    "sonar": "yarn sonar-cli && npx tsx scripts/sonar.ts"
+  },
+  "keywords": [
+    "prisma",
+    "sql",
+    "query",
+    "optimizer",
+    "postgresql",
+    "sqlite",
+    "cloudflare",
+    "d1",
+    "performance",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/prisma-to-sql.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/prisma-to-sql/issues"
+  },
+  "homepage": "https://github.com/yourusername/prisma-to-sql#readme",
+  "author": "Your Name <your.email@example.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@dee-wan/schema-parser": "1.1.0",
+    "@prisma/client": "7.2.0",
+    "prisma": "7.2.0"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^10.2.0",
+    "@prisma/adapter-better-sqlite3": "^7.2.0",
+    "@prisma/adapter-pg": "^7.2.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.0.0",
+    "better-sqlite3": "^12.6.2",
+    "drizzle-kit": "^0.31.8",
+    "drizzle-orm": "^0.45.1",
+    "postgres": "^3.4.8",
+    "tsup": "^8.5.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.14"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^4.0.0 || ^5.0.0 || ^6.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

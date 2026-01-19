@@ -1,0 +1,312 @@
+
+model Organization {
+  id          Int       @id @default(autoincrement())
+  name        String
+  slug        String    @unique
+  plan        Plan      @default(FREE)
+  settings    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  members     Member[]
+  projects    Project[]
+  invitations Invitation[]
+
+  @@map("organizations")
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  name          String?
+  avatarUrl     String?
+  role          String    @default("USER")
+  status        String    @default("ACTIVE")
+  metadata      String?
+  tags          String    @default("[]")  // JSON array as string, not String[]
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  memberships   Member[]
+  assignedTasks Task[]    @relation("TaskAssignee")
+  createdTasks  Task[]    @relation("TaskCreator")
+  comments      Comment[]
+  activities    Activity[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Member {
+  id             Int        @id @default(autoincrement())
+  role           MemberRole @default(MEMBER)
+  joinedAt       DateTime   @default(now())
+  
+  organizationId Int
+  userId         Int
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("members")
+}
+
+model Invitation {
+  id             Int              @id @default(autoincrement())
+  email          String
+  role           MemberRole       @default(MEMBER)
+  token          String           @unique
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  createdAt      DateTime         @default(now())
+
+  organizationId Int
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("invitations")
+}
+
+model Project {
+  id             Int           @id @default(autoincrement())
+  name           String
+  description    String?
+  color          String?
+  status         ProjectStatus @default(ACTIVE)
+  isPublic       Boolean       @default(false)
+  budget         Decimal?
+  startDate      DateTime?
+  endDate        DateTime?
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organizationId Int
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  tasks          Task[]
+  labels         Label[]
+  milestones     Milestone[]
+
+  @@map("projects")
+}
+
+model Milestone {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  projectId   Int
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  tasks       Task[]
+
+  @@map("milestones")
+}
+
+model Label {
+  id        Int      @id @default(autoincrement())
+  name      String
+  color     String
+  createdAt DateTime @default(now())
+
+  projectId Int
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  tasks     TaskLabel[]
+
+  @@unique([projectId, name])
+  @@map("labels")
+}
+
+model Task {
+  id           Int          @id @default(autoincrement())
+  title        String
+  description  String?
+  status       TaskStatus   @default(TODO)
+  priority     Priority     @default(MEDIUM)
+  position     Int          @default(0)
+  dueDate      DateTime?
+  completedAt  DateTime?
+  estimatedHours Decimal?
+  metadata     Json?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  projectId    Int
+  assigneeId   Int?
+  creatorId    Int
+  milestoneId  Int?
+  parentId     Int?
+
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee     User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  creator      User         @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  milestone    Milestone?   @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  parent       Task?        @relation("TaskHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  
+  subtasks     Task[]       @relation("TaskHierarchy")
+  comments     Comment[]
+  labels       TaskLabel[]
+  activities   Activity[]
+  attachments  Attachment[]
+
+  @@map("tasks")
+}
+
+model TaskLabel {
+  taskId    Int
+  labelId   Int
+  assignedAt DateTime @default(now())
+
+  task      Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  label     Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, labelId])
+  @@map("task_labels")
+}
+
+model Comment {
+  id        Int       @id @default(autoincrement())
+  content   String
+  isEdited  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  taskId    Int
+  authorId  Int
+  parentId  Int?
+
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  
+  replies   Comment[] @relation("CommentReplies")
+  reactions Reaction[]
+
+  @@map("comments")
+}
+
+model Reaction {
+  id        Int      @id @default(autoincrement())
+  emoji     String
+  createdAt DateTime @default(now())
+
+  commentId Int
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@map("reactions")
+}
+
+model Attachment {
+  id        Int      @id @default(autoincrement())
+  filename  String
+  url       String
+  mimeType  String
+  size      Int
+  createdAt DateTime @default(now())
+
+  taskId    Int
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+model Activity {
+  id        Int          @id @default(autoincrement())
+  action    ActivityType
+  details   Json?
+  createdAt DateTime     @default(now())
+
+  taskId    Int?
+  userId    Int
+
+  task      Task?        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("activities")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  type      String
+  title     String
+  message   String?
+  isRead    Boolean  @default(false)
+  data      Json?
+  createdAt DateTime @default(now())
+
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum GlobalRole {
+  USER
+  ADMIN
+  SUPERADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+  COMPLETED
+  ON_HOLD
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ActivityType {
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_COMPLETED
+  TASK_ASSIGNED
+  COMMENT_ADDED
+  ATTACHMENT_ADDED
+}
