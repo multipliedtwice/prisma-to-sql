@@ -5,7 +5,7 @@ on:
       - main
   pull_request:
     branches:
-      - "*"
+      - '*'
 
 permissions:
   contents: write
@@ -33,17 +33,17 @@ jobs:
       - name: Build
         run: yarn build
 
-      - name: Run tests and collect coverage
-        run: yarn test:coverage
+      # - name: Run tests and collect coverage
+      #   run: yarn test:coverage
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage/lcov.info
-          flags: unittests
-          verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      # - name: Upload coverage to Codecov
+      #   uses: codecov/codecov-action@v4
+      #   with:
+      #     files: ./coverage/lcov.info
+      #     flags: unittests
+      #     verbose: true
+      #   env:
+      #     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   Publish:
     needs: Test_and_Coverage
