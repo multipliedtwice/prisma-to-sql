@@ -13,6 +13,26 @@ function parseAggregateValue(value: unknown): unknown {
   return value
 }
 
+function transformGroupByResults(results: unknown[]): unknown[] {
+  return results.map((row) => {
+    const raw = row as Record<string, unknown>
+    const parsed: any = {}
+
+    for (const [key, value] of Object.entries(raw)) {
+      const parts = key.split('.')
+      if (parts.length === 2) {
+        const [group, field] = parts
+        if (!parsed[group]) parsed[group] = {}
+        parsed[group][field] = parseAggregateValue(value)
+      } else {
+        parsed[key] = value
+      }
+    }
+
+    return parsed
+  })
+}
+
 function transformCountResults(results: unknown[]): number {
   const result = results[0] as any
   const count = result?.['_count._all'] || result?.count || 0
@@ -44,6 +64,7 @@ export const RESULT_TRANSFORMERS: Partial<
   findUnique: (results) => results[0] || null,
   count: transformCountResults,
   aggregate: transformAggregateResults,
+  groupBy: transformGroupByResults,
 }
 
 export function transformQueryResults(
