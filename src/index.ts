@@ -78,7 +78,7 @@ function toSqliteParams(sql: string, params: readonly unknown[]): SqlResult {
   return { sql: converted, params: reordered }
 }
 
-function buildSQL(
+export function buildSQL(
   model: Model,
   models: Model[],
   method: PrismaMethod,
@@ -532,3 +532,4 @@ export type { SqlDialect, SQLDirective }
 export { setGlobalDialect, getGlobalDialect } from './sql-builder-dialect'
 export type { Model, Field, PrismaQueryArgs } from './types'
 export { convertDMMFToModels } from '@dee-wan/schema-parser'
+export { transformQueryResults }
