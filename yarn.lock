@@ -3060,6 +3060,8 @@ __metadata:
   peerDependenciesMeta:
     "@prisma/client":
       optional: false
+  bin:
+    prisma-sql-generator: ./dist/generator.cjs
   languageName: unknown
   linkType: soft
 
