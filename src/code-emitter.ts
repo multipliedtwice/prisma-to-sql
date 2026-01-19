@@ -34,22 +34,31 @@ export async function generateClient(options: GenerateClientOptions) {
     },
   )
 
-  const queries = new Map<string, Map<string, any>>()
+  const queries = new Map<string, Map<string, Map<string, any>>>()
 
   for (const [modelName, result] of directiveResults) {
     if (result.directives.length === 0) continue
 
-    const modelQueries = new Map<string, any>()
+    if (!queries.has(modelName)) {
+      queries.set(modelName, new Map())
+    }
+
+    const modelQueries = queries.get(modelName)!
 
     for (const directive of result.directives) {
       try {
+        const method = directive.header // "findMany", "count", etc.
         const sqlDirective = generateSQL(directive)
-        const queryKey = JSON.stringify(
-          directive.query.original,
-          Object.keys(directive.query.original).sort(),
-        )
 
-        modelQueries.set(queryKey, {
+        if (!modelQueries.has(method)) {
+          modelQueries.set(method, new Map())
+        }
+
+        const methodQueries = modelQueries.get(method)!
+
+        const queryKey = createQueryKey(directive.query.processed)
+
+        methodQueries.set(queryKey, {
           sql: sqlDirective.sql,
           params: sqlDirective.staticParams,
           dynamicKeys: sqlDirective.dynamicKeys,
@@ -58,10 +67,6 @@ export async function generateClient(options: GenerateClientOptions) {
       } catch (error) {
         if (!config.skipInvalid) throw error
       }
-    }
-
-    if (modelQueries.size > 0) {
-      queries.set(modelName, modelQueries)
     }
   }
 
@@ -74,16 +79,34 @@ export async function generateClient(options: GenerateClientOptions) {
   await writeFile(outputPath, code)
 
   const totalQueries = Array.from(queries.values()).reduce(
-    (sum, m) => sum + m.size,
+    (sum, methodMap) =>
+      sum +
+      Array.from(methodMap.values()).reduce(
+        (s, queryMap) => s + queryMap.size,
+        0,
+      ),
     0,
   )
   console.log(`✓ Generated ${queries.size} models, ${totalQueries} queries`)
   console.log(`✓ Output: ${outputPath}`)
 }
 
+function createQueryKey(processedQuery: Record<string, unknown>): string {
+  return JSON.stringify(processedQuery, (key, value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const sorted: Record<string, unknown> = {}
+      for (const k of Object.keys(value).sort()) {
+        sorted[k] = value[k]
+      }
+      return sorted
+    }
+    return value
+  })
+}
+
 function generateCode(
   models: any[],
-  queries: Map<string, Map<string, any>>,
+  queries: Map<string, Map<string, Map<string, any>>>,
   dialect: 'postgres' | 'sqlite',
 ): string {
   const cleanModels = models.map((model) => ({
@@ -96,28 +119,38 @@ import { buildSQL, transformQueryResults, type PrismaMethod } from 'prisma-sql'
 
 const MODELS = ${JSON.stringify(cleanModels, null, 2)}
 
-const QUERIES: Record<string, Record<string, {
+const QUERIES: Record<string, Record<string, Record<string, {
   sql: string
   params: unknown[]
   dynamicKeys: string[]
   paramMappings: any[]
-}>> = ${formatQueries(queries)}
+}>>> = ${formatQueries(queries)}
 
 const DIALECT = ${JSON.stringify(dialect)}
 
 function normalizeQuery(args: any): string {
   if (!args) return '{}'
-  return JSON.stringify(args, Object.keys(args).sort())
+  return JSON.stringify(args, (key, value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const sorted: Record<string, unknown> = {}
+      for (const k of Object.keys(value).sort()) {
+        sorted[k] = value[k]
+      }
+      return sorted
+    }
+    return value
+  })
 }
 
 function extractDynamicParams(args: any, dynamicKeys: string[]): unknown[] {
   const params: unknown[] = []
   
   for (const key of dynamicKeys) {
-    const parts = key.split('.')
+    const parts = key.split(':')
+    const path = parts[0].split('.')
     let value: any = args
     
-    for (const part of parts) {
+    for (const part of path) {
       if (value === null || value === undefined) break
       value = value[part]
     }
@@ -178,7 +211,7 @@ export function createExtension(config: {
       const startTime = Date.now()
 
       const queryKey = normalizeQuery(args)
-      const prebakedQuery = QUERIES[modelName]?.[queryKey]
+      const prebakedQuery = QUERIES[modelName]?.[method]?.[queryKey]
 
       let sql: string
       let params: unknown[]
@@ -256,31 +289,41 @@ export function createExtension(config: {
 `
 }
 
-function formatQueries(queries: Map<string, Map<string, any>>): string {
+function formatQueries(
+  queries: Map<string, Map<string, Map<string, any>>>,
+): string {
   if (queries.size === 0) {
     return '{}'
   }
 
-  const entries: string[] = []
+  const modelEntries: string[] = []
 
-  for (const [modelName, modelQueries] of queries) {
-    const queryEntries: string[] = []
+  for (const [modelName, methodMap] of queries) {
+    const methodEntries: string[] = []
 
-    for (const [queryKey, query] of modelQueries) {
-      queryEntries.push(`  ${JSON.stringify(queryKey)}: {
-    sql: ${JSON.stringify(query.sql)},
-    params: ${JSON.stringify(query.params)},
-    dynamicKeys: ${JSON.stringify(query.dynamicKeys)},
-    paramMappings: ${JSON.stringify(query.paramMappings)},
-  }`)
+    for (const [method, queryMap] of methodMap) {
+      const queryEntries: string[] = []
+
+      for (const [queryKey, query] of queryMap) {
+        queryEntries.push(`    ${JSON.stringify(queryKey)}: {
+      sql: ${JSON.stringify(query.sql)},
+      params: ${JSON.stringify(query.params)},
+      dynamicKeys: ${JSON.stringify(query.dynamicKeys)},
+      paramMappings: ${JSON.stringify(query.paramMappings)},
+    }`)
+      }
+
+      methodEntries.push(`    ${JSON.stringify(method)}: {
+${queryEntries.join(',\n')}
+    }`)
     }
 
-    entries.push(`  ${JSON.stringify(modelName)}: {
-${queryEntries.join(',\n')}
+    modelEntries.push(`  ${JSON.stringify(modelName)}: {
+${methodEntries.join(',\n')}
   }`)
   }
 
   return `{
-${entries.join(',\n')}
+${modelEntries.join(',\n')}
 }`
 }
