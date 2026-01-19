@@ -2,17 +2,24 @@
 
 Speed up Prisma reads **2-7x** by executing queries via postgres.js or better-sqlite3 instead of Prisma's query engine.
 
+**Same API. Same types. Just faster.**
+
 ```typescript
-import { convertDMMFToModels } from 'prisma-sql'
-import { Prisma } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import postgres from 'postgres'
 
 const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-const sql = postgres(DATABASE_URL)
+const sql = postgres(process.env.DATABASE_URL)
 const prisma = new PrismaClient().$extends(
   speedExtension({ postgres: sql, models }),
 )
 
-const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
+// Just use Prisma normally - queries are automatically faster
+const users = await prisma.user.findMany({
+  where: { status: 'ACTIVE' },
+  include: { posts: true },
+})
 ```
 
 ## Why?
@@ -44,97 +51,6 @@ npm install prisma-sql better-sqlite3
 
 ## Quick Start
 
-You can use prisma-sql in two ways:
-
-### 1. Generator Mode (Recommended - Fastest)
-
-Prebake SQL queries at build time for maximum performance.
-
-**Add generator to schema:**
-
-```prisma
-// schema.prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-generator client {
-  provider = "prisma-client-js"
-}
-
-generator sql {
-  provider = "prisma-sql-generator"
-  // Dialect auto-detected from datasource.provider
-}
-
-model User {
-  id     Int     @id @default(autoincrement())
-  email  String  @unique
-  status String
-  posts  Post[]
-}
-```
-
-**Add optimize directives to models:**
-
-```prisma
-/// @optimize {
-///   "method": "findMany",
-///   "query": {
-///     "skip": "$skip",
-///     "take": "$take",
-///     "orderBy": { "createdAt": "desc" },
-///     "where": { "status": "ACTIVE" }
-///   }
-/// }
-/// @optimize { "method": "count", "query": {} }
-model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  status    String
-  createdAt DateTime @default(now())
-  posts     Post[]
-}
-```
-
-**Generate and use:**
-
-```bash
-npx prisma generate
-```
-
-```typescript
-import { PrismaClient } from '@prisma/client'
-import { createExtension } from '../path/to/generated/sql' // Adjust path to your generated code
-import postgres from 'postgres'
-
-const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(createExtension({ postgres: sql }))
-
-// ⚡ PREBAKED - Uses pre-generated SQL (instant)
-const activeUsers = await prisma.user.findMany({
-  where: { status: 'ACTIVE' },
-  skip: 0,
-  take: 10,
-  orderBy: { createdAt: 'desc' },
-})
-
-// 🔨 RUNTIME - Generates SQL on-the-fly (still fast)
-const searchUsers = await prisma.user.findMany({
-  where: { email: { contains: '@example.com' } },
-})
-```
-
-**Note on output location:** By default, the generated code is placed next to your Prisma Client:
-
-- If Prisma Client is at `./node_modules/.prisma/client`, generated SQL goes to `./node_modules/.prisma/client/sql`
-- You can customize with the `output` option in the generator config
-
-### 2. Runtime Mode (Simpler, No Build Step)
-
-Generate SQL on-the-fly without code generation.
-
 **PostgreSQL:**
 
 ```typescript
@@ -144,10 +60,12 @@ import postgres from 'postgres'
 
 const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(process.env.DATABASE_URL)
+
 const prisma = new PrismaClient().$extends(
   speedExtension({ postgres: sql, models }),
 )
 
+// Use Prisma exactly as before - it's just faster now
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
   include: { posts: true },
@@ -163,6 +81,7 @@ import Database from 'better-sqlite3'
 
 const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const db = new Database('./data.db')
+
 const prisma = new PrismaClient().$extends(
   speedExtension({ sqlite: db, models }),
 )
@@ -170,264 +89,40 @@ const prisma = new PrismaClient().$extends(
 const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
 ```
 
-## Generator Mode vs Runtime Mode
-
-### Generator Mode (Recommended)
-
-**Pros:**
-
-- ⚡ **Fastest** - SQL pre-generated at build time (~0.03ms overhead)
-- 🎯 **Zero overhead** for known queries
-- 🔨 **Auto-fallback** to runtime for unknown queries
-- 📊 **Track performance** with `prebaked` flag in `onQuery` callback
-
-**Cons:**
-
-- Requires `npx prisma generate` step
-- Need to define common queries upfront with `@optimize` directives
-
-**When to use:**
-
-- ✅ Production applications
-- ✅ Known query patterns (dashboards, APIs)
-- ✅ Want maximum performance
-- ✅ Build step is acceptable
-
-### Runtime Mode
-
-**Pros:**
-
-- 🚀 **Simple** - no build step
-- 🔧 **Flexible** - handles any query
-- 📝 **Easy prototyping**
-
-**Cons:**
-
-- Small overhead (~0.2ms) for SQL generation
-- Still 2-7x faster than Prisma
-
-**When to use:**
-
-- ✅ Rapid prototyping
-- ✅ Fully dynamic queries
-- ✅ No build step desired
-- ✅ Query patterns unknown
-
-## Generator Mode Details
-
-### How It Works
-
-```
-Build Time:
-  schema.prisma
-       ↓
-  /// @optimize { "method": "findMany", "query": { "where": { "status": "ACTIVE" } } }
-       ↓
-  npx prisma generate
-       ↓
-  generated/sql/index.ts
-       ↓
-  QUERIES = {
-    User: {
-      findMany: {
-        '{"where":{"status":"ACTIVE"}}': {
-          sql: 'SELECT * FROM users WHERE status = $1',
-          params: ['ACTIVE'],
-          dynamicKeys: []
-        }
-      }
-    }
-  }
-
-Runtime:
-  prisma.user.findMany({ where: { status: 'ACTIVE' } })
-       ↓
-  Normalize query → '{"where":{"status":"ACTIVE"}}'
-       ↓
-  QUERIES.User.findMany[query] found?
-       ↓
-  YES → ⚡ Use prebaked SQL (0.03ms overhead)
-       ↓
-  NO → 🔨 Generate SQL runtime (0.2ms overhead)
-       ↓
-  Execute via postgres.js/better-sqlite3
-```
-
-### Generator Configuration
-
-```prisma
-generator sql {
-  provider = "prisma-sql-generator"
-
-  // Optional: Override auto-detected dialect (rarely needed)
-  // dialect = "postgres"  // or "sqlite"
-
-  // Optional: Output directory (default: next to Prisma Client)
-  // output = "./generated/sql"
-
-  // Optional: Skip invalid directives instead of failing (default: false)
-  // skipInvalid = "true"
-}
-```
-
-### Optimize Directive Syntax
-
-The `@optimize` directive tells the generator which queries to prebake:
-
-```prisma
-/// @optimize {
-///   "method": "findMany",
-///   "query": {
-///     "skip": "$skip",
-///     "take": "$take",
-///     "where": { "status": "ACTIVE" }
-///   }
-/// }
-model User {
-  id     Int    @id
-  status String
-}
-```
-
-### Dynamic Parameters
-
-Use `$paramName` for runtime values:
-
-```prisma
-/// @optimize {
-///   "method": "findMany",
-///   "query": {
-///     "skip": "$skip",
-///     "take": "$take",
-///     "where": { "status": "$status" }
-///   }
-/// }
-model User {
-  id     Int    @id
-  status String
-}
-```
-
-At runtime, dynamic parameters are extracted from your query args:
-
-```typescript
-// The generator extracts dynamic params from these positions
-await prisma.user.findMany({
-  skip: 0, // → fills $skip
-  take: 10, // → fills $take
-  where: {
-    status: 'ACTIVE', // → fills $status
-  },
-})
-```
-
-### Supported Methods
-
-```prisma
-/// @optimize { "method": "findMany", "query": { ... } }
-/// @optimize { "method": "findFirst", "query": { ... } }
-/// @optimize { "method": "findUnique", "query": { ... } }
-/// @optimize { "method": "count", "query": { ... } }
-/// @optimize { "method": "aggregate", "query": { ... } }
-/// @optimize { "method": "groupBy", "query": { ... } }
-```
-
-### Example: Complex Query
-
-```prisma
-/// @optimize {
-///   "method": "findMany",
-///   "query": {
-///     "skip": "$skip",
-///     "take": "$take",
-///     "orderBy": { "createdAt": "desc" },
-///     "include": {
-///       "company": {
-///         "where": { "deletedAt": null },
-///         "select": { "id": true, "name": true, "website": true }
-///       },
-///       "matches": {
-///         "where": { "deletedAt": null },
-///         "select": {
-///           "id": true,
-///           "totalScore": true,
-///           "createdAt": true,
-///           "freelancer": {
-///             "select": { "id": true, "name": true, "username": true }
-///           }
-///         }
-///       }
-///     }
-///   }
-/// }
-/// @optimize { "method": "count", "query": {} }
-model job {
-  id          String   @id
-  title       String
-  companyId   String?
-  company     company? @relation(fields: [companyId], references: [id])
-  matches     match[]
-  createdAt   DateTime @default(now())
-}
-```
-
-### Performance Tracking
-
-```typescript
-import { createExtension } from '../path/to/generated/sql'
-import postgres from 'postgres'
-
-const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(
-  createExtension({
-    postgres: sql,
-    debug: true,
-    onQuery: (info) => {
-      console.log(`${info.model}.${info.method}: ${info.duration}ms`)
-      console.log(info.prebaked ? '⚡ PREBAKED' : '🔨 RUNTIME')
-    },
-  }),
-)
-```
-
-The `onQuery` callback receives:
-
-```typescript
-interface QueryInfo {
-  model: string // e.g., "User"
-  method: string // e.g., "findMany"
-  sql: string // The executed SQL
-  params: unknown[] // Parameters passed to SQL
-  duration: number // Query duration in ms
-  prebaked: boolean // true if using generated SQL, false if runtime
-}
-```
-
-## What Gets Faster
-
-**Accelerated (via raw SQL):**
-
-- `findMany`, `findFirst`, `findUnique`
-- `count`
-- `aggregate` (\_count, \_sum, \_avg, \_min, \_max)
-- `groupBy` with having clauses
-
-**Unchanged (still uses Prisma):**
-
-- `create`, `update`, `delete`, `upsert`
-- `createMany`, `updateMany`, `deleteMany`
-- Transactions (`$transaction`)
-- Middleware
-
----
+That's it! All your read queries are now 2-7x faster with zero code changes.
 
 ## Performance
 
-Benchmarks from 137 E2E tests comparing identical queries against Prisma v6, Prisma v7, and Drizzle:
+Benchmarks from 137 E2E tests comparing identical queries:
 
-### BENCHMARK RESULTS - Prisma v6 vs v7 vs Generated SQL
+### PostgreSQL Results (Highlights)
 
-## POSTGRES Results:
+| Query Type          | Prisma v6 | Prisma v7 | This Extension | Speedup vs v7 |
+| ------------------- | --------- | --------- | -------------- | ------------- |
+| Simple where        | 0.40ms    | 0.34ms    | 0.17ms         | **2.0x** ⚡   |
+| Complex conditions  | 13.10ms   | 6.90ms    | 2.37ms         | **2.9x** ⚡   |
+| With relations      | 0.83ms    | 0.72ms    | 0.41ms         | **1.8x** ⚡   |
+| Nested relations    | 28.35ms   | 14.34ms   | 4.81ms         | **3.0x** ⚡   |
+| Aggregations        | 0.42ms    | 0.44ms    | 0.24ms         | **1.8x** ⚡   |
+| Multi-field orderBy | 3.97ms    | 2.38ms    | 1.09ms         | **2.2x** ⚡   |
+
+**Overall:** 2.10x faster than Prisma v7, 2.39x faster than v6
+
+### SQLite Results (Highlights)
+
+| Query Type         | Prisma v6 | Prisma v7 | This Extension | Speedup vs v7 |
+| ------------------ | --------- | --------- | -------------- | ------------- |
+| Simple where       | 0.45ms    | 0.23ms    | 0.03ms         | **7.7x** ⚡   |
+| Complex conditions | 10.32ms   | 3.87ms    | 0.93ms         | **4.2x** ⚡   |
+| Relation filters   | 166.62ms  | 128.44ms  | 2.40ms         | **53.5x** ⚡  |
+| Count queries      | 0.17ms    | 0.07ms    | 0.01ms         | **7.0x** ⚡   |
+
+**Overall:** 5.48x faster than Prisma v7, 7.51x faster than v6
+
+<details>
+<summary><b>View Full Benchmark Results (137 queries)</b></summary>
+
+### POSTGRES - Complete Results
 
 | Test                     | Prisma v6 | Prisma v7 | Generated | Drizzle | v6 Speedup | v7 Speedup |
 | ------------------------ | --------- | --------- | --------- | ------- | ---------- | ---------- |
@@ -491,17 +186,7 @@ Benchmarks from 137 E2E tests comparing identical queries against Prisma v6, Pri
 | ILIKE special chars      | 0.22ms    | 0.26ms    | 0.14ms    | N/A     | 1.54x      | 1.76x      |
 | LIKE case sensitive      | 0.19ms    | 0.22ms    | 0.12ms    | N/A     | 1.62x      | 1.85x      |
 
-##### Summary:
-
-- Generated SQL vs Prisma v6: **2.39x faster**
-- Generated SQL vs Prisma v7: **2.10x faster**
-- Generated SQL vs Drizzle: **1.53x faster**
-
----
-
-#### SQLITE:
-
----
+### SQLITE - Complete Results
 
 | Test                     | Prisma v6 | Prisma v7 | Generated | Drizzle | v6 Speedup | v7 Speedup |
 | ------------------------ | --------- | --------- | --------- | ------- | ---------- | ---------- |
@@ -562,48 +247,27 @@ Benchmarks from 137 E2E tests comparing identical queries against Prisma v6, Pri
 | \_count relation         | 0.62ms    | 0.46ms    | 0.32ms    | N/A     | 1.93x      | 1.44x      |
 | \_count multi-relation   | 0.14ms    | 0.17ms    | 0.04ms    | N/A     | 3.22x      | 4.09x      |
 
-##### Summary:
+</details>
 
-- Generated SQL vs Prisma v6: **7.51x faster**
-- Generated SQL vs Prisma v7: **5.48x faster**
-- Generated SQL vs Drizzle: **2.61x faster**
+> **Note:** Benchmarks run on MacBook Pro M1 with PostgreSQL 15 and SQLite 3.43. Results vary based on database config, indexes, query complexity, and hardware. Run your own benchmarks for accurate measurements.
 
-> **Note on Prisma v7:** Prisma v7 introduced significant performance improvements (39% faster than v6 on PostgreSQL, 24% faster on SQLite), but this extension still provides 2-7x additional speedup over v7.
+## What Gets Faster
 
-> **Benchmarks:** These are representative results from our test suite running on a MacBook Pro M1 with PostgreSQL 15 and SQLite 3.43. Your mileage may vary based on:
->
-> - Database configuration and indexes
-> - Query complexity and data volume
-> - Hardware and network latency
-> - Concurrent load
->
-> Run benchmarks with your own schema and data for accurate measurements. See [Benchmarking](#benchmarking) section below.
+**Accelerated (via raw SQL):**
 
----
+- ✅ `findMany`, `findFirst`, `findUnique`
+- ✅ `count`
+- ✅ `aggregate` (\_count, \_sum, \_avg, \_min, \_max)
+- ✅ `groupBy` with having clauses
+
+**Unchanged (still uses Prisma):**
+
+- `create`, `update`, `delete`, `upsert`
+- `createMany`, `updateMany`, `deleteMany`
+- Transactions (`$transaction`)
+- Middleware
 
 ## Configuration
-
-### Basic Configuration
-
-```typescript
-import { Prisma } from '@prisma/client'
-import { convertDMMFToModels } from 'prisma-sql'
-
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-
-speedExtension({
-  postgres: sql,
-  models,
-
-  debug: true,
-
-  allowedModels: ['User', 'Post'],
-
-  onQuery: (info) => {
-    console.log(`${info.model}.${info.method}: ${info.duration}ms`)
-  },
-})
-```
 
 ### Debug Mode
 
@@ -615,25 +279,13 @@ import { Prisma } from '@prisma/client'
 
 const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 
-speedExtension({
-  postgres: sql,
-  models,
-  debug: true,
-})
-```
-
-### Selective Models
-
-Only accelerate specific models:
-
-```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-
-speedExtension({
-  postgres: sql,
-  models,
-  allowedModels: ['User', 'Post'],
-})
+const prisma = new PrismaClient().$extends(
+  speedExtension({
+    postgres: sql,
+    models,
+    debug: true, // Logs SQL for every query
+  }),
+)
 ```
 
 ### Performance Monitoring
@@ -643,79 +295,287 @@ Track query performance:
 ```typescript
 const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 
-speedExtension({
-  postgres: sql,
-  models,
-  onQuery: (info) => {
-    console.log(`${info.model}.${info.method} completed in ${info.duration}ms`)
+const prisma = new PrismaClient().$extends(
+  speedExtension({
+    postgres: sql,
+    models,
+    onQuery: (info) => {
+      console.log(`${info.model}.${info.method}: ${info.duration}ms`)
 
-    if (info.duration > 100) {
-      logger.warn('Slow query detected', {
-        model: info.model,
-        method: info.method,
-        sql: info.sql,
-      })
+      if (info.duration > 100) {
+        logger.warn('Slow query', {
+          model: info.model,
+          method: info.method,
+          sql: info.sql,
+        })
+      }
+    },
+  }),
+)
+```
+
+The `onQuery` callback receives:
+
+```typescript
+interface QueryInfo {
+  model: string // "User"
+  method: string // "findMany"
+  sql: string // The executed SQL
+  params: unknown[] // SQL parameters
+  duration: number // Query duration in ms
+  prebaked: boolean // true if using generated SQL (see Advanced Usage)
+}
+```
+
+### Selective Models
+
+Only accelerate specific models:
+
+```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
+const prisma = new PrismaClient().$extends(
+  speedExtension({
+    postgres: sql,
+    models,
+    allowedModels: ['User', 'Post'], // Only speed up these models
+  }),
+)
+```
+
+## Supported Queries
+
+### Filters
+
+```typescript
+// Comparisons
+{ age: { gt: 18, lte: 65 } }
+{ status: { in: ['ACTIVE', 'PENDING'] } }
+{ status: { notIn: ['DELETED'] } }
+
+// String operations
+{ email: { contains: '@example.com' } }
+{ email: { startsWith: 'user' } }
+{ email: { endsWith: '.com' } }
+{ email: { contains: 'EXAMPLE', mode: 'insensitive' } }
+
+// Boolean logic
+{ AND: [{ status: 'ACTIVE' }, { verified: true }] }
+{ OR: [{ role: 'ADMIN' }, { role: 'MODERATOR' }] }
+{ NOT: { status: 'DELETED' } }
+
+// Null checks
+{ deletedAt: null }
+{ deletedAt: { not: null } }
+```
+
+### Relations
+
+```typescript
+// Include relations
+{
+  include: {
+    posts: true,
+    profile: true
+  }
+}
+
+// Nested includes with filters
+{
+  include: {
+    posts: {
+      include: { comments: true },
+      where: { published: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5
     }
+  }
+}
+
+// Relation filters
+{
+  where: {
+    posts: { some: { published: true } }
+  }
+}
+
+{
+  where: {
+    posts: { every: { published: true } }
+  }
+}
+
+{
+  where: {
+    posts: { none: { published: false } }
+  }
+}
+```
+
+### Pagination & Ordering
+
+```typescript
+// Basic pagination
+{
+  take: 10,
+  skip: 20,
+  orderBy: { createdAt: 'desc' }
+}
+
+// Cursor-based pagination
+{
+  cursor: { id: 100 },
+  take: 10,
+  skip: 1,
+  orderBy: { id: 'asc' }
+}
+
+// Multi-field ordering
+{
+  orderBy: [
+    { status: 'asc' },
+    { priority: 'desc' },
+    { createdAt: 'desc' }
+  ]
+}
+```
+
+### Aggregations
+
+```typescript
+// Count
+await prisma.user.count({ where: { status: 'ACTIVE' } })
+
+// Aggregate
+await prisma.task.aggregate({
+  where: { status: 'DONE' },
+  _count: { _all: true },
+  _sum: { estimatedHours: true },
+  _avg: { estimatedHours: true },
+  _min: { startedAt: true },
+  _max: { completedAt: true },
+})
+
+// Group by
+await prisma.task.groupBy({
+  by: ['status', 'priority'],
+  _count: { _all: true },
+  _avg: { estimatedHours: true },
+  having: {
+    status: {
+      _count: { gte: 5 },
+    },
   },
 })
 ```
 
 ## Advanced Usage
 
-### Read Replicas
+### Generator Mode - Prebaked SQL Queries
 
-Send writes to primary, reads to replica:
+For maximum performance, prebake your most common queries at build time. This reduces overhead from ~0.2ms (runtime) to ~0.03ms.
 
-```typescript
-import { convertDMMFToModels } from 'prisma-sql'
-import { Prisma } from '@prisma/client'
+**1. Add generator to your schema:**
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-
-const primary = new PrismaClient()
-
-const replica = postgres(process.env.REPLICA_URL)
-const fastPrisma = new PrismaClient().$extends(
-  speedExtension({ postgres: replica, models })
-)
-
-await primary.user.create({ data: { ... } })
-const users = await fastPrisma.user.findMany()
+```prisma
+// schema.prisma
+generator sql {
+  provider = "prisma-sql-generator"
+}
 ```
 
-### Connection Pooling
+**2. Add optimize directives to your models:**
 
-Configure postgres.js connection pool:
+```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "skip": "$skip",
+///     "take": "$take",
+///     "orderBy": { "createdAt": "desc" },
+///     "where": { "status": "ACTIVE" }
+///   }
+/// }
+/// @optimize { "method": "count", "query": {} }
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  status    String
+  createdAt DateTime @default(now())
+  posts     Post[]
+}
+```
+
+**3. Generate:**
+
+```bash
+npx prisma generate
+```
+
+**4. Use the generated extension:**
 
 ```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+import { PrismaClient } from '@prisma/client'
+import { createExtension } from '../path/to/generated/sql'
+import postgres from 'postgres'
 
-const sql = postgres(process.env.DATABASE_URL, {
-  max: 20,
-  idle_timeout: 20,
-  connect_timeout: 10,
-  ssl: 'require',
+const sql = postgres(process.env.DATABASE_URL)
+const prisma = new PrismaClient().$extends(createExtension({ postgres: sql }))
+
+// ⚡ PREBAKED - Uses pre-generated SQL (~0.03ms overhead)
+const activeUsers = await prisma.user.findMany({
+  where: { status: 'ACTIVE' },
+  skip: 0,
+  take: 10,
+  orderBy: { createdAt: 'desc' },
 })
 
-const prisma = new PrismaClient().$extends(
-  speedExtension({ postgres: sql, models }),
-)
+// 🔨 RUNTIME - Generates SQL on-the-fly (~0.2ms overhead, still fast!)
+const searchUsers = await prisma.user.findMany({
+  where: { email: { contains: '@example.com' } },
+})
 ```
 
-### Gradual Rollout
+The extension automatically:
 
-Feature-flag the extension for safe rollout:
+- Uses prebaked SQL for matching queries (instant)
+- Falls back to runtime generation for non-matching queries (still fast)
+- Tracks which queries are prebaked via `onQuery` callback
 
-```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-const USE_FAST_READS = process.env.FAST_READS === 'true'
+**Dynamic Parameters:**
 
-const sql = postgres(DATABASE_URL)
-const prisma = new PrismaClient()
+Use `$paramName` syntax for runtime values:
 
-const db = USE_FAST_READS
-  ? prisma.$extends(speedExtension({ postgres: sql, models }))
-  : prisma
+```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "where": { "status": "$status" },
+///     "skip": "$skip",
+///     "take": "$take"
+///   }
+/// }
+model User {
+  id     Int    @id
+  status String
+}
+```
+
+**Generator Configuration:**
+
+```prisma
+generator sql {
+  provider = "prisma-sql-generator"
+
+  // Optional: Override auto-detected dialect
+  // dialect = "postgres"  // or "sqlite"
+
+  // Optional: Custom output directory
+  // output = "./generated/sql"
+
+  // Optional: Skip invalid directives instead of failing
+  // skipInvalid = "true"
+}
 ```
 
 ### Access Original Prisma
@@ -726,14 +586,16 @@ const prisma = new PrismaClient().$extends(
   speedExtension({ postgres: sql, models }),
 )
 
+// Fast (via raw SQL)
 const fast = await prisma.user.findMany()
 
+// Slow (via Prisma engine)
 const slow = await prisma.$original.user.findMany()
 ```
 
-## Edge Runtime
+### Edge Runtime
 
-### Vercel Edge Functions
+**Vercel Edge Functions:**
 
 ```typescript
 import { PrismaClient, Prisma } from '@prisma/client'
@@ -754,9 +616,9 @@ export default async function handler(req: Request) {
 }
 ```
 
-### Cloudflare Workers
+**Cloudflare Workers:**
 
-For Cloudflare Workers, use the standalone SQL generation API instead of the extension:
+For Cloudflare Workers, use the standalone SQL generation API:
 
 ```typescript
 import { createToSQL, convertDMMFToModels } from 'prisma-sql'
@@ -779,151 +641,110 @@ export default {
 }
 ```
 
-> **Note:** The Prisma Client extension is not recommended for Cloudflare Workers due to cold start overhead. Use the `createToSQL` API for edge deployments.
+## Generator Mode Details
 
-## Supported Queries
+### How It Works
 
-### Filters
+```
+Build Time:
+  schema.prisma
+       ↓
+  /// @optimize { "method": "findMany", "query": { "where": { "status": "ACTIVE" } } }
+       ↓
+  npx prisma generate
+       ↓
+  generated/sql/index.ts
+       ↓
+  QUERIES = {
+    User: {
+      findMany: {
+        '{"where":{"status":"ACTIVE"}}': {
+          sql: 'SELECT * FROM users WHERE status = $1',
+          params: ['ACTIVE'],
+          dynamicKeys: []
+        }
+      }
+    }
+  }
 
-```typescript
-{ age: { gt: 18, lte: 65 } }
-{ status: { in: ['ACTIVE', 'PENDING'] } }
-{ status: { notIn: ['DELETED'] } }
-
-{ email: { contains: '@example.com' } }
-{ email: { startsWith: 'user' } }
-{ email: { endsWith: '.com' } }
-{ email: { contains: 'EXAMPLE', mode: 'insensitive' } }
-
-{ AND: [{ status: 'ACTIVE' }, { verified: true }] }
-{ OR: [{ role: 'ADMIN' }, { role: 'MODERATOR' }] }
-{ NOT: { status: 'DELETED' } }
-
-{ deletedAt: null }
-{ deletedAt: { not: null } }
+Runtime:
+  prisma.user.findMany({ where: { status: 'ACTIVE' } })
+       ↓
+  Normalize query → '{"where":{"status":"ACTIVE"}}'
+       ↓
+  QUERIES.User.findMany[query] found?
+       ↓
+  YES → ⚡ Use prebaked SQL (0.03ms overhead)
+       ↓
+  NO → 🔨 Generate SQL runtime (0.2ms overhead)
+       ↓
+  Execute via postgres.js/better-sqlite3
 ```
 
-### Relations
+### Optimize Directive Examples
 
-```typescript
-{
-  include: {
-    posts: true,
-    profile: true
-  }
-}
+**Basic query:**
 
-{
-  include: {
-    posts: {
-      include: { comments: true },
-      where: { published: true },
-      orderBy: { createdAt: 'desc' },
-      take: 5
-    }
-  }
-}
-
-{
-  where: {
-    posts: {
-      some: { published: true }
-    }
-  }
-}
-
-{
-  where: {
-    posts: {
-      every: { published: true }
-    }
-  }
-}
-
-{
-  where: {
-    posts: {
-      none: { published: false }
-    }
-  }
+```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "where": { "status": "ACTIVE" }
+///   }
+/// }
+model User {
+  id     Int    @id
+  status String
 }
 ```
 
-### Pagination & Ordering
+**With pagination:**
 
-```typescript
-{
-  take: 10,
-  skip: 20,
-  orderBy: { createdAt: 'desc' }
-}
-
-{
-  cursor: { id: 100 },
-  take: 10,
-  skip: 1,
-  orderBy: { id: 'asc' }
-}
-
-{
-  orderBy: [
-    { status: 'asc' },
-    { priority: 'desc' },
-    { createdAt: 'desc' }
-  ]
-}
-
-{
-  orderBy: {
-    name: {
-      sort: 'asc',
-      nulls: 'last'
-    }
-  }
-}
+```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "skip": "$skip",
+///     "take": "$take",
+///     "orderBy": { "createdAt": "desc" }
+///   }
+/// }
 ```
 
-### Aggregations
+**With relations:**
 
-```typescript
-await prisma.user.count({ where: { status: 'ACTIVE' } })
-
-await prisma.task.aggregate({
-  where: { status: 'DONE' },
-  _count: { _all: true },
-  _sum: { estimatedHours: true },
-  _avg: { estimatedHours: true },
-  _min: { startedAt: true },
-  _max: { completedAt: true },
-})
-
-await prisma.task.groupBy({
-  by: ['status', 'priority'],
-  _count: { _all: true },
-  _avg: { estimatedHours: true },
-  having: {
-    status: {
-      _count: { gte: 5 },
-    },
-  },
-})
+```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "include": {
+///       "posts": {
+///         "where": { "published": true },
+///         "orderBy": { "createdAt": "desc" },
+///         "take": 5
+///       }
+///     }
+///   }
+/// }
 ```
 
-### Distinct
+**Complex query:**
 
-```typescript
-{
-  distinct: ['status'],
-  orderBy: { status: 'asc' }
-}
-
-{
-  distinct: ['status', 'priority'],
-  orderBy: [
-    { status: 'asc' },
-    { priority: 'asc' }
-  ]
-}
+```prisma
+/// @optimize {
+///   "method": "findMany",
+///   "query": {
+///     "skip": "$skip",
+///     "take": "$take",
+///     "orderBy": { "createdAt": "desc" },
+///     "include": {
+///       "company": {
+///         "where": { "deletedAt": null },
+///         "select": { "id": true, "name": true }
+///       }
+///     }
+///   }
+/// }
 ```
 
 ## Migration Guide
@@ -937,45 +758,7 @@ const prisma = new PrismaClient()
 const users = await prisma.user.findMany()
 ```
 
-**After (Generator Mode):**
-
-```prisma
-// schema.prisma
-generator sql {
-  provider = "prisma-sql-generator"
-}
-
-/// @optimize {
-///   "method": "findMany",
-///   "query": {
-///     "where": { "status": "$status" }
-///   }
-/// }
-model User {
-  id     Int    @id
-  status String
-}
-```
-
-```bash
-npx prisma generate
-```
-
-```typescript
-import { PrismaClient } from '@prisma/client'
-import { createExtension } from '../path/to/generated/sql'
-import postgres from 'postgres'
-
-const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(createExtension({ postgres: sql }))
-
-// ⚡ Prebaked query
-const users = await prisma.user.findMany({
-  where: { status: 'ACTIVE' },
-})
-```
-
-**After (Runtime Mode):**
+**After:**
 
 ```typescript
 import { PrismaClient, Prisma } from '@prisma/client'
@@ -988,7 +771,7 @@ const prisma = new PrismaClient().$extends(
   speedExtension({ postgres: sql, models }),
 )
 
-const users = await prisma.user.findMany()
+const users = await prisma.user.findMany() // Same API, just faster
 ```
 
 ### From Drizzle
@@ -1011,8 +794,9 @@ const users = await db
 **After:**
 
 ```typescript
+import { PrismaClient, Prisma } from '@prisma/client'
 import { speedExtension, convertDMMFToModels } from 'prisma-sql'
-import { Prisma } from '@prisma/client'
+import postgres from 'postgres'
 
 const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(DATABASE_URL)
@@ -1022,6 +806,109 @@ const prisma = new PrismaClient().$extends(
 
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
+})
+```
+
+## Limitations
+
+### Partially Supported
+
+These features work but have limitations:
+
+- ⚠️ **Array operations**: Basic operations (`has`, `hasSome`, `hasEvery`, `isEmpty`) work. Advanced filtering not yet supported.
+- ⚠️ **JSON operations**: Path-based filtering works. Advanced JSON functions not yet supported.
+
+### Not Yet Supported
+
+These Prisma features will fall back to Prisma Client:
+
+- ❌ Full-text search (`search` operator)
+- ❌ Composite types (MongoDB-style embedded documents)
+- ❌ Raw database features (PostGIS, pg_trgm, etc.)
+- ❌ Some advanced aggregations in `groupBy`
+
+Enable `debug: true` to see which queries are accelerated vs fallback.
+
+### Database Support
+
+- ✅ PostgreSQL 12+
+- ✅ SQLite 3.35+
+- ❌ MySQL (not yet implemented)
+- ❌ MongoDB (not applicable - document database)
+- ❌ SQL Server (not yet implemented)
+- ❌ CockroachDB (not yet tested)
+
+## Troubleshooting
+
+### "speedExtension requires models parameter"
+
+Convert DMMF at module level:
+
+```typescript
+import { Prisma } from '@prisma/client'
+import { convertDMMFToModels } from 'prisma-sql'
+
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
+const prisma = new PrismaClient().$extends(
+  speedExtension({
+    postgres: sql,
+    models,
+  }),
+)
+```
+
+### "Results don't match Prisma Client"
+
+Enable debug mode and compare SQL:
+
+```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
+speedExtension({
+  postgres: sql,
+  models,
+  debug: true, // Shows generated SQL
+})
+```
+
+Compare with Prisma's query log:
+
+```typescript
+new PrismaClient({ log: ['query'] })
+```
+
+File an issue if results differ: https://github.com/multipliedtwice/prisma-sql/issues
+
+### "Connection pool exhausted"
+
+Increase postgres.js pool size:
+
+```typescript
+const sql = postgres(DATABASE_URL, {
+  max: 50, // Default is 10
+})
+```
+
+### "Performance not improving"
+
+Some queries won't see dramatic improvements:
+
+- Very simple `findUnique` by ID (already fast)
+- Queries with no WHERE clause on small tables
+- Aggregations on unindexed fields
+
+Use `onQuery` to measure actual speedup:
+
+```typescript
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
+speedExtension({
+  postgres: sql,
+  models,
+  onQuery: (info) => {
+    console.log(`${info.method} took ${info.duration}ms`)
+  },
 })
 ```
 
@@ -1067,132 +954,6 @@ cd prisma-sql
 npm unlink              # In prisma-sql directory
 ```
 
-## Limitations
-
-### Partially Supported
-
-These features work but have limitations:
-
-- ⚠️ **Array operations**: Basic operations (`has`, `hasSome`, `hasEvery`, `isEmpty`) work. Advanced filtering like `array_contains(array_field, [1,2,3])` not yet supported.
-- ⚠️ **JSON operations**: Path-based filtering works (`json.path(['field'], { equals: 'value' })`). Advanced JSON functions not yet supported.
-
-### Not Yet Supported
-
-These Prisma features are not supported and will fall back to Prisma Client:
-
-- ❌ Full-text search (`search` operator)
-- ❌ Composite types (MongoDB-style embedded documents)
-- ❌ Raw database features (PostGIS, pg_trgm, etc.)
-- ❌ Some advanced aggregations in `groupBy` (nested aggregations)
-
-If you encounter unsupported queries, enable `debug: true` to see which queries are being converted and which fall back to Prisma.
-
-### Database Support
-
-- ✅ PostgreSQL 12+
-- ✅ SQLite 3.35+
-- ❌ MySQL (not yet implemented)
-- ❌ MongoDB (not applicable - document database)
-- ❌ SQL Server (not yet implemented)
-- ❌ CockroachDB (not yet tested)
-
-## Troubleshooting
-
-### "speedExtension requires models parameter"
-
-Convert DMMF at module level:
-
-```typescript
-import { Prisma } from '@prisma/client'
-import { convertDMMFToModels } from 'prisma-sql'
-
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-
-const prisma = new PrismaClient().$extends(
-  speedExtension({
-    postgres: sql,
-    models,
-  }),
-)
-```
-
-### "Generator: Cannot find module"
-
-The package hasn't been built or linked:
-
-```bash
-# In prisma-sql directory
-npm run build
-npm link
-
-# In your project
-npm link prisma-sql
-npx prisma generate
-```
-
-### "Results don't match Prisma Client"
-
-Enable debug mode to inspect generated SQL:
-
-```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-
-speedExtension({
-  postgres: sql,
-  models,
-  debug: true,
-})
-```
-
-Compare with Prisma's query log:
-
-```typescript
-new PrismaClient({ log: ['query'] })
-```
-
-File an issue if results differ: https://github.com/multipliedtwice/prisma-sql/issues
-
-### "Connection pool exhausted"
-
-Increase postgres.js pool size:
-
-```typescript
-const sql = postgres(DATABASE_URL, {
-  max: 50,
-})
-```
-
-### "Type errors after extending"
-
-Ensure `@prisma/client` is up to date:
-
-```bash
-npm update @prisma/client
-npx prisma generate
-```
-
-### "Performance not improving"
-
-Some queries won't see dramatic improvements:
-
-- Very simple `findUnique` by ID (already fast)
-- Queries with no WHERE clause on small tables
-- Aggregations on unindexed fields
-
-Use `onQuery` to measure actual speedup:
-
-```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-
-speedExtension({
-  postgres: sql,
-  models,
-  onQuery: (info) => {
-    console.log(`${info.method} took ${info.duration}ms`)
-  },
-})
-```
-
 ## FAQ
 
 **Q: Do I need to keep using Prisma Client?**  
@@ -1202,7 +963,7 @@ A: Yes. You need Prisma for schema management, migrations, types, and write oper
 A: Yes. No schema changes required. It works with your existing Prisma schema and generated client.
 
 **Q: What about writes (create, update, delete)?**  
-A: Writes still use Prisma Client. This extension only accelerates reads. For write-heavy workloads, this provides less benefit.
+A: Writes still use Prisma Client. This extension only accelerates reads.
 
 **Q: Is it production ready?**  
 A: Yes. 137 E2E tests verify exact parity with Prisma Client across both Prisma v6 and v7. Used in production.
@@ -1211,29 +972,22 @@ A: Yes. 137 E2E tests verify exact parity with Prisma Client across both Prisma 
 A: Yes. Works with any PostgreSQL-compatible database. Just pass the connection string to postgres.js.
 
 **Q: Does it support Prisma middlewares?**  
-A: The extension runs after middlewares. If you need middleware to see the actual SQL, use Prisma's query logging.
+A: The extension runs after middlewares. For middleware to see actual SQL, use Prisma's query logging.
 
 **Q: Can I still use `$queryRaw` and `$executeRaw`?**  
-A: Yes. Those methods are unaffected. You also still have direct access to the postgres.js client.
+A: Yes. Those methods are unaffected.
 
 **Q: What's the overhead of SQL generation?**  
-A: Generator mode: ~0.03ms (prebaked queries). Runtime mode: ~0.2ms. Even with this overhead, total time is 2-7x faster than Prisma.
-
-**Q: How do I benchmark my own queries?**  
-A: Use the `onQuery` callback to measure each query, or see the [Benchmarking](#benchmarking) section below.
-
-**Q: How does performance compare to Prisma v7?**  
-A: Prisma v7 introduced significant improvements (~39% faster than v6 on PostgreSQL, ~24% on SQLite), but this extension still provides 2-7x additional speedup over v7 depending on query complexity.
+A: Runtime mode: ~0.2ms per query. Generator mode: ~0.03ms for prebaked queries. Still 2-7x faster than Prisma overall.
 
 **Q: Should I use generator mode or runtime mode?**  
-A: Generator mode is recommended for production (faster). Runtime mode is better for prototyping or fully dynamic queries.
+A: Start with runtime mode (simpler). Add generator mode for your hottest queries later if needed.
 
 ## Examples
 
 - [Generator Mode Example](./examples/generator-mode) - Complete working example
 - [PostgreSQL E2E Tests](./tests/e2e/postgres.test.ts) - Comprehensive query examples
 - [SQLite E2E Tests](./tests/e2e/sqlite.e2e.test.ts) - SQLite-specific queries
-- [Runtime API Tests](./tests/e2e/runtime-api.test.ts) - All three APIs
 
 To run examples locally:
 
@@ -1273,22 +1027,6 @@ await prisma.post.findMany({ include: { author: true } })
 
 console.table(queries)
 ```
-
-Or run the full test suite benchmarks:
-
-```bash
-git clone https://github.com/multipliedtwice/prisma-sql
-cd prisma-sql
-npm install
-
-npx prisma db push
-
-DATABASE_URL="postgresql://..." npm run test:e2e:postgres
-
-npm run test:e2e:sqlite
-```
-
-Results include timing for Prisma vs Extension vs Drizzle (where applicable).
 
 ## Contributing
 
