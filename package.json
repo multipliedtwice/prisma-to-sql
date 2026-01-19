@@ -62,7 +62,7 @@
   "author": "multipliedtwice <multipliedtwice@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@dee-wan/schema-parser": "1.1.0",
+    "@dee-wan/schema-parser": "1.2.0",
     "@prisma/generator-helper": "^7.2.0",
     "@prisma/internals": "^7.2.0"
   },
