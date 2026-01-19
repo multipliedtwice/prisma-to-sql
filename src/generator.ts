@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { generatorHandler, GeneratorOptions } from '@prisma/generator-helper'
 import { generateClient } from './code-emitter'
 import { logger } from '@prisma/internals'
@@ -22,7 +24,7 @@ generatorHandler({
     return {
       version,
       defaultOutput: '../node_modules/.prisma/client/sql',
-      prettyName: 'Prisma SQL Generator',
+      prettyName: 'prisma-sql-generator',
       requiresGenerators: ['prisma-client-js'],
     }
   },
