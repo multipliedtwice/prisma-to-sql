@@ -40,31 +40,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@dee-wan/prisma-sql@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "@dee-wan/prisma-sql@workspace:."
-  dependencies:
-    "@dee-wan/schema-parser": 1.1.0
-    "@faker-js/faker": ^10.2.0
-    "@prisma/adapter-better-sqlite3": ^7.2.0
-    "@prisma/adapter-pg": ^7.2.0
-    "@prisma/client": 7.2.0
-    "@types/better-sqlite3": ^7.6.13
-    "@types/node": ^20.0.0
-    better-sqlite3: ^12.6.2
-    drizzle-kit: ^0.31.8
-    drizzle-orm: ^0.45.1
-    postgres: ^3.4.8
-    prisma: 7.2.0
-    tsup: ^8.5.1
-    tsx: ^4.7.0
-    typescript: ^5.3.3
-    vitest: ^4.0.14
-  peerDependencies:
-    "@prisma/client": ^4.0.0 || ^5.0.0 || ^6.0.0
-  languageName: unknown
-  linkType: soft
-
 "@dee-wan/schema-parser@npm:1.1.0":
   version: 1.1.0
   resolution: "@dee-wan/schema-parser@npm:1.1.0"
@@ -2943,6 +2918,34 @@ __metadata:
   checksum: 300740ca415e9ddbf2bd363f1a6d2673cc11dd0665c5ec431bbb5bf024c2f13c56791fb939ce2b2a2c12f2d2a09c91316169e8063a80eb4482a44b8fe5b265e1
   languageName: node
   linkType: hard
+
+"prisma-sql@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "prisma-sql@workspace:."
+  dependencies:
+    "@dee-wan/schema-parser": 1.1.0
+    "@faker-js/faker": ^10.2.0
+    "@prisma/adapter-better-sqlite3": ^7.2.0
+    "@prisma/adapter-pg": ^7.2.0
+    "@prisma/client": 7.2.0
+    "@types/better-sqlite3": ^7.6.13
+    "@types/node": ^20.0.0
+    better-sqlite3: ^12.6.2
+    drizzle-kit: ^0.31.8
+    drizzle-orm: ^0.45.1
+    postgres: ^3.4.8
+    prisma: 7.2.0
+    tsup: ^8.5.1
+    tsx: ^4.7.0
+    typescript: ^5.3.3
+    vitest: ^4.0.14
+  peerDependencies:
+    "@prisma/client": ">=4.0.0"
+  peerDependenciesMeta:
+    "@prisma/client":
+      optional: false
+  languageName: unknown
+  linkType: soft
 
 "prisma@npm:7.2.0":
   version: 7.2.0
