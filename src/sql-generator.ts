@@ -17,7 +17,7 @@ import {
 } from '@dee-wan/schema-parser'
 
 export interface SQLDirective {
-  header: string
+  method: PrismaMethod
   sql: string
   staticParams: any[]
   dynamicKeys: string[]
@@ -222,6 +222,7 @@ function buildMainWhere(args: {
 }
 
 function buildAndNormalizeSql(args: {
+  method: PrismaMethod
   processed: Record<string, any>
   whereResult: ReturnType<typeof buildWhereClause>
   tableName: string
@@ -231,6 +232,7 @@ function buildAndNormalizeSql(args: {
   dialect: SqlDialect
 }): { sql: string; paramMappings: readonly ParamMap[] } {
   const {
+    method,
     processed,
     whereResult,
     tableName,
@@ -239,8 +241,6 @@ function buildAndNormalizeSql(args: {
     schemaModels,
     dialect,
   } = args
-
-  const method = getMethodFromProcessed(processed)
 
   const sqlResult = buildSqlResult({
     method,
@@ -273,7 +273,7 @@ function finalizeDirective(args: {
     buildParamsFromMappings(normalizedMappings)
 
   return {
-    header: directive.header,
+    method: directive.method as PrismaMethod,
     sql: normalizedSql,
     staticParams,
     dynamicKeys,
@@ -299,7 +299,10 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
     dialect,
   })
 
+  const method = directive.method as PrismaMethod
+
   const normalized = buildAndNormalizeSql({
+    method,
     processed: query.processed,
     whereResult,
     tableName,

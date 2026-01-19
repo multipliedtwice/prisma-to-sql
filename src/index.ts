@@ -494,7 +494,7 @@ export function generateAllSQL(directives: DirectiveProps[]): SQLDirective[] {
     )
     for (const { directive, error } of errors) {
       console.warn(
-        `  - ${directive.modelName}.${directive.header}: ${error.message}`,
+        `  - ${directive.modelName}.${directive.method}: ${error.message}`,
       )
     }
   }

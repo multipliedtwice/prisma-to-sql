@@ -47,7 +47,7 @@ export async function generateClient(options: GenerateClientOptions) {
 
     for (const directive of result.directives) {
       try {
-        const method = directive.header // "findMany", "count", etc.
+        const method = directive.method
         const sqlDirective = generateSQL(directive)
 
         if (!modelQueries.has(method)) {
