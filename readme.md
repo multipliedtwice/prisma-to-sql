@@ -1,12 +1,12 @@
 # @dee-wan/prisma-sql
 
-Speed up Prisma reads **2-5x** by executing queries via postgres.js instead of Prisma's query engine.
+Speed up Prisma reads **2-7x** by executing queries via postgres.js instead of Prisma's query engine.
 
 ```typescript
 const sql = postgres(DATABASE_URL)
 const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 
-// Same Prisma API, 2-5x faster reads
+// Same Prisma API, 2-7x faster reads
 const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
 ```
 
@@ -21,7 +21,7 @@ Prisma's query engine adds overhead even in v7:
 
 This extension bypasses the engine for read queries and executes raw SQL directly via postgres.js or better-sqlite3.
 
-**Result:** Same API, same types, 2-5x faster reads.
+**Result:** Same API, same types, 2-7x faster reads.
 
 ## Installation
 
@@ -252,7 +252,7 @@ Benchmarks from 137 E2E tests comparing identical queries against Prisma v6, Pri
 - Generated SQL vs Prisma v7: **5.48x faster**
 - Generated SQL vs Drizzle: **2.61x faster**
 
-> **Note on Prisma v7:** Prisma v7 introduced significant performance improvements (39% faster than v6 on PostgreSQL, 24% faster on SQLite), but this extension still provides 2-5x additional speedup over v7.
+> **Note on Prisma v7:** Prisma v7 introduced significant performance improvements (39% faster than v6 on PostgreSQL, 24% faster on SQLite), but this extension still provides 2-7x additional speedup over v7.
 
 > **Benchmarks:** These are representative results from our test suite running on a MacBook Pro M1 with PostgreSQL 15 and SQLite 3.43. Your mileage may vary based on:
 >
@@ -659,7 +659,7 @@ import { speedExtension } from '@dee-wan/prisma-sql'
 const sql = postgres(DATABASE_URL)
 const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 
-const users = await prisma.user.findMany() // Same code, 2-5x faster
+const users = await prisma.user.findMany() // Same code, 2-7x faster
 ```
 
 ### From Drizzle
@@ -847,13 +847,13 @@ speedExtension({
 If you see "Cannot access Prisma DMMF" error, add this parameter.
 
 **Q: What's the overhead of SQL generation?**  
-A: ~0.03-0.04ms per query. Even with this overhead, total time is 2-5x faster than Prisma.
+A: ~0.03-0.04ms per query. Even with this overhead, total time is 2-7x faster than Prisma.
 
 **Q: How do I benchmark my own queries?**  
 A: Use the `onQuery` callback to measure each query, or see the [Benchmarking](#benchmarking) section below.
 
 **Q: How does performance compare to Prisma v7?**  
-A: Prisma v7 introduced significant improvements (~39% faster than v6 on PostgreSQL, ~24% on SQLite), but this extension still provides 2-5x additional speedup over v7 depending on query complexity.
+A: Prisma v7 introduced significant improvements (~39% faster than v6 on PostgreSQL, ~24% on SQLite), but this extension still provides 2-7x additional speedup over v7 depending on query complexity.
 
 ## Examples
 
