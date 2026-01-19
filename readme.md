@@ -1,4 +1,4 @@
-# @dee-wan/prisma-sql
+# prisma-sql
 
 Speed up Prisma reads **2-7x** by executing queries via postgres.js instead of Prisma's query engine.
 
@@ -28,13 +28,13 @@ This extension bypasses the engine for read queries and executes raw SQL directl
 **PostgreSQL:**
 
 ```bash
-npm install @dee-wan/prisma-sql postgres
+npm install prisma-sql postgres
 ```
 
 **SQLite:**
 
 ```bash
-npm install @dee-wan/prisma-sql better-sqlite3
+npm install prisma-sql better-sqlite3
 ```
 
 ## Quick Start
@@ -43,7 +43,7 @@ npm install @dee-wan/prisma-sql better-sqlite3
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { speedExtension } from '@dee-wan/prisma-sql'
+import { speedExtension } from 'prisma-sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
@@ -60,7 +60,7 @@ const users = await prisma.user.findMany({
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { speedExtension } from '@dee-wan/prisma-sql'
+import { speedExtension } from 'prisma-sql'
 import Database from 'better-sqlite3'
 
 const db = new Database('./data.db')
@@ -75,7 +75,7 @@ In some environments (Cloudflare Workers, Vercel Edge, bundlers), Prisma's DMMF 
 
 ```typescript
 import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension } from '@dee-wan/prisma-sql'
+import { speedExtension } from 'prisma-sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
@@ -433,7 +433,7 @@ const slow = await prisma.$original.user.findMany()
 
 ```typescript
 import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension } from '@dee-wan/prisma-sql'
+import { speedExtension } from 'prisma-sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
@@ -457,7 +457,7 @@ export default async function handler(req: Request) {
 For Cloudflare Workers, use the standalone SQL generation API instead of the extension:
 
 ```typescript
-import { createToSQL } from '@dee-wan/prisma-sql'
+import { createToSQL } from 'prisma-sql'
 import { Prisma } from '@prisma/client'
 
 const toSQL = createToSQL(Prisma.dmmf, 'sqlite')
@@ -654,7 +654,7 @@ const users = await prisma.user.findMany()
 
 ```typescript
 import postgres from 'postgres'
-import { speedExtension } from '@dee-wan/prisma-sql'
+import { speedExtension } from 'prisma-sql'
 
 const sql = postgres(DATABASE_URL)
 const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
@@ -682,7 +682,7 @@ const users = await db
 **After:**
 
 ```typescript
-import { speedExtension } from '@dee-wan/prisma-sql'
+import { speedExtension } from 'prisma-sql'
 
 const sql = postgres(DATABASE_URL)
 const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
@@ -875,7 +875,7 @@ npm test
 Benchmark your own queries:
 
 ```typescript
-import { speedExtension } from '@dee-wan/prisma-sql'
+import { speedExtension } from 'prisma-sql'
 
 const queries: { name: string; duration: number }[] = []
 
@@ -985,7 +985,7 @@ MIT
 
 ## Links
 
-- [NPM Package](https://www.npmjs.com/package/@dee-wan/prisma-sql)
+- [NPM Package](https://www.npmjs.com/package/prisma-sql)
 - [GitHub Repository](https://github.com/dee-see/prisma-sql)
 - [Issue Tracker](https://github.com/dee-see/prisma-sql/issues)
 
