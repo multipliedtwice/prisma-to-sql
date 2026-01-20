@@ -30,8 +30,10 @@ export function createQuery(
   q: Record<string, unknown>,
 ): DirectiveProps {
   const model = datamodel.models.find((m) => m.name === modelName)!
+  const method = q.method as string
+
   return {
-    header: 'test',
+    method,
     modelName,
     query: { original: q, processed: q, staticValues: [], dynamicKeys: [] },
     parameters: { all: [], required: [], optional: [], typeMap: {} },
