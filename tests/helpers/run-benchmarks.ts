@@ -35,25 +35,33 @@ async function switchPrismaVersion(version: 6 | 7) {
   const packageJsonPath = path.join(process.cwd(), 'package.json')
   const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
 
-  if (version === 6) {
-    pkg.dependencies['@prisma/client'] = '6.16.3'
-    pkg.dependencies['prisma'] = '6.16.3'
-    pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^6.16.3'
-    pkg.devDependencies['@prisma/adapter-pg'] = '^6.16.3'
-  } else {
-    pkg.dependencies['@prisma/client'] = '7.2.0'
-    pkg.dependencies['prisma'] = '7.2.0'
-    pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^7.2.0'
-    pkg.devDependencies['@prisma/adapter-pg'] = '^7.2.0'
-  }
+  const prismaVersion = version === 6 ? '6.16.3' : '7.2.0'
+  const adapterVersion = version === 6 ? '^6.16.3' : '^7.2.0'
 
-  delete pkg.dependencies['@prisma/client-v7']
-  delete pkg.dependencies['prisma-v7']
+  // Remove from all locations first to avoid conflicts
+  delete pkg.dependencies?.['@prisma/client']
+  delete pkg.dependencies?.prisma
+  delete pkg.devDependencies?.['@prisma/client']
+  delete pkg.devDependencies?.prisma
+  delete pkg.dependencies?.['@prisma/client-v7']
+  delete pkg.dependencies?.['prisma-v7']
+
+  // Set in devDependencies (where they belong for a library)
+  pkg.devDependencies = pkg.devDependencies || {}
+  pkg.devDependencies['@prisma/client'] = prismaVersion
+  pkg.devDependencies.prisma = prismaVersion
+  pkg.devDependencies['@prisma/adapter-better-sqlite3'] = adapterVersion
+  pkg.devDependencies['@prisma/adapter-pg'] = adapterVersion
+
+  // Keep these at v7 since they're used in the generator itself
+  pkg.dependencies = pkg.dependencies || {}
+  pkg.dependencies['@prisma/generator-helper'] = '^7.2.0'
+  pkg.dependencies['@prisma/internals'] = '^7.2.0'
 
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n')
 
   console.log('Installing dependencies...')
-  execSync('yarn install --silent', { stdio: 'inherit' })
+  execSync('yarn install', { stdio: 'inherit' })
   console.log(`✓ Switched to Prisma v${version}\n`)
 }
 
