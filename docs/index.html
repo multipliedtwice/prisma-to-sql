@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prisma-SQL - Remedy for Slow Prisma Reads | 2-7x Faster at Raw SQL Speed</title>
+  <meta name="description"
+    content="Execute Prisma queries 2-7x faster with zero code changes. Drop-in extension that bypasses the query engine for read operations.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#2D3748',
+            accent: '#48BB78',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .gradient-text {
+      background: linear-gradient(135deg, #48BB78 0%, #38A169 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .code-block {
+      border-radius: 0.5rem;
+      overflow: hidden;
+    }
+
+    .metric-card {
+      transition: transform 0.2s;
+    }
+
+    .metric-card:hover {
+      transform: translateY(-4px);
+    }
+  </style>
+</head>
+
+<body class="bg-gray-50">
+  <!-- Header -->
+  <header class="bg-white shadow-sm sticky top-0 z-50">
+    <nav class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+      <div class="flex justify-between items-center">
+        <div class="flex items-center space-x-2">
+          <svg class="w-8 h-8 text-accent" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span class="text-2xl font-bold text-primary">prisma-sql</span>
+        </div>
+        <div class="flex items-center space-x-6">
+          <a href="https://github.com/multipliedtwice/prisma-sql"
+            class="text-gray-600 hover:text-primary transition">GitHub</a>
+          <a href="https://www.npmjs.com/package/prisma-sql" class="text-gray-600 hover:text-primary transition">NPM</a>
+          <a href="https://github.com/multipliedtwice/prisma-sql#readme"
+            class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-green-600 transition">
+            Get Started →
+          </a>
+        </div>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="relative overflow-hidden bg-gradient-to-br from-gray-900 via-primary to-gray-800 text-white py-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center max-w-4xl mx-auto">
+        <div class="inline-block bg-accent/10 text-accent px-4 py-2 rounded-full text-sm font-semibold mb-6">
+          The Performance Fix Prisma Needs
+        </div>
+        <h1 class="text-5xl md:text-6xl font-extrabold mb-6 leading-tight">
+          Remedy for Slow Prisma<br />
+          <span class="gradient-text">Read Operations at Raw SQL Speed</span>
+        </h1>
+        <p class="text-xl text-gray-300 mb-8 leading-relaxed">
+          Your Prisma reads are slower than they should be. The query engine adds unnecessary overhead.<br />
+          Execute queries 2-7x faster with <strong>zero code changes</strong>.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <a href="https://www.npmjs.com/package/prisma-sql"
+            class="bg-accent hover:bg-green-600 text-white font-bold py-4 px-8 rounded-lg text-lg transition shadow-lg hover:shadow-xl">
+            Install Now
+          </a>
+          <a href="https://github.com/multipliedtwice/prisma-sql#readme"
+            class="bg-white/10 hover:bg-white/20 text-white font-bold py-4 px-8 rounded-lg text-lg transition border border-white/20">
+            View Documentation
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating code preview -->
+    <div class="max-w-4xl mx-auto px-4 mt-16">
+      <div class="code-block bg-gray-900 border border-gray-700 shadow-2xl">
+        <div class="bg-gray-800 px-4 py-2 flex items-center space-x-2 border-b border-gray-700">
+          <div class="w-3 h-3 rounded-full bg-red-500"></div>
+          <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+          <div class="w-3 h-3 rounded-full bg-green-500"></div>
+          <span class="text-gray-400 text-sm ml-4">app.ts</span>
+        </div>
+        <pre class="p-6"><code class="language-typescript">import { PrismaClient, Prisma } from '@prisma/client'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import postgres from 'postgres'
+
+const sql = postgres(process.env.DATABASE_URL)
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql, models })
+)
+
+// Same API, same types — just 2-7x faster
+const users = await prisma.user.findMany({
+  where: { status: 'ACTIVE' },
+  include: { posts: true }
+})</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Problem Section -->
+  <section class="py-20 bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-bold text-primary mb-4">The Problem with Prisma</h2>
+        <p class="text-xl text-gray-600 max-w-3xl mx-auto">
+          Prisma's query engine creates overhead even in v7. Every read query goes through layers of translation,
+          validation, and transformation.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-8">
+        <div class="bg-red-50 border-l-4 border-red-400 p-6 rounded-r-lg">
+          <div class="flex items-start">
+            <div class="flex-shrink-0">
+              <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+            </div>
+            <div class="ml-4">
+              <h3 class="text-lg font-semibold text-red-900 mb-2">Query Translation Overhead</h3>
+              <p class="text-red-700">Every query is parsed, validated, and transformed through Prisma's engine</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-orange-50 border-l-4 border-orange-400 p-6 rounded-r-lg">
+          <div class="flex items-start">
+            <div class="flex-shrink-0">
+              <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z">
+                </path>
+              </svg>
+            </div>
+            <div class="ml-4">
+              <h3 class="text-lg font-semibold text-orange-900 mb-2">Serialization Costs</h3>
+              <p class="text-orange-700">Results are serialized, mapped, and transformed before reaching your code</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-6 rounded-r-lg">
+          <div class="flex items-start">
+            <div class="flex-shrink-0">
+              <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+            </div>
+            <div class="ml-4">
+              <h3 class="text-lg font-semibold text-yellow-900 mb-2">Processing Delays</h3>
+              <p class="text-yellow-700">Type checking and query planning add milliseconds to every operation</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Performance Metrics -->
+  <section class="py-20 bg-gray-100">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-bold text-primary mb-4">Real Performance Gains</h2>
+        <p class="text-xl text-gray-600">Benchmarked across 137 E2E tests comparing identical queries</p>
+      </div>
+
+      <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+        <div class="metric-card bg-white rounded-xl shadow-lg p-6 text-center border-t-4 border-accent">
+          <div class="text-5xl font-bold text-accent mb-2">2.9x</div>
+          <div class="text-gray-600 font-semibold">Complex Conditions</div>
+          <div class="text-sm text-gray-500 mt-2">PostgreSQL</div>
+        </div>
+
+        <div class="metric-card bg-white rounded-xl shadow-lg p-6 text-center border-t-4 border-blue-500">
+          <div class="text-5xl font-bold text-blue-600 mb-2">3.0x</div>
+          <div class="text-gray-600 font-semibold">Nested Relations</div>
+          <div class="text-sm text-gray-500 mt-2">PostgreSQL</div>
+        </div>
+
+        <div class="metric-card bg-white rounded-xl shadow-lg p-6 text-center border-t-4 border-purple-500">
+          <div class="text-5xl font-bold text-purple-600 mb-2">7.7x</div>
+          <div class="text-gray-600 font-semibold">Simple Queries</div>
+          <div class="text-sm text-gray-500 mt-2">SQLite</div>
+        </div>
+
+        <div class="metric-card bg-white rounded-xl shadow-lg p-6 text-center border-t-4 border-pink-500">
+          <div class="text-5xl font-bold text-pink-600 mb-2">53.5x</div>
+          <div class="text-gray-600 font-semibold">Relation Filters</div>
+          <div class="text-sm text-gray-500 mt-2">SQLite</div>
+        </div>
+      </div>
+
+      <!-- Comparison Chart -->
+      <div class="bg-white rounded-xl shadow-lg p-8">
+        <h3 class="text-2xl font-bold text-primary mb-6 text-center">Average Query Times</h3>
+        <div class="space-y-6">
+          <div>
+            <div class="flex justify-between mb-2">
+              <span class="font-semibold text-gray-700">Prisma v7</span>
+              <span class="text-gray-600">2.10ms</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-4">
+              <div class="bg-gray-400 h-4 rounded-full" style="width: 100%"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between mb-2">
+              <span class="font-semibold text-accent">prisma-sql (PostgreSQL)</span>
+              <span class="text-accent font-bold">1.00ms → 2.10x faster</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-4">
+              <div class="bg-gradient-to-r from-accent to-green-600 h-4 rounded-full" style="width: 48%"></div>
+            </div>
+          </div>
+
+          <div class="pt-4 border-t">
+            <div class="flex justify-between mb-2">
+              <span class="font-semibold text-gray-700">Prisma v7 (SQLite)</span>
+              <span class="text-gray-600">5.48ms</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-4">
+              <div class="bg-gray-400 h-4 rounded-full" style="width: 100%"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between mb-2">
+              <span class="font-semibold text-purple-600">prisma-sql (SQLite)</span>
+              <span class="text-purple-600 font-bold">1.00ms → 5.48x faster</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-4">
+              <div class="bg-gradient-to-r from-purple-500 to-pink-600 h-4 rounded-full" style="width: 18%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works -->
+  <section class="py-20 bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-bold text-primary mb-4">How It Works</h2>
+        <p class="text-xl text-gray-600">Bypass Prisma's query engine for read operations</p>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-12 items-center">
+        <div>
+          <div class="space-y-6">
+            <div class="flex items-start">
+              <div
+                class="flex-shrink-0 w-10 h-10 bg-accent text-white rounded-full flex items-center justify-center font-bold">
+                1</div>
+              <div class="ml-4">
+                <h3 class="text-lg font-semibold text-primary mb-2">Intercept Read Queries</h3>
+                <p class="text-gray-600">Extension catches findMany, findFirst, findUnique, count, aggregate, and
+                  groupBy operations</p>
+              </div>
+            </div>
+
+            <div class="flex items-start">
+              <div
+                class="flex-shrink-0 w-10 h-10 bg-accent text-white rounded-full flex items-center justify-center font-bold">
+                2</div>
+              <div class="ml-4">
+                <h3 class="text-lg font-semibold text-primary mb-2">Generate Optimized SQL</h3>
+                <p class="text-gray-600">Parser converts Prisma query to raw SQL with proper parameterization and JOIN
+                  optimization</p>
+              </div>
+            </div>
+
+            <div class="flex items-start">
+              <div
+                class="flex-shrink-0 w-10 h-10 bg-accent text-white rounded-full flex items-center justify-center font-bold">
+                3</div>
+              <div class="ml-4">
+                <h3 class="text-lg font-semibold text-primary mb-2">Execute Directly</h3>
+                <p class="text-gray-600">SQL runs through postgres.js or better-sqlite3, skipping Prisma's engine
+                  entirely</p>
+              </div>
+            </div>
+
+            <div class="flex items-start">
+              <div
+                class="flex-shrink-0 w-10 h-10 bg-accent text-white rounded-full flex items-center justify-center font-bold">
+                4</div>
+              <div class="ml-4">
+                <h3 class="text-lg font-semibold text-primary mb-2">Return Typed Results</h3>
+                <p class="text-gray-600">Results match Prisma's format exactly. Your types still work, IntelliSense
+                  still works</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-gray-900 rounded-xl p-6 border border-gray-700">
+          <pre class="text-sm overflow-x-auto"><code class="language-typescript">// Before: Prisma Client
+const users = await prisma.user.findMany({
+  where: { status: 'ACTIVE' },
+  include: { posts: true }
+})
+// ❌ Goes through query engine
+// ❌ 2.10ms average overhead
+
+// After: With prisma-sql
+const users = await prisma.user.findMany({
+  where: { status: 'ACTIVE' },
+  include: { posts: true }
+})
+// ✅ Direct SQL execution
+// ✅ 1.00ms average overhead
+// ✅ Same API, same types</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Key Features -->
+  <section class="py-20 bg-gradient-to-br from-gray-900 to-primary text-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-bold mb-4">Why Choose prisma-sql?</h2>
+        <p class="text-xl text-gray-300">The best of both worlds: Prisma's DX + raw SQL performance</p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-8">
+        <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+          <div class="w-12 h-12 bg-accent rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z">
+              </path>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3">Zero Code Changes</h3>
+          <p class="text-gray-300">Add one line to your app. Everything else stays exactly the same. No refactoring
+            required.</p>
+        </div>
+
+        <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+          <div class="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+              </path>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3">Type Safety Preserved</h3>
+          <p class="text-gray-300">Full TypeScript support. All your existing types, IntelliSense, and compile-time
+            checks work perfectly.</p>
+        </div>
+
+        <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+          <div class="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4">
+              </path>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3">Battle-Tested</h3>
+          <p class="text-gray-300">137 E2E tests verify exact parity with Prisma Client across v6 and v7. Used in
+            production.</p>
+        </div>
+
+        <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+          <div class="w-12 h-12 bg-pink-500 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01">
+              </path>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3">PostgreSQL & SQLite</h3>
+          <p class="text-gray-300">Works with any PostgreSQL-compatible database (Neon, Supabase, PlanetScale) and
+            SQLite/D1.</p>
+        </div>
+
+        <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+          <div class="w-12 h-12 bg-yellow-500 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4">
+              </path>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3">Prebaked Queries</h3>
+          <p class="text-gray-300">Generator mode creates compile-time SQL for your hottest queries. Sub-millisecond
+            overhead.</p>
+        </div>
+
+        <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+          <div class="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold mb-3">Edge Runtime Ready</h3>
+          <p class="text-gray-300">Works in Vercel Edge Functions, Cloudflare Workers, and other edge environments.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Installation -->
+  <section class="py-20 bg-gray-100">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-12">
+        <h2 class="text-4xl font-bold text-primary mb-4">Get Started in 60 Seconds</h2>
+        <p class="text-xl text-gray-600">Three simple steps to faster queries</p>
+      </div>
+
+      <div class="space-y-8">
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+          <div class="bg-gradient-to-r from-accent to-green-600 px-6 py-4">
+            <h3 class="text-white font-bold text-lg">Step 1: Install</h3>
+          </div>
+          <div class="p-6">
+            <div class="code-block bg-gray-900 border border-gray-700">
+              <pre class="p-4"><code class="language-bash">npm install prisma-sql postgres
+# or
+npm install prisma-sql better-sqlite3</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+          <div class="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4">
+            <h3 class="text-white font-bold text-lg">Step 2: Add Extension</h3>
+          </div>
+          <div class="p-6">
+            <div class="code-block bg-gray-900 border border-gray-700">
+              <pre class="p-4"><code class="language-typescript">import { PrismaClient, Prisma } from '@prisma/client'
+import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import postgres from 'postgres'
+
+const sql = postgres(process.env.DATABASE_URL)
+const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql, models })
+)</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+          <div class="bg-gradient-to-r from-purple-500 to-purple-600 px-6 py-4">
+            <h3 class="text-white font-bold text-lg">Step 3: Use Normally</h3>
+          </div>
+          <div class="p-6">
+            <div class="code-block bg-gray-900 border border-gray-700">
+              <pre class="p-4"><code class="language-typescript">// That's it! Your queries are now 2-7x faster
+const users = await prisma.user.findMany({
+  where: { status: 'ACTIVE' },
+  include: { posts: true }
+})</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="py-20 bg-gradient-to-br from-accent to-green-700 text-white">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <h2 class="text-4xl md:text-5xl font-bold mb-6">Ready to Speed Up Your Prisma App?</h2>
+      <p class="text-xl mb-8 text-green-100">
+        Join developers who've already made their Prisma reads 2-7x faster with zero code changes.
+      </p>
+      <div class="flex flex-col sm:flex-row gap-4 justify-center">
+        <a href="https://www.npmjs.com/package/prisma-sql"
+          class="bg-white text-accent hover:bg-gray-100 font-bold py-4 px-8 rounded-lg text-lg transition shadow-lg hover:shadow-xl">
+          Install from NPM
+        </a>
+        <a href="https://github.com/multipliedtwice/prisma-sql"
+          class="bg-accent/20 hover:bg-accent/30 text-white font-bold py-4 px-8 rounded-lg text-lg transition border-2 border-white">
+          View on GitHub
+        </a>
+      </div>
+      <p class="mt-8 text-green-100">
+        MIT Licensed • PostgreSQL & SQLite • 137 E2E Tests • Production Ready
+      </p>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bg-gray-900 text-gray-400 py-12">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid md:grid-cols-4 gap-8">
+        <div>
+          <h3 class="text-white font-bold mb-4">prisma-sql</h3>
+          <p class="text-sm">Remedy for slow Prisma reads. Execute queries at raw SQL speed.</p>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold mb-4">Resources</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://github.com/multipliedtwice/prisma-sql#readme"
+                class="hover:text-white transition">Documentation</a></li>
+            <li><a href="https://github.com/multipliedtwice/prisma-sql/tree/main/examples"
+                class="hover:text-white transition">Examples</a></li>
+            <li><a href="https://github.com/multipliedtwice/prisma-sql#benchmarking"
+                class="hover:text-white transition">Benchmarks</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold mb-4">Community</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://github.com/multipliedtwice/prisma-sql" class="hover:text-white transition">GitHub</a>
+            </li>
+            <li><a href="https://github.com/multipliedtwice/prisma-sql/issues"
+                class="hover:text-white transition">Issues</a></li>
+            <li><a href="https://www.npmjs.com/package/prisma-sql" class="hover:text-white transition">NPM Package</a>
+            </li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold mb-4">Legal</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://github.com/multipliedtwice/prisma-sql/blob/main/LICENSE"
+                class="hover:text-white transition">MIT License</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="border-t border-gray-800 mt-8 pt-8 text-sm text-center">
+        <p>© 2024 prisma-sql. Made for developers who need Prisma's DX with raw SQL performance.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    hljs.highlightAll();
+  </script>
+</body>
+
+</html>
