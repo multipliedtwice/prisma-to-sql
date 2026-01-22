@@ -1,11 +1,11 @@
-# Contributing to eav-to-prisma
+# Contributing to prisma-to-sql
 
 Thank you for your interest in contributing! 
 
 ## Development Setup
 ```bash
-git clone https://github.com/multipliedtwice/eav-to-prisma.git
-cd eav-to-prisma
+git clone https://github.com/multipliedtwice/prisma-to-sql.git
+cd prisma-to-sql
 yarn install
 ```
 
@@ -42,7 +42,7 @@ yarn test:coverage # With coverage
 
 ## Questions?
 
-Open a [Discussion](https://github.com/multipliedtwice/eav-to-prisma/discussions) or reach out to maintainers.
+Open a [Discussion](https://github.com/multipliedtwice/prisma-to-sql/discussions) or reach out to maintainers.
 ```
 
 ### 3. **.npmignore** (Redundant but safer)
