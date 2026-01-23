@@ -1,0 +1,37 @@
+---
+interface Props {
+  t: any;
+  locale: string;
+}
+
+const { t, locale } = Astro.props;
+const testingPath = locale === 'en' ? '/prisma-to-sql/testing' : `/prisma-to-sql/${locale}/testing`;
+---
+
+<section class="py-8 sm:py-12 bg-gradient-to-r from-blue-50 to-indigo-50 border-y border-blue-100">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <a href={testingPath} class="block group">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6">
+        <div class="text-center sm:text-left flex-1">
+          <div class="inline-block bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-semibold mb-3">
+            {t.testingCallout.badge}
+          </div>
+          <h3 class="text-xl sm:text-2xl font-bold text-primary mb-2 group-hover:text-blue-600 transition">
+            {t.testingCallout.title}
+          </h3>
+          <p class="text-sm sm:text-base text-gray-600">
+            {t.testingCallout.description}
+          </p>
+        </div>
+        <div class="flex-shrink-0">
+          <span class="inline-flex items-center bg-white text-blue-600 font-semibold px-6 py-3 rounded-lg border-2 border-blue-600 group-hover:bg-blue-600 group-hover:text-white transition shadow-sm">
+            {t.testingCallout.link}
+            <svg class="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
+            </svg>
+          </span>
+        </div>
+      </div>
+    </a>
+  </div>
+</section>

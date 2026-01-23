@@ -1,7 +1,7 @@
 {
   "meta": {
-    "title": "Fix Slow Prisma Queries: 2-7x Faster Database Reads | Prisma-SQL",
-    "description": "Is Prisma slow? Speed up slow Prisma queries by 2-7x without code changes. Direct SQL execution eliminates Prisma performance bottlenecks in PostgreSQL and SQLite. Production-ready solution for slow Prisma reads.",
+    "title": "Fix Slow Prisma Queries: 2–7× Faster Reads (Up to 53.5×) | Prisma-SQL",
+    "description": "Is Prisma slow? Speed up slow Prisma reads by 2–7× without refactors. Bypass Prisma’s read execution path with direct SQL execution in PostgreSQL and SQLite (up to 53.5× on SQLite relation filters). Production-ready optimization for read-heavy Prisma workloads.",
     "keywords": "slow prisma, prisma slow, prisma performance, fix slow prisma, speed up prisma, prisma optimization, prisma query speed, slow prisma queries, prisma performance issues, make prisma faster, postgresql, sqlite"
   },
   "header": {
@@ -10,15 +10,15 @@
   "hero": {
     "badge": "🚀 The Solution for Slow Prisma",
     "title": "Fix Slow Prisma Queries",
-    "titleHighlight": "Make Prisma 2-7x Faster Instantly",
+    "titleHighlight": "Make Your API 2–7× Faster (Up to 53.5×)",
     "description": "Is Prisma slow? You're not alone. Love Prisma's DX but need better performance?",
-    "descriptionBold": "Speed up slow Prisma queries by 2-7x",
-    "descriptionSuffix": "without changing a single line of code.",
+    "descriptionBold": "Speed up slow Prisma queries by 2–7×",
+    "descriptionSuffix": "(up to 53.5× on SQLite relation filters) without changing any existing queries.",
     "cta1": "Speed Up Prisma Now",
     "cta2": "See How It Works",
     "trustBadges": [
-      "Fixes Slow Prisma",
-      "No Code Changes",
+      "Faster Prisma Reads",
+      "No Query Changes",
       "Production-Ready",
       "137 E2E Tests"
     ],
@@ -27,15 +27,15 @@
   },
   "stats": [
     {
-      "value": "2-7x",
-      "label": "Faster Than Slow Prisma",
-      "subtitle": "Proven speedup",
+      "value": "2–7×",
+      "label": "Faster Prisma Reads",
+      "subtitle": "Typical speedup",
       "color": "text-accent"
     },
     {
       "value": "0",
-      "label": "Code Changes",
-      "subtitle": "Fix Prisma speed issues",
+      "label": "Query Changes",
+      "subtitle": "Keep your existing Prisma calls",
       "color": "text-blue-600"
     },
     {
@@ -54,77 +54,77 @@
   "problem": {
     "title": "Why Is Prisma Slow?",
     "subtitle": "Understanding Prisma's evolution and performance characteristics helps explain why this extension exists.",
-    "historyTitle": "The Prisma Journey: From Revolutionary to Performance-Conscious",
+    "historyTitle": "The Prisma Journey: DX First, Performance Matters at Scale",
     "history": [
       {
         "period": "🎯 2019: The Birth of Modern Prisma",
-        "description": "Prisma 2 launched in 2019, revolutionizing the Node.js ORM landscape. The team introduced a game-changing approach: type-safe database access with auto-generated types from your schema. Unlike traditional ORMs, Prisma built a custom query engine in Rust to handle the heavy lifting of query translation and type validation. This architecture was a deliberate choice—it enabled features that were previously impossible in JavaScript ORMs."
+        "description": "Prisma 2 launched in 2019, changing the TypeScript ORM landscape with type-safe database access and generated types from your schema. Prisma introduced an engine-based architecture to translate queries, validate them, and provide strong guarantees that were hard to achieve with traditional JavaScript ORMs."
       },
       {
-        "period": "⚡ 2020-2022: Rapid Growth & Feature Expansion",
-        "description": "During this period, Prisma added powerful features like nested writes, transaction support, and middleware. Each feature made Prisma more capable but also added layers to the query engine. The Rust-based engine provided safety and cross-database compatibility, but every query had to traverse multiple abstraction layers: TypeScript → Query Engine → Database Driver → Database. For most use cases, the developer experience gains far outweighed the performance overhead."
+        "period": "⚡ 2020–2022: Rapid Growth & Feature Expansion",
+        "description": "Prisma added powerful features like nested writes, transactions, and middleware. The feature set expanded, but every query still paid an architectural cost: queries are represented, validated, executed, and results are shaped to match the Prisma API."
       },
       {
-        "period": "📊 2023: Prisma v5 Era - Performance Becomes Noticeable",
-        "description": "As Prisma matured through version 5, more teams deployed it at scale. With high-traffic production workloads, the query engine overhead became measurable. Benchmarks showed Prisma was 2-7x slower than raw SQL for read operations. The community started discussing \"slow Prisma\" performance issues, particularly for analytics queries, complex aggregations, and high-throughput APIs. This wasn't a bug—it was the inherent cost of Prisma's architecture providing type safety and validation."
+        "period": "📊 2023: Overhead Becomes Noticeable at Scale",
+        "description": "As more teams deployed Prisma in high-traffic workloads, the fixed per-query overhead became measurable. This is most visible on read-heavy endpoints, analytics, aggregations, and large result sets. The overhead is not a bug; it's the cost of Prisma’s guarantees and API behavior."
       },
       {
-        "period": "🚀 2024: Prisma v6 & v7 - Optimization Efforts",
-        "description": "The Prisma team recognized performance concerns and made significant optimizations in versions 6 and 7. They improved query planning, reduced serialization overhead, and optimized the engine's communication layer. Prisma v7, released in late 2024, showed measurable improvements—some queries were 30-40% faster than v5. However, the fundamental architecture remained: queries still passed through the engine layer, and read operations were still 2-5x slower than raw SQL."
+        "period": "🚀 2024–2025: Prisma Performance Work Continues",
+        "description": "Prisma shipped major updates focused on performance and engine changes. Even with improvements, there is still an unavoidable cost to parsing, validating, planning, and shaping results compared to executing raw SQL directly."
       },
       {
-        "period": "🎯 December 2024: prisma-sql Extension Released",
-        "description": "This extension was created and released in December 2024 to complement Prisma's strengths. Instead of competing with Prisma, it extends the ecosystem by addressing one specific challenge: read performance. The extension bypasses the query engine for read operations (findMany, findFirst, findUnique, count, aggregate, groupBy) while keeping all of Prisma's features for writes, migrations, and schema management. It was designed alongside Prisma v7 and tested extensively against both v6 and v7 to ensure compatibility."
+        "period": "🎯 2026: prisma-sql Extension Released",
+        "description": "This extension focuses on read performance. It bypasses Prisma’s read execution path for findMany, findFirst, findUnique, count, aggregate, and groupBy, while keeping Prisma for writes, migrations, schema management, and type generation. Validate compatibility with your Prisma version before rollout."
       }
     ],
     "whyExists": {
       "title": "💡 Why This Extension Exists",
-      "description": "Prisma made the right architectural choices for its goals: type safety, developer experience, and cross-database compatibility. But those choices create overhead that's noticeable at scale. This extension doesn't replace Prisma—it enhances it for teams who need both the amazing DX and raw SQL performance. You keep using Prisma for everything it's great at (migrations, type safety, schema management, writes) while getting 2-7x faster reads."
+      "description": "Prisma made the right architectural choices for its goals: type safety, developer experience, and cross-database behavior. But those choices create overhead that's noticeable at scale. This extension doesn't replace Prisma—it optimizes reads for teams that want Prisma's DX plus faster execution where it matters."
     },
     "technical": [
       {
         "title": "Query Translation Layer",
-        "description": "Prisma's Rust engine translates TypeScript queries into database-specific SQL. This enables amazing features like cross-database compatibility and type safety, but adds processing time to every query. This overhead is the trade-off for Prisma's incredible developer experience.",
+        "description": "Prisma translates your query inputs into database-specific SQL. This enables cross-database behavior and Prisma's API semantics, but adds processing time before the database sees the SQL.",
         "iconPath": "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
       },
       {
-        "title": "Validation & Type Checking",
-        "description": "The engine validates every query against your schema and ensures type safety at runtime. These safety features are invaluable for development and prevent entire classes of bugs, but they add overhead to each database operation.",
+        "title": "Validation & Type Guarantees",
+        "description": "Prisma validates queries against the schema and enforces API-level guarantees. These safeguards prevent classes of bugs, but they also add overhead to each query.",
         "iconPath": "M13 10V3L4 14h7v7l9-11h-7z"
       },
       {
-        "title": "Result Transformation",
-        "description": "Results get serialized and transformed through multiple layers to match your TypeScript types perfectly. This ensures type safety end-to-end but adds latency, especially for large result sets and complex queries.",
+        "title": "Result Shaping",
+        "description": "Results are shaped to match Prisma's API behavior. This is great for DX and consistency, but it adds latency, especially on large result sets and complex includes.",
         "iconPath": "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
       }
     ],
-    "conclusion": "This extension complements Prisma by offering an alternative path for read queries. You keep everything you love about Prisma while getting 2-7x faster reads when performance matters."
+    "conclusion": "This extension complements Prisma by offering a faster path for read queries. You keep everything you love about Prisma while getting 2–7× faster reads in typical cases (and up to 53.5× in SQLite relation filters) when performance matters."
   },
   "performance": {
     "title": "How Much Faster? Real Benchmarks",
-    "subtitle": "See exactly how this extension accelerates Prisma across 137 test cases",
+    "subtitle": "See how this extension accelerates Prisma across 137 test cases",
     "environment": "Benchmark environment: MacBook Pro M1 • PostgreSQL 15 • SQLite 3.43",
     "metrics": [
       {
-        "value": "2.9x",
+        "value": "2.9×",
         "label": "Complex Filters",
         "subtitle": "PostgreSQL speedup",
         "color": "accent"
       },
       {
-        "value": "3.0x",
+        "value": "3.0×",
         "label": "Nested Includes",
         "subtitle": "PostgreSQL speedup",
         "color": "blue"
       },
       {
-        "value": "7.7x",
+        "value": "7.7×",
         "label": "Simple Queries",
         "subtitle": "SQLite speedup",
         "color": "purple"
       },
       {
-        "value": "53.5x",
+        "value": "53.5×",
         "label": "Relation Filters",
         "subtitle": "SQLite speedup",
         "color": "pink"
@@ -142,7 +142,7 @@
       },
       {
         "label": "Prisma + Extension (PostgreSQL)",
-        "time": "1.00ms → 2.10x faster ⚡",
+        "time": "2.10ms → 1.00ms (2.10× faster) ⚡",
         "width": 48,
         "bgColor": "bg-gradient-to-r from-accent to-green-600",
         "color": "text-accent",
@@ -158,7 +158,7 @@
       },
       {
         "label": "Prisma + Extension (SQLite)",
-        "time": "1.00ms → 5.48x faster ⚡",
+        "time": "5.48ms → 1.00ms (5.48× faster) ⚡",
         "width": 18,
         "bgColor": "bg-gradient-to-r from-purple-500 to-pink-600",
         "color": "text-purple-600",
@@ -170,11 +170,11 @@
   },
   "howItWorks": {
     "title": "How It Optimizes Prisma",
-    "subtitle": "Bypass the query engine for reads while keeping all of Prisma's features",
+    "subtitle": "Bypass Prisma's read execution path while keeping Prisma's API and types",
     "steps": [
       {
         "title": "Intercept Prisma Queries",
-        "description": "Extension catches read operations (findMany, findFirst, findUnique, count, aggregate, groupBy) before they hit Prisma's query engine"
+        "description": "Extension catches read operations (findMany, findFirst, findUnique, count, aggregate, groupBy) before they execute"
       },
       {
         "title": "Generate Optimized SQL",
@@ -182,40 +182,40 @@
       },
       {
         "title": "Execute Directly",
-        "description": "Run queries through postgres.js or better-sqlite3, completely bypassing Prisma's engine overhead"
+        "description": "Run queries through postgres.js or better-sqlite3, bypassing Prisma read overhead"
       },
       {
         "title": "Return Compatible Results",
-        "description": "Results match Prisma's exact format. Your types, IntelliSense, and existing code work unchanged"
+        "description": "Results match Prisma's expected shape. Types, IntelliSense, and existing query code remain unchanged"
       }
     ],
-    "codeExample": "const users = await prisma.user.findMany({\n  where: { status: 'ACTIVE' },\n  include: { posts: true }\n})\n\n// ✅ Direct SQL execution\n// ✅ ~1.00ms overhead  \n// ✅ Accelerates Prisma instantly"
+    "codeExample": "const users = await prisma.user.findMany({\n  where: { status: 'ACTIVE' },\n  include: { posts: true }\n})\n\n// Direct SQL execution for reads\n// Benchmarked around ~1.00ms on this workload\n// Same Prisma query code"
   },
   "features": {
     "title": "Why Choose This Prisma Extension?",
-    "subtitle": "Get raw SQL performance while keeping everything you love about Prisma",
+    "subtitle": "Get raw SQL execution speed for reads while keeping Prisma's developer experience",
     "items": [
       {
         "title": "Instant Prisma Speedup",
-        "description": "One line of code accelerates Prisma queries. No refactoring, no migration, no downtime.",
+        "description": "One-time setup accelerates Prisma reads. No refactoring, no migration, no downtime.",
         "color": "accent",
         "iconPath": "M13 10V3L4 14h7v7l9-11h-7z"
       },
       {
         "title": "Keep Your Prisma Types",
-        "description": "Full TypeScript support maintained. All type inference, autocomplete, and compile-time safety preserved while accelerating Prisma.",
+        "description": "Full TypeScript support maintained. Type inference, autocomplete, and compile-time safety preserved while accelerating reads.",
         "color": "blue",
         "iconPath": "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
       },
       {
         "title": "Production-Tested Solution",
-        "description": "137 E2E tests prove compatibility with Prisma v6 and v7. Already accelerating Prisma in production apps.",
+        "description": "137 E2E tests validate compatibility with recent Prisma versions. Used to accelerate Prisma reads in production apps.",
         "color": "purple",
         "iconPath": "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
       },
       {
         "title": "Multiple Database Support",
-        "description": "Optimize Prisma on PostgreSQL (including Neon, Supabase, PlanetScale) and SQLite/Cloudflare D1.",
+        "description": "Optimize Prisma reads on PostgreSQL (including Neon, Supabase) and SQLite.",
         "color": "pink",
         "iconPath": "M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
       },
@@ -226,8 +226,8 @@
         "iconPath": "M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
       },
       {
-        "title": "Edge & Serverless Ready",
-        "description": "Accelerate Prisma in Vercel Edge Functions, Cloudflare Workers, and any serverless platform.",
+        "title": "Serverless Ready (Node Runtimes)",
+        "description": "Works in serverless Node runtimes. Edge runtime support depends on runtime constraints and the driver you use.",
         "color": "green",
         "iconPath": "M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
       }
@@ -239,49 +239,49 @@
     "cases": [
       {
         "title": "📊 Analytics & Reporting",
-        "description": "Prisma aggregations and groupBy operations benefit significantly from direct SQL",
+        "description": "Prisma aggregations and groupBy operations benefit significantly from direct SQL execution",
         "color": "blue",
         "benefits": [
-          "5x faster groupBy accelerates Prisma reports",
-          "Optimize Prisma aggregate queries",
-          "Real-time metrics with faster Prisma"
+          "5× faster groupBy accelerates reports",
+          "Faster aggregate queries",
+          "Real-time metrics with lower latency"
         ]
       },
       {
         "title": "🚀 High-Traffic APIs",
-        "description": "Query overhead compounds under load - optimization matters",
+        "description": "Per-query overhead compounds under load, especially on read-heavy endpoints",
         "color": "purple",
         "benefits": [
-          "Optimize Prisma API response times",
-          "Handle more requests with faster Prisma",
+          "Lower API response times",
+          "Handle more requests per instance",
           "Reduce infrastructure costs"
         ]
       },
       {
         "title": "☁️ Serverless Functions",
-        "description": "Every millisecond matters in serverless - optimize Prisma execution time",
+        "description": "Every millisecond matters in serverless: reduce read latency where it counts",
         "color": "green",
         "benefits": [
-          "Minimize Prisma cold start impact",
-          "Works with D1, Neon, Supabase",
-          "Lower costs by optimizing Prisma"
+          "Better p95/p99 on reads",
+          "Lower costs through faster reads",
+          "Faster reads without refactors"
         ]
       },
       {
         "title": "📱 Mobile Backends",
-        "description": "Users notice laggy responses - speed up Prisma for better UX",
+        "description": "Users notice latency: faster reads improve perceived UX immediately",
         "color": "orange",
         "benefits": [
-          "Accelerate Prisma feed loading",
-          "Optimize Prisma pagination",
-          "Instant app interactions"
+          "Faster feed loading",
+          "Faster pagination",
+          "More responsive interactions"
         ]
       }
     ]
   },
   "installation": {
     "title": "Optimize Prisma in 3 Steps",
-    "subtitle": "Accelerate Prisma performance in under 60 seconds",
+    "subtitle": "Accelerate Prisma reads in under 60 seconds",
     "steps": [
       {
         "title": "Install the Prisma Extension",
@@ -294,7 +294,7 @@
         "code": "import { PrismaClient, Prisma } from '@prisma/client'\nimport { speedExtension, convertDMMFToModels } from 'prisma-sql'\nimport postgres from 'postgres'\n\nconst sql = postgres(process.env.DATABASE_URL)\nconst models = convertDMMFToModels(Prisma.dmmf.datamodel)\n\nconst prisma = new PrismaClient().$extends(\n  speedExtension({ postgres: sql, models })\n)"
       },
       {
-        "title": "Prisma Optimized - Use Normally",
+        "title": "Use Prisma Normally",
         "language": "language-typescript",
         "code": "const users = await prisma.user.findMany({\n  where: { status: 'ACTIVE' },\n  include: { posts: true }\n})"
       }
@@ -302,42 +302,298 @@
   },
   "faq": {
     "title": "Prisma Performance FAQ",
-    "subtitle": "Common questions about optimizing Prisma",
+    "subtitle": "Common questions about optimizing Prisma reads",
     "questions": [
       {
         "question": "Why does Prisma have overhead?",
-        "answer": "Prisma's query engine adds overhead because it provides incredible features like type safety, schema migrations, and cross-database compatibility. The engine translates your queries, validates them against your schema, and transforms results. This architecture made Prisma the best TypeScript ORM, and this extension simply optimizes read performance while keeping all those great features."
+        "answer": "Prisma adds overhead because it implements API guarantees like schema-based validation, consistent query behavior, and result shaping. Those layers provide a great developer experience but cost time compared to executing raw SQL directly."
       },
       {
         "question": "How do I optimize Prisma queries?",
-        "answer": "Optimize Prisma queries by using this extension. It bypasses Prisma's query engine for read operations, executing queries directly via postgres.js or better-sqlite3. This accelerates performance while maintaining Prisma's API and type safety. Installation takes less than 60 seconds and requires zero code changes."
+        "answer": "Optimize read-heavy Prisma workloads by adding this extension. It executes read operations via direct SQL using postgres.js or better-sqlite3 while keeping Prisma's API and types. Setup is a small initialization change and does not require refactoring your existing queries."
       },
       {
         "question": "Is Prisma slower than raw SQL?",
-        "answer": "Yes, Prisma is slower than raw SQL for read operations - our benchmarks show 2-7x overhead due to the query engine layer. But this overhead exists because Prisma gives you type safety, migrations, and an amazing developer experience. This extension gives you both: Prisma's DX with raw SQL speed for reads."
+        "answer": "For many read workloads, yes. There is architectural overhead compared to raw SQL execution. This extension aims to keep Prisma's DX while reducing read latency by executing SQL directly."
       },
       {
-        "question": "Can I speed up Prisma without changing code?",
-        "answer": "Absolutely. This extension speeds up Prisma queries without any code changes to your application. Simply add the extension to your Prisma Client initialization and all read queries automatically execute 2-7x faster. Your existing Prisma code, types, and schema remain completely unchanged."
+        "question": "Can I speed up Prisma without changing existing queries?",
+        "answer": "Yes. Add the extension once during Prisma Client initialization and keep your existing Prisma query code unchanged. Read operations run faster while your Prisma API, types, and schema remain the same."
       },
       {
         "question": "Does this work in production?",
-        "answer": "Yes, this extension is production-ready and battle-tested. With 137 comprehensive E2E tests validating exact compatibility with Prisma v6 and v7, it's currently optimizing Prisma in production environments. Released alongside Prisma v7.2 in January 2026."
+        "answer": "Yes. It is validated with 137 E2E tests and designed to be used in production. Always verify compatibility with your Prisma version and run your own regression tests before rollout."
       },
       {
         "question": "What causes slower Prisma aggregations?",
-        "answer": "Prisma aggregations and groupBy operations go through the same query engine overhead as other operations. The engine processes complex queries through multiple transformation layers before execution. This extension optimizes these operations by generating SQL directly, resulting in 3-5x faster aggregate queries while keeping Prisma's API."
+        "answer": "Aggregations and groupBy often amplify fixed overhead (query processing and result shaping) and can involve larger intermediate result sets. This extension optimizes those reads by generating SQL directly, which typically reduces latency on aggregation-heavy endpoints."
       }
     ]
   },
   "cta": {
     "title": "Ready to Speed Up Prisma?",
-    "subtitle": "Join developers who've already optimized Prisma performance with 2-7x faster queries",
+    "subtitle": "Join developers optimizing Prisma reads: 2–7× faster (up to 53.5×)",
     "button1": "Install Prisma-SQL",
     "button2": "View on GitHub"
   },
   "footer": {
-    "copyright": "© 2026 prisma-sql - Fix slow Prisma queries instantly with 2-7x performance boost",
+    "copyright": "© 2026 Prisma-SQL - Speed up Prisma reads by 2–7× (up to 53.5×)",
     "tagline": "Making Prisma even better"
+  },
+  "testingCallout": {
+    "badge": "✓ Validated",
+    "title": "How do we ensure correctness?",
+    "description": "Every query is validated against Prisma with 137 end-to-end tests across PostgreSQL and SQLite",
+    "link": "View Testing Methodology →"
+  },
+  "testing": {
+    "meta": {
+      "title": "Testing Methodology - Prisma-SQL",
+      "description": "Comprehensive testing approach validating 137 E2E tests ensure generated SQL matches Prisma output exactly",
+      "keywords": "prisma testing, sql validation, e2e tests, orm testing, database testing"
+    },
+    "hero": {
+      "badge": "🧪 Quality Assurance",
+      "title": "Testing",
+      "titleHighlight": "Methodology",
+      "subtitle": "137 end-to-end tests validate every generated SQL query matches Prisma's output exactly"
+    },
+    "stats": [
+      {
+        "value": "137",
+        "label": "E2E Tests",
+        "description": "Every query validated"
+      },
+      {
+        "value": "100%",
+        "label": "Parity Coverage",
+        "description": "Byte-for-byte match"
+      },
+      {
+        "value": "2",
+        "label": "Database Engines",
+        "description": "PostgreSQL & SQLite"
+      },
+      {
+        "value": "3",
+        "label": "ORM Benchmarks",
+        "description": "Prisma v6/v7, Drizzle"
+      }
+    ],
+    "validation": {
+      "title": "How We Validate Correctness",
+      "subtitle": "Every test follows a rigorous 5-step validation process to ensure generated SQL produces identical results to Prisma",
+      "steps": [
+        {
+          "title": "Generate SQL from Prisma Query",
+          "description": "Parse Prisma query arguments and generate equivalent SQL using the same models and schema. The generated SQL uses parameterized queries for security and performance."
+        },
+        {
+          "title": "Execute Both Queries in Parallel",
+          "description": "Run the generated SQL directly via postgres.js or better-sqlite3, and execute the same query through Prisma. Both hit the same database state."
+        },
+        {
+          "title": "Normalize Results",
+          "description": "Handle type differences (BigInt vs Number, Decimal precision, Date serialization) and normalize object key ordering for fair comparison."
+        },
+        {
+          "title": "Deep Equality Check",
+          "description": "Verify results match exactly: same number of rows, same field values, same nested relations, same ordering. Any mismatch fails the test."
+        },
+        {
+          "title": "Benchmark Performance",
+          "description": "Measure execution time with 5 warmup runs, then average 10-50 iterations per test. Compare against Prisma v6, Prisma v7, and Drizzle ORM."
+        }
+      ]
+    },
+    "advancedTechniques": {
+      "title": "Advanced Validation Techniques",
+      "dataTypes": {
+        "title": "Data Type Normalization",
+        "items": [
+          {
+            "label": "BigInt Conversion",
+            "description": "JavaScript BigInt → Number for comparison"
+          },
+          {
+            "label": "Decimal Handling",
+            "description": "Prisma Decimal → Float with 10-digit precision"
+          },
+          {
+            "label": "Date Normalization",
+            "description": "All DateTime values → null (focus on data, not timestamps)"
+          },
+          {
+            "label": "JSON Parsing",
+            "description": "Automatic detection and parsing of JSON strings"
+          },
+          {
+            "label": "Object Key Sorting",
+            "description": "Alphabetical ordering for consistent comparison"
+          }
+        ]
+      },
+      "performance": {
+        "title": "Performance Benchmarking",
+        "items": [
+          {
+            "label": "Warmup Phase",
+            "description": "5 iterations to prime caches and JIT"
+          },
+          {
+            "label": "Adaptive Iterations",
+            "description": "5-50 runs based on query complexity"
+          },
+          {
+            "label": "Isolated Measurement",
+            "description": "Each query type measured independently"
+          },
+          {
+            "label": "Multi-ORM Comparison",
+            "description": "Prisma v6, v7, Drizzle, Generated SQL"
+          },
+          {
+            "label": "SQL Generation Time",
+            "description": "Separate timing for query generation overhead"
+          }
+        ]
+      }
+    },
+    "coverage": {
+      "title": "Comprehensive Test Coverage",
+      "subtitle": "Tests cover every Prisma read operation across multiple complexity levels",
+      "categories": [
+        {
+          "title": "Query Operations",
+          "items": [
+            "findMany with complex filters",
+            "findFirst with skip & pagination",
+            "findUnique by ID & unique fields",
+            "count with WHERE conditions",
+            "aggregate (sum, avg, min, max)",
+            "groupBy with HAVING clauses"
+          ]
+        },
+        {
+          "title": "Complex Scenarios",
+          "items": [
+            "Nested includes (4 levels deep)",
+            "Relation filters (some/every/none)",
+            "Distinct with window functions",
+            "Cursor pagination",
+            "Select + include combined",
+            "Relation counts (_count)"
+          ]
+        },
+        {
+          "title": "Filter Types",
+          "items": [
+            "Comparison (lt/lte/gt/gte)",
+            "Logical (AND/OR/NOT)",
+            "String ops (contains/startsWith)",
+            "NULL checks (is/isNot)",
+            "IN/NOT IN arrays",
+            "Case sensitivity modes"
+          ]
+        }
+      ]
+    },
+    "databaseSpecific": {
+      "postgres": {
+        "title": "PostgreSQL Testing",
+        "items": [
+          "ILIKE case-insensitive searches",
+          "JSON/JSONB operations",
+          "Array field handling",
+          "Composite type support",
+          "Window function validation",
+          "Transaction isolation testing"
+        ]
+      },
+      "sqlite": {
+        "title": "SQLite Testing",
+        "items": [
+          "LIKE pattern matching",
+          "JSON1 extension validation",
+          "Window function emulation",
+          "DISTINCT optimization",
+          "Subquery correlation",
+          "Text affinity handling"
+        ]
+      }
+    },
+    "example": {
+      "title": "Example Test Case",
+      "subtitle": "See how we validate a complex nested query with relation filters",
+      "filename": "tests/e2e/postgres.test.ts",
+      "code": "it('nested relation filter', () =>\n  runParityTest(\n    db,\n    benchmarkResults,\n    'findMany nested relation',\n    'Organization',\n    {\n      method: 'findMany',\n      where: {\n        projects: {\n          some: {\n            tasks: { some: { status: 'DONE' } }\n          }\n        }\n      }\n    },\n    () => db.prisma.organization.findMany({\n      where: {\n        projects: {\n          some: {\n            tasks: { some: { status: 'DONE' } }\n          }\n        }\n      },\n      orderBy: { id: 'asc' }\n    }),\n  )\n)\n\n// runParityTest internally:\n// 1. Calls generateSQL() with the args\n// 2. Executes generated SQL directly\n// 3. Executes Prisma query\n// 4. Normalizes both results\n// 5. Deep equality check - fails if any difference\n// 6. Benchmarks execution time"
+    },
+    "executionFlow": {
+      "title": "What Happens During Test Execution",
+      "steps": [
+        {
+          "number": "1",
+          "title": "Query Generation (Microseconds)",
+          "description": "The generateSQL() function parses Prisma args and creates parameterized SQL. This step is benchmarked separately to measure query generation overhead."
+        },
+        {
+          "number": "2",
+          "title": "Parallel Execution (Milliseconds)",
+          "description": "Both queries hit the same database state simultaneously using Promise.all(), ensuring fair comparison and identical data conditions."
+        },
+        {
+          "number": "3",
+          "title": "Deep Normalization",
+          "description": "Results undergo recursive normalization: BigInt→Number, Decimal→Float(10), Date→null, JSON parse, key sorting. This ensures byte-for-byte comparison accuracy."
+        },
+        {
+          "number": "4",
+          "title": "Strict Equality",
+          "description": "JSON stringify comparison with zero tolerance. Any mismatch in row count, field values, nested objects, or ordering fails the test with detailed diff output."
+        },
+        {
+          "number": "5",
+          "title": "Performance Measurement",
+          "description": "After validation, 5-50 iterations measure average execution time. Results include: Prisma v6, Prisma v7, Drizzle ORM, Generated SQL, and SQL generation overhead."
+        }
+      ]
+    },
+    "multiVersion": {
+      "title": "Multi-Version Validation",
+      "description": "Every test runs against both Prisma v6 and v7 to ensure compatibility across versions:",
+      "v6": {
+        "title": "Prisma v6 (6.16.3)",
+        "items": [
+          "Direct PrismaClient usage",
+          "Legacy engine architecture",
+          "Baseline performance metrics"
+        ]
+      },
+      "v7": {
+        "title": "Prisma v7 (7.2.0)",
+        "items": [
+          "Adapter-based architecture",
+          "@prisma/adapter-pg & adapter-better-sqlite3",
+          "New engine optimizations"
+        ]
+      }
+    },
+    "benchmarkReports": {
+      "title": "Automated Benchmark Reports",
+      "description": "All benchmark results are automatically generated and stored as JSON files for complete transparency:",
+      "files": [
+        "benchmark-results/v6-postgres-latest.json",
+        "benchmark-results/v7-postgres-latest.json",
+        "benchmark-results/v6-sqlite-latest.json",
+        "benchmark-results/v7-sqlite-latest.json"
+      ],
+      "footer": "Each file contains: test name, Prisma execution time, generated SQL time, Drizzle time, speedup ratios, and ISO timestamp."
+    },
+    "cta": {
+      "title": "Explore the Full Test Suite",
+      "subtitle": "All 137 tests are open source. Review the test code, benchmarks, and validation logic.",
+      "button1": "View Test Suite →",
+      "button2": "See Benchmarks"
+    }
   }
 }

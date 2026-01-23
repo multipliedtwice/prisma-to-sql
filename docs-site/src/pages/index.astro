@@ -14,6 +14,7 @@ import CTA from '../components/CTA.astro';
 import Footer from '../components/Footer.astro';
 
 import en from '../i18n/en.json';
+import TestingCallout from '../components/TestingCallout.astro';
 
 const t = en;
 const locale = 'en';
@@ -30,6 +31,7 @@ const locale = 'en';
   <Stats t={t} />
   <Problem t={t} />
   <Performance t={t} />
+  <TestingCallout t={t} locale={locale} />
   <HowItWorks t={t} />
   <Features t={t} />
   <UseCases t={t} />
