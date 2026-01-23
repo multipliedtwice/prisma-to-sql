@@ -1,82 +1,165 @@
 ---
-import '../styles/global.css';
+import '../styles/global.css'
 
 interface Props {
-  title: string;
-  description: string;
-  locale: string;
-  keywords?: string;
+  title: string
+  description: string
+  locale: string
+  keywords?: string
 }
 
-const { title, description, locale, keywords } = Astro.props;
-const canonicalURL = new URL(Astro.url.pathname, Astro.site);
-const ogImage = `${Astro.site}og-image.png`;
-const base = '/prisma-to-sql';
+const { title, description, locale, keywords } = Astro.props
+const canonicalURL = new URL(Astro.url.pathname, Astro.site)
+const ogImage = `${Astro.site}og-image.png`
+const base = '/prisma-to-sql'
 ---
 
-<!DOCTYPE html>
+<!doctype html>
 <html lang={locale}>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self';">
-  <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+  <head>
+    <meta charset='UTF-8' />
+    <meta
+      name='viewport'
+      content='width=device-width, initial-scale=1.0, maximum-scale=5.0'
+    />
+    <meta
+      http-equiv='Content-Security-Policy'
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self';"
+    />
+    <meta
+      http-equiv='Referrer-Policy'
+      content='strict-origin-when-cross-origin'
+    />
 
-  <title>{title}</title>
-  <meta name="title" content={title}>
-  <meta name="description" content={description}>
-  {keywords && <meta name="keywords" content={keywords}>}
-  <meta name="author" content="multipliedtwice">
-  <meta name="robots" content="index, follow">
+    <title>{title}</title>
+    <meta name='title' content={title} />
+    <meta name='description' content={description} />
+    {keywords && <meta name='keywords' content={keywords} />}
+    <meta name='author' content='multipliedtwice' />
+    <meta name='robots' content='index, follow' />
 
-  <link rel="canonical" href={canonicalURL}>
-  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
-  <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+    <link rel='canonical' href={canonicalURL} />
+    <link rel='preconnect' href='https://cdnjs.cloudflare.com' crossorigin />
+    <link rel='dns-prefetch' href='https://cdnjs.cloudflare.com' />
 
-  <meta property="og:type" content="website">
-  <meta property="og:url" content={canonicalURL}>
-  <meta property="og:title" content={title}>
-  <meta property="og:description" content={description}>
-  <meta property="og:image" content={ogImage}>
+    <meta property='og:type' content='website' />
+    <meta property='og:url' content={canonicalURL} />
+    <meta property='og:title' content={title} />
+    <meta property='og:description' content={description} />
+    <meta property='og:image' content={ogImage} />
 
-  <meta property="twitter:card" content="summary_large_image">
-  <meta property="twitter:url" content={canonicalURL}>
-  <meta property="twitter:title" content={title}>
-  <meta property="twitter:description" content={description}>
-  <meta property="twitter:image" content={ogImage}>
+    <meta property='twitter:card' content='summary_large_image' />
+    <meta property='twitter:url' content={canonicalURL} />
+    <meta property='twitter:title' content={title} />
+    <meta property='twitter:description' content={description} />
+    <meta property='twitter:image' content={ogImage} />
 
-  <link rel="icon" type="image/x-icon" href={`${base}/favicon.ico`}>
-  <link rel="icon" type="image/svg+xml" href={`${base}/favicon.svg`}>
-  <link rel="icon" type="image/png" sizes="16x16" href={`${base}/favicon-16x16.png`}>
-  <link rel="icon" type="image/png" sizes="32x32" href={`${base}/favicon-32x32.png`}>
-  <link rel="icon" type="image/png" sizes="96x96" href={`${base}/favicon-96x96.png`}>
-  <link rel="apple-touch-icon" sizes="180x180" href={`${base}/apple-touch-icon.png`}>
-  <link rel="manifest" href={`${base}/site.webmanifest`}>
+    <link rel='icon' type='image/x-icon' href={`${base}/favicon.ico`} />
+    <link rel='icon' type='image/svg+xml' href={`${base}/favicon.svg`} />
+    <link
+      rel='icon'
+      type='image/png'
+      sizes='16x16'
+      href={`${base}/favicon-16x16.png`}
+    />
+    <link
+      rel='icon'
+      type='image/png'
+      sizes='32x32'
+      href={`${base}/favicon-32x32.png`}
+    />
+    <link
+      rel='icon'
+      type='image/png'
+      sizes='96x96'
+      href={`${base}/favicon-96x96.png`}
+    />
+    <link
+      rel='apple-touch-icon'
+      sizes='180x180'
+      href={`${base}/apple-touch-icon.png`}
+    />
+    <link rel='manifest' href={`${base}/site.webmanifest`} />
 
-  <style>
-    .gradient-text{background:linear-gradient(135deg,#48BB78 0%,#38A169 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.metric-card{transition:transform .2s,box-shadow .2s}.metric-card:hover{transform:translateY(-4px);box-shadow:0 20px 25px -5px rgba(0,0,0,.1),0 10px 10px -5px rgba(0,0,0,.04)}.feature-card{transition:all .3s ease}.feature-card:hover{transform:translateY(-2px)}@keyframes fadeIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}.animate-fade-in{animation:fadeIn .6s ease-out}pre{overflow-x:auto;-webkit-overflow-scrolling:touch}pre::-webkit-scrollbar{height:6px}pre::-webkit-scrollbar-track{background:#1f2937}pre::-webkit-scrollbar-thumb{background:#4b5563;border-radius:3px}
-  </style>
-
-  <slot name="head" />
-</head>
-<body class="bg-gray-50">
-  <slot />
-  
-  <script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" async></script>
-  <script is:inline>
-    if ('loading' in HTMLScriptElement.prototype) {
-      document.addEventListener('DOMContentLoaded', function() {
-        if (typeof hljs !== 'undefined') {
-          hljs.highlightAll();
+    <style>
+      .gradient-text {
+        background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .metric-card {
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+      }
+      .metric-card:hover {
+        transform: translateY(-4px);
+        box-shadow:
+          0 20px 25px -5px rgba(0, 0, 0, 0.1),
+          0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      }
+      .feature-card {
+        transition: all 0.3s ease;
+      }
+      .feature-card:hover {
+        transform: translateY(-2px);
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
         }
-      });
-    } else {
-      window.addEventListener('load', function() {
-        if (typeof hljs !== 'undefined') {
-          hljs.highlightAll();
+        to {
+          opacity: 1;
+          transform: translateY(0);
         }
-      });
-    }
-  </script>
-</body>
+      }
+      .animate-fade-in {
+        animation: fadeIn 0.6s ease-out;
+      }
+      pre {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      pre::-webkit-scrollbar {
+        height: 6px;
+      }
+      pre::-webkit-scrollbar-track {
+        background: #1f2937;
+      }
+      pre::-webkit-scrollbar-thumb {
+        background: #4b5563;
+        border-radius: 3px;
+      }
+    </style>
+
+    <slot name='head' />
+  </head>
+  <body class='bg-gray-50'>
+    <main>
+      <slot />
+    </main>
+    <slot />
+
+    <script
+      is:inline
+      src='https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js'
+      async></script>
+    <script is:inline>
+      if ('loading' in HTMLScriptElement.prototype) {
+        document.addEventListener('DOMContentLoaded', function () {
+          if (typeof hljs !== 'undefined') {
+            hljs.highlightAll()
+          }
+        })
+      } else {
+        window.addEventListener('load', function () {
+          if (typeof hljs !== 'undefined') {
+            hljs.highlightAll()
+          }
+        })
+      }
+    </script>
+  </body>
 </html>
