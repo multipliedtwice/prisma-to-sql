@@ -5,20 +5,19 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    testTimeout: 30000,
-    hookTimeout: 30000,
-    include: ['tests/unit/**/*.test.ts', 'tests/integration/**/*.test.ts'],
+    testTimeout: 120000,
+    hookTimeout: 120000,
+    include: ['tests/e2e/**/*.test.ts'],
     exclude: [
       ...configDefaults.exclude,
-      'tests/e2e/**',
       '**/node_modules/**',
       '**/dist/**',
       '/tests/generated/**',
       '/tests/prisma/*.full.prisma',
       '/tests/prisma/db.sqlite*',
     ],
-    // Unit tests CAN run in parallel
-    fileParallelism: true,
+    // CRITICAL: e2e tests MUST run sequentially (Prisma version switching)
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -35,6 +34,16 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    watch: {
+      ignored: [
+        '**/node_modules/**',
+        '**/tests/generated/**',
+        '**/tests/prisma/*.full.prisma',
+        '**/tests/prisma/db.sqlite*',
+      ],
     },
   },
 })

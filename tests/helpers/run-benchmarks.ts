@@ -87,10 +87,14 @@ async function runBenchmark(
   }
 
   try {
-    execSync(`npx vitest run ${testFile} --reporter=dot`, {
-      env,
-      stdio: 'inherit',
-    })
+    // Use the e2e config explicitly
+    execSync(
+      `npx vitest run ${testFile} --config vitest.config.e2e.ts --reporter=dot`,
+      {
+        env,
+        stdio: 'inherit',
+      },
+    )
   } catch (error) {
     console.error(`Benchmark failed for v${version} ${dialect}`)
     throw error
