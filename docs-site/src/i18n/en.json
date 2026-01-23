@@ -595,5 +595,310 @@
       "button1": "View Test Suite →",
       "button2": "See Benchmarks"
     }
+  },
+  "sqlPrevention": {
+    "meta": {
+      "title": "SQL Injection Prevention - Prisma-SQL Security",
+      "description": "SQL injection prevention methodology using parameter binding, schema-based validation, and 137 security-focused tests (current suite)",
+      "keywords": "sql injection prevention, parameterized queries, sql security, database security, prisma security"
+    },
+    "hero": {
+      "badge": "🔒 Security First",
+      "title": "SQL Injection",
+      "titleHighlight": "Prevention",
+      "subtitle": "User-provided values are never interpolated into SQL text — values are bound via parameter placeholders (dialect-specific, e.g. $1 or ?)"
+    },
+    "stats": [
+      {
+        "value": "100%",
+        "label": "Parameter Bound",
+        "description": "All user-provided values use placeholders"
+      },
+      {
+        "value": "Zero",
+        "label": "Value Interpolation",
+        "description": "User data never appears in SQL text"
+      },
+      {
+        "value": "Guaranteed",
+        "label": "Order Preservation",
+        "description": "Placeholders map to params 1:1"
+      },
+      {
+        "value": "137",
+        "label": "Security Tests",
+        "description": "Injection attempt coverage (current suite)"
+      }
+    ],
+    "threat": {
+      "title": "Understanding SQL Injection",
+      "subtitle": "SQL injection remains one of the most critical web application vulnerabilities",
+      "description": "SQL injection occurs when untrusted data is incorporated into SQL text without safe parameter binding. Attackers can manipulate query meaning to access unauthorized data, modify records, or trigger unintended operations.",
+      "examples": {
+        "title": "Common Attack Patterns",
+        "items": [
+          {
+            "name": "Authentication Bypass",
+            "attack": "admin' OR '1'='1",
+            "description": "Attempts to bypass login by making the WHERE condition always true"
+          },
+          {
+            "name": "Data Exfiltration",
+            "attack": "' UNION SELECT password FROM users--",
+            "description": "Uses UNION to attempt extracting data from other tables"
+          },
+          {
+            "name": "Destructive Commands",
+            "attack": "'; DROP TABLE users; --",
+            "description": "Attempts to append extra statements to delete data"
+          },
+          {
+            "name": "Parameter Order Bug Abuse",
+            "attack": "Exploit: If placeholders and params are mismatched, authorization checks may use the wrong values",
+            "description": "Example: WHERE userId=$1 AND isAdmin=$2, but params=[true, 123] instead of [123, true] can incorrectly grant admin access"
+          }
+        ]
+      }
+    },
+    "protection": {
+      "title": "Multi-Layer Protection Strategy",
+      "subtitle": "Every query passes through multiple security validation layers",
+      "layers": [
+        {
+          "title": "Layer 1: Automatic Parameter Binding",
+          "description": "All user-provided values are converted into bound parameters. Values do not enter SQL text as literals.",
+          "guarantees": [
+            "User values are represented using dialect-specific placeholders (e.g. $1 or ?)",
+            "Array inputs are parameterized (expanded placeholders or array parameters depending on dialect/strategy)",
+            "NULL and optional values handled without concatenating user input into SQL text",
+            "Date/time values are parameterized",
+            "JSON values are parameterized"
+          ]
+        },
+        {
+          "title": "Layer 2: Field Name Validation",
+          "description": "Every field name is validated against the Prisma schema metadata before query generation.",
+          "guarantees": [
+            "Only schema-defined fields are allowed",
+            "Relation filters validated via schema metadata",
+            "No arbitrary field names accepted",
+            "Unsupported/computed fields rejected where applicable",
+            "Prototype pollution payloads are rejected (e.g. __proto__, constructor)"
+          ]
+        },
+        {
+          "title": "Layer 3: Identifier Sanitization",
+          "description": "Table names, column names, and aliases are validated and safely quoted/escaped as required.",
+          "guarantees": [
+            "Control characters rejected",
+            "Reserved keywords are quoted when needed",
+            "Schema qualification supported where configured",
+            "Double-quote escaping (or dialect equivalent) for identifiers",
+            "Maximum identifier length enforced per dialect"
+          ]
+        },
+        {
+          "title": "Layer 4: Operator Validation",
+          "description": "Only known, safe operators are allowed for each field type.",
+          "guarantees": [
+            "String operators: contains, startsWith, endsWith",
+            "Numeric operators: lt, lte, gt, gte",
+            "Array operators: in, notIn with type validation",
+            "Logical operators: AND, OR, NOT validated structurally",
+            "Unknown operators rejected immediately"
+          ]
+        },
+        {
+          "title": "Layer 5: Parameter Order Guarantee",
+          "description": "Strict ordering ensures each placeholder maps to exactly one parameter in insertion order, preventing mismatches.",
+          "guarantees": [
+            "Sequential counter prevents reordering",
+            "Lockstep SQL building and param array construction",
+            "No intermediate buffer or reordering operations",
+            "Test verification: generated SQL and params always align",
+            "One-to-one correspondence: placeholder N → params[N-1] (or equivalent mapping for the dialect)"
+          ]
+        }
+      ]
+    },
+    "formalProofs": {
+      "title": "Formal Security Guarantees",
+      "subtitle": "Proof sketches for injection resistance under stated design assumptions (parameter binding, no raw-SQL bypass, correct driver usage)",
+      "proofs": [
+        {
+          "title": "Theorem 1: Value Isolation",
+          "statement": "For all user-provided values V, there exists no execution path where V appears as SQL text in the generated query string.",
+          "proof": "By construction, all code paths that handle user values call addParameter(value) which:\n1. Stores the value in a separate params array\n2. Returns a placeholder token for the SQL text\n3. Only the placeholder token is appended into the SQL string\n4. The database driver receives SQL text and parameter values separately\n∴ User values are not parsed as SQL syntax",
+          "code": "const addParameter = (params: any[], value: any) => {\n  params.push(value)\n  const index = params.length\n  return `$${index}`\n}"
+        },
+        {
+          "title": "Theorem 2: Field Name Closure",
+          "statement": "The set of field names F in any generated query is a subset of schema-defined fields S, i.e., F ⊆ S.",
+          "proof": "For every field reference:\n1. Field name extracted from query object\n2. Lookup performed against schema metadata\n3. If the field does not exist in the schema, an error is thrown\n4. Only validated fields reach SQL generation\n∴ Arbitrary field names cannot appear in SQL",
+          "code": "const validateField = (field: string, model: Model) => {\n  if (!model.fields.has(field)) {\n    throw new Error(`Field ${field} does not exist`)\n  }\n  return model.fields.get(field)\n}"
+        },
+        {
+          "title": "Theorem 3: Operator Safety",
+          "statement": "For any operator O applied to field F, O is a member of the allowed operators for F's type T.",
+          "proof": "Operator validation algorithm:\n1. Extract field type T from schema\n2. Define allowed_ops(T) = { valid operators for type T }\n3. For operator O in query:\n   - If O ∉ allowed_ops(T), throw error\n   - Else apply operator using parameter binding\n∴ Only type-appropriate operators can be used",
+          "code": "const ALLOWED_OPS: Record<string, string[]> = {\n  String: ['contains', 'startsWith', 'endsWith'],\n  Int: ['lt', 'lte', 'gt', 'gte']\n}\nif (!ALLOWED_OPS[fieldType]?.includes(operator)) {\n  throw new Error('Invalid operator')\n}"
+        },
+        {
+          "title": "Theorem 4: Identifier Safety",
+          "statement": "All SQL identifiers I are validated to prevent control characters and to ensure safe quoting/escaping per dialect.",
+          "proof": "Identifier processing:\n1. Reject if contains control characters\n2. Escape internal quote characters per dialect rules\n3. Quote identifiers when required (reserved keywords or special characters)\n4. Enforce per-dialect identifier length limits\n∴ Identifiers cannot break SQL syntax or introduce injected tokens",
+          "code": "const quoteIdentifier = (id: string) => {\n  if (/[\\x00-\\x1F]/.test(id)) {\n    throw new Error('Invalid characters')\n  }\n  const escaped = id.replace(/\"/g, '\"\"')\n  const needsQuoting = /[^a-z0-9_]/i.test(id) || isReservedKeyword(id)\n  return needsQuoting ? `\"${escaped}\"` : id\n}"
+        },
+        {
+          "title": "Theorem 5: Parameter Order Consistency",
+          "statement": "For every placeholder position N emitted into the SQL text, params[N-1] contains the exact value intended for that position, with no reordering or mismatch.",
+          "proof": "Parameter ordering guarantee:\n1. A single tracker maintains insertion order\n2. Each add() call appends the value to params and immediately emits the next placeholder token\n3. SQL text construction and params construction proceed in lockstep\n4. No intermediate reordering operations occur\n∴ One-to-one correspondence is maintained throughout",
+          "code": "class ParameterTracker {\n  private params: any[] = []\n\n  add(value: any): string {\n    this.params.push(value)\n    return `$${this.params.length}`\n  }\n\n  getParams(): any[] {\n    return this.params\n  }\n}\n\nconst tracker = new ParameterTracker()\nconst sql = `WHERE email = ${tracker.add(email)} AND age > ${tracker.add(age)}`\nconst params = tracker.getParams()"
+        }
+      ]
+    },
+    "testCoverage": {
+      "title": "Comprehensive Security Test Coverage",
+      "subtitle": "137 tests validate protection against common SQL injection vectors and edge cases (current suite)",
+      "categories": [
+        {
+          "title": "Value Parameterization (basic.test.ts)",
+          "tests": [
+            "Strings with quotes: user'with'quotes",
+            "Strings with semicolons: user;extra",
+            "SQL keywords as values: DROP TABLE users",
+            "Complex injection: '; DROP TABLE users; --",
+            "Union attacks: ' UNION SELECT * FROM users--",
+            "Boolean attacks: admin' OR '1'='1",
+            "Comment injection: test@example.com' -- comment"
+          ]
+        },
+        {
+          "title": "Field Name Validation (identifiers.test.ts)",
+          "tests": [
+            "Reject malicious field names in SELECT",
+            "Reject malicious field names in WHERE",
+            "Reject malicious field names in ORDER BY",
+            "Reject SQL injection in field names",
+            "Reject non-existent fields",
+            "Reject prototype pollution: __proto__, constructor"
+          ]
+        },
+        {
+          "title": "LIKE Pattern Safety (like-patterns.test.ts)",
+          "tests": [
+            "Wildcard injection: %' OR '1'='1",
+            "Underscore injection: test_' OR '1'='1",
+            "Backslash handling: test\\\\'; DROP--",
+            "Multiple wildcards: %_%'; DROP--",
+            "Case insensitive injection: '; UNION SELECT--"
+          ]
+        },
+        {
+          "title": "Array Operator Safety (array-operators.test.ts)",
+          "tests": [
+            "IN with malicious arrays: ['; DROP--', 'UNION SELECT--']",
+            "NOT IN with injection: ['; TRUNCATE--', 'DELETE FROM--']",
+            "Empty array handling",
+            "Large array validation (100+ items)",
+            "Mixed type array handling"
+          ]
+        },
+        {
+          "title": "Edge Cases (edge-cases.test.ts)",
+          "tests": [
+            "Unicode injection: \\u0027 OR \\u00271\\u0027=\\u00271",
+            "Hex-encoded injection: 0x31=0x31--",
+            "URL encoded: %27%3B%20DROP%20TABLE",
+            "Stacked queries: '; DROP TABLE users; SELECT",
+            "Time-based blind (dialect-specific): WAITFOR DELAY '00:00:05'--",
+            "UNION-based: UNION ALL SELECT null, password",
+            "Second-order injection attempts"
+          ]
+        },
+        {
+          "title": "Parameter Order Verification (basic.test.ts)",
+          "tests": [
+            "Sequential placeholder positions",
+            "Parameter array matches placeholder order",
+            "Complex queries maintain order across conditions",
+            "Nested OR/AND conditions preserve parameter sequence",
+            "Relation filters maintain correct parameter mapping"
+          ]
+        }
+      ]
+    },
+    "codeExamples": {
+      "title": "Safe vs. Unsafe: Code Comparison",
+      "unsafe": {
+        "title": "❌ Unsafe: String Concatenation",
+        "code": "const email = req.body.email\nconst sql = \"SELECT * FROM users WHERE email = '\" + email + \"'\""
+      },
+      "safe": {
+        "title": "✅ Safe: Automatic Parameter Binding",
+        "code": "const email = req.body.email\nconst { sql, params } = toSQL('User', 'findMany', {\n  where: { email }\n})\n\nconst result = { sql, params }"
+      }
+    },
+    "implementation": {
+      "title": "Implementation Details",
+      "sections": [
+        {
+          "title": "Parameter Management",
+          "description": "Centralized parameter tracking ensures every user-provided value is parameter bound and order-stable",
+          "code": "class ParameterTracker {\n  private params: any[] = []\n\n  add(value: any): string {\n    this.params.push(value)\n    return `$${this.params.length}`\n  }\n\n  getParams(): any[] {\n    return this.params\n  }\n}"
+        },
+        {
+          "title": "Field Validation",
+          "description": "Schema-based validation prevents arbitrary field access",
+          "code": "function validateField(\n  fieldName: string,\n  model: ModelInfo\n): FieldInfo {\n  const field = model.fields.get(fieldName)\n  if (!field) {\n    throw new Error(\n      `Field \"${fieldName}\" does not exist`\n    )\n  }\n  return field\n}"
+        },
+        {
+          "title": "Identifier Quoting",
+          "description": "Dialect-aware identifier validation and quoting prevents identifier-based syntax injection",
+          "code": "function quoteIdentifier(identifier: string): string {\n  if (/[\\x00-\\x1F]/.test(identifier)) {\n    throw new Error('Invalid control characters')\n  }\n\n  const escaped = identifier.replace(/\"/g, '\"\"')\n  const needsQuoting = /[^a-z0-9_]/i.test(identifier) || isReservedKeyword(identifier)\n\n  if (needsQuoting) {\n    return `\"${escaped}\"`\n  }\n\n  return identifier\n}"
+        }
+      ]
+    },
+    "bestPractices": {
+      "title": "Security Best Practices",
+      "practices": [
+        {
+          "title": "Never Disable Validation",
+          "description": "Do not bypass schema validation or field checking. These are critical security layers.",
+          "do": "Use the library as designed with full validation",
+          "dont": "Bypass schema validation or inject raw SQL into query text"
+        },
+        {
+          "title": "Keep Schema Updated",
+          "description": "Ensure your Prisma schema accurately reflects your database structure.",
+          "do": "Run prisma db pull and prisma generate after schema changes",
+          "dont": "Use outdated DMMF or schema definitions"
+        },
+        {
+          "title": "Validate Input Types",
+          "description": "TypeScript provides compile-time safety, but runtime validation adds defense in depth.",
+          "do": "Use Prisma's generated types for query arguments",
+          "dont": "Cast user input to any before passing to queries"
+        },
+        {
+          "title": "Monitor Query Patterns",
+          "description": "Log and monitor generated SQL and parameters in production to detect anomalies and misuse.",
+          "do": "Enable query logging and review patterns",
+          "dont": "Run in production without monitoring"
+        }
+      ]
+    },
+    "securityCallout": {
+      "badge": "🔒 Verified Secure",
+      "title": "How do we prevent SQL injection?",
+      "description": "Multi-layer validation with parameter binding, schema-based field checks, and 137 security tests (current suite)",
+      "link": "View Security Details →"
+    },
+    "cta": {
+      "title": "Security Through Design",
+      "subtitle": "SQL injection protection is built into every layer of this library. Review the security tests and implementation details directly.",
+      "button1": "View Security Tests →",
+      "button2": "View Source Code"
+    }
   }
 }

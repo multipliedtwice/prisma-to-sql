@@ -4,40 +4,53 @@ interface Props {
 }
 
 const { t } = Astro.props;
-
-const bgColorMap = {
-  accent: 'bg-accent',
-  blue: 'bg-blue-500',
-  purple: 'bg-purple-500',
-  pink: 'bg-pink-500',
-  yellow: 'bg-yellow-500',
-  green: 'bg-green-500'
-} as const;
 ---
 
-<section class="py-12 sm:py-16 lg:py-20 bg-gradient-to-br from-gray-900 to-primary text-white">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="text-center mb-12 sm:mb-16">
-      <h2 class="text-3xl sm:text-4xl font-bold mb-4">{t.features.title}</h2>
-      <p class="text-lg sm:text-xl text-gray-300 px-4">{t.features.subtitle}</p>
+<section class="py-24 bg-gray-900 text-white relative overflow-hidden">
+  <div class="absolute inset-0 bg-grid-pattern opacity-5"></div>
+  
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
+    <div class="text-center mb-16">
+      <h2 class="text-4xl lg:text-5xl font-bold mb-4">{t.features.title}</h2>
+      <p class="text-xl text-gray-400 max-w-3xl mx-auto">{t.features.subtitle}</p>
     </div>
 
-    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-      {t.features.items.map((feature: any) => {
-        const bgColor = bgColorMap[feature.color as keyof typeof bgColorMap] || 'bg-accent';
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
+      {t.features.items.map((feature: any, index: number) => {
+        const colors = [
+          'from-green-500 to-emerald-500',
+          'from-blue-500 to-indigo-500',
+          'from-purple-500 to-pink-500',
+          'from-orange-500 to-red-500',
+          'from-yellow-500 to-orange-500',
+          'from-teal-500 to-cyan-500'
+        ];
+        const gradient = colors[index % colors.length];
         
         return (
-          <article class="feature-card bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div class={`w-12 h-12 ${bgColor} rounded-lg flex items-center justify-center mb-4`}>
-              <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={feature.iconPath}></path>
+          <div class="group relative bg-gray-800/50 backdrop-blur-sm rounded-2xl p-8 border border-gray-700 hover:border-gray-600 transition-all duration-300 hover:-translate-y-2">
+            <div class={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-0 group-hover:opacity-10 rounded-2xl transition-opacity duration-300`}></div>
+            
+            <div class={`w-14 h-14 bg-gradient-to-br ${gradient} rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300`}>
+              <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={feature.iconPath}/>
               </svg>
             </div>
-            <h3 class="text-lg sm:text-xl font-bold mb-3">{feature.title}</h3>
-            <p class="text-sm sm:text-base text-gray-300">{feature.description}</p>
-          </article>
+            
+            <h3 class="text-xl font-bold mb-3 text-white">{feature.title}</h3>
+            <p class="text-gray-400 leading-relaxed">{feature.description}</p>
+          </div>
         );
       })}
     </div>
   </div>
 </section>
+
+<style>
+  .bg-grid-pattern {
+    background-image: 
+      linear-gradient(to right, #ffffff 1px, transparent 1px),
+      linear-gradient(to bottom, #ffffff 1px, transparent 1px);
+    background-size: 3rem 3rem;
+  }
+</style>

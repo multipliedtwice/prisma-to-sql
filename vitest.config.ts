@@ -7,7 +7,11 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 30000,
     hookTimeout: 30000,
-    include: ['tests/unit/**/*.test.ts', 'tests/integration/**/*.test.ts'],
+    include: [
+      'tests/unit/**/*.test.ts',
+      'tests/integration/**/*.test.ts',
+      'tests/sql-injection/**/*.test.ts',
+    ],
     exclude: [
       ...configDefaults.exclude,
       'tests/e2e/**',

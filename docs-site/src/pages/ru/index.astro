@@ -15,6 +15,7 @@ import Footer from '../../components/Footer.astro';
 
 import ru from '../../i18n/ru.json';
 import TestingCallout from '../../components/TestingCallout.astro';
+import SecurityCallout from '../../components/SecurityCallout.astro';
 
 const t = ru;
 const locale = 'ru';
@@ -33,6 +34,7 @@ const locale = 'ru';
   <Performance t={t} />
   <TestingCallout t={t} locale={locale} />
   <HowItWorks t={t} />
+  <SecurityCallout t={t} locale={locale} />
   <Features t={t} />
   <UseCases t={t} />
   <Installation t={t} />
