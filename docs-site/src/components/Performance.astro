@@ -1,5 +1,4 @@
 ---
-// docs-site/src/components/Performance.astro
 interface Props {
   t: any;
 }
@@ -58,16 +57,16 @@ const colorMap = {
                 {comparison.time}
               </span>
             </div>
-            <div class="w-full bg-gray-200 rounded-full h-4" role="progressbar" aria-valuenow={comparison.width} aria-valuemin="0" aria-valuemax="100">
-              <div class={`${comparison.bgColor} h-4 rounded-full`} style={`width: ${comparison.width}%`}></div>
+            <div class="w-full bg-gray-200 rounded-full h-4" role="progressbar" aria-valuenow={comparison.width} aria-valuemin="0" aria-valuemax="100" aria-label={`${comparison.label}: ${comparison.time}`}>
+              <div class={`${comparison.bgColor} h-4 rounded-full transition-all`} style={`width: ${comparison.width}%`}></div>
             </div>
           </div>
         ))}
       </div>
 
-      <p class="text-xs sm:text-sm text-gray-500 mt-6 text-center px-4">
+      <p class="text-xs sm:text-sm text-gray-600 mt-6 text-center px-4">
         {t.performance.footer}
-        <a href="https://github.com/multipliedtwice/prisma-to-sql#performance" class="text-accent hover:underline">
+        <a href="https://github.com/multipliedtwice/prisma-to-sql#performance" class="text-accent hover:text-green-700 underline decoration-2 underline-offset-2">
           {t.performance.footerLink} →
         </a>
       </p>

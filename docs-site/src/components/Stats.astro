@@ -11,13 +11,13 @@ const { t } = Astro.props;
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 text-center">
       {t.stats.map((stat: any) => (
         <div class="metric-card p-4 sm:p-6">
-          <div class={`text-3xl sm:text-4xl lg:text-5xl font-bold mb-2 ${stat.color}`}>
+          <div class={`text-3xl sm:text-4xl lg:text-5xl font-bold mb-2 ${stat.color === 'text-accent' ? 'text-green-700' : stat.color}`}>
             {stat.value}
           </div>
-          <div class="text-sm sm:text-base text-gray-600 font-semibold">
+          <div class="text-sm sm:text-base text-gray-700 font-semibold">
             {stat.label}
           </div>
-          <div class="text-xs sm:text-sm text-gray-500 mt-1">
+          <div class="text-xs sm:text-sm text-gray-600 mt-1">
             {stat.subtitle}
           </div>
         </div>
