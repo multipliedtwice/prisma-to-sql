@@ -1,0 +1,41 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-gray-50">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12">
+      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-4">{t.installation.title}</h2>
+      <p class="text-lg sm:text-xl text-gray-600 px-4">{t.installation.subtitle}</p>
+    </div>
+
+    <div class="space-y-6 sm:space-y-8">
+      {t.installation.steps.map((step: any, index: number) => {
+        const gradients = [
+          'from-accent to-green-600',
+          'from-blue-500 to-blue-600',
+          'from-purple-500 to-purple-600'
+        ];
+        
+        return (
+          <article class="bg-white rounded-xl overflow-hidden shadow-sm">
+            <div class={`bg-gradient-to-r ${gradients[index]} px-4 sm:px-6 py-3 sm:py-4`}>
+              <h3 class="text-white font-bold text-base sm:text-lg">
+                {index === 0 ? '①' : index === 1 ? '②' : '③'} {step.title}
+              </h3>
+            </div>
+            <div class="p-4 sm:p-6">
+              <div class="code-block bg-gray-900 border border-gray-700 overflow-hidden rounded-lg">
+                <pre class="p-3 sm:p-4 overflow-x-auto text-xs sm:text-sm"><code class={step.language}>{step.code}</code></pre>
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  </div>
+</section>

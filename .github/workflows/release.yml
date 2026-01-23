@@ -1,4 +1,5 @@
 name: CI
+
 on:
   push:
     branches:
@@ -11,9 +12,15 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: false
 
 jobs:
-  Test_and_Coverage:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,23 +37,11 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
-      - name: Build
+      - name: Build package
         run: yarn build
 
-      # - name: Run tests and collect coverage
-      #   run: yarn test:coverage
-
-      # - name: Upload coverage to Codecov
-      #   uses: codecov/codecov-action@v4
-      #   with:
-      #     files: ./coverage/lcov.info
-      #     flags: unittests
-      #     verbose: true
-      #   env:
-      #     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-  Publish:
-    needs: Test_and_Coverage
+  publish:
+    needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
@@ -65,11 +60,49 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
-      - name: Build
+      - name: Build package
         run: yarn build
 
-      - name: Publish 🚀
+      - name: Publish to NPM 🚀
         run: npx semantic-release
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  build-docs:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: |
+          yarn install --immutable
+          cd docs-site && yarn install --immutable
+
+      - name: Build Astro site
+        run: cd docs-site && yarn build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs
+
+  deploy-pages:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

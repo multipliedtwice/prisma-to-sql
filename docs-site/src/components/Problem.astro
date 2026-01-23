@@ -1,0 +1,80 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-gray-50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sm:mb-16">
+      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-4">{t.problem.title}</h2>
+      <p class="text-lg sm:text-xl text-gray-600 max-w-3xl mx-auto px-4">
+        {t.problem.subtitle}
+      </p>
+    </div>
+
+    <div class="max-w-5xl mx-auto mb-12 sm:mb-16">
+      <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-6 sm:p-8 rounded-r-lg shadow-sm">
+        <div class="flex items-start mb-6">
+          <div class="flex-shrink-0">
+            <svg class="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+            </svg>
+          </div>
+          <div class="ml-4">
+            <h3 class="text-xl sm:text-2xl font-bold text-blue-900 mb-4">{t.problem.historyTitle}</h3>
+
+            <div class="space-y-4 text-sm sm:text-base text-blue-900">
+              {t.problem.history.map((item: any) => (
+                <div>
+                  <h4 class="font-semibold text-base sm:text-lg mb-2">{item.period}</h4>
+                  <p class="text-blue-800">{item.description}</p>
+                </div>
+              ))}
+
+              <div class="bg-blue-100 border border-blue-300 rounded-lg p-4 mt-6">
+                <h4 class="font-semibold text-base sm:text-lg mb-2">{t.problem.whyExists.title}</h4>
+                <p class="text-blue-800">{t.problem.whyExists.description}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-6 sm:gap-8">
+      {t.problem.technical.map((item: any, index: number) => {
+        const colors = [
+          { border: 'border-blue-400', icon: 'text-blue-600' },
+          { border: 'border-green-400', icon: 'text-green-600' },
+          { border: 'border-purple-400', icon: 'text-purple-600' }
+        ];
+        const color = colors[index];
+        
+        return (
+          <article class={`bg-white border-l-4 ${color.border} p-6 rounded-r-lg shadow-sm`}>
+            <div class="flex items-start">
+              <div class="flex-shrink-0">
+                <svg class={`w-6 h-6 ${color.icon}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={item.iconPath}></path>
+                </svg>
+              </div>
+              <div class="ml-4">
+                <h3 class="text-base sm:text-lg font-semibold text-gray-900 mb-2">{item.title}</h3>
+                <p class="text-sm sm:text-base text-gray-700">{item.description}</p>
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+
+    <div class="mt-12 text-center">
+      <p class="text-base sm:text-lg text-gray-700 max-w-3xl mx-auto px-4">
+        {t.problem.conclusion}
+      </p>
+    </div>
+  </div>
+</section>

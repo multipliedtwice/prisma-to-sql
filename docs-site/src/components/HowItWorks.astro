@@ -1,0 +1,38 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-gray-50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sm:mb-16">
+      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-4">{t.howItWorks.title}</h2>
+      <p class="text-lg sm:text-xl text-gray-600 px-4">{t.howItWorks.subtitle}</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-8 sm:gap-12 items-center">
+      <div>
+        <div class="space-y-6">
+          {t.howItWorks.steps.map((step: any, index: number) => (
+            <article class="flex items-start">
+              <div class="flex-shrink-0 w-10 h-10 bg-accent text-white rounded-full flex items-center justify-center font-bold">
+                {index + 1}
+              </div>
+              <div class="ml-4">
+                <h3 class="text-base sm:text-lg font-semibold text-primary mb-2">{step.title}</h3>
+                <p class="text-sm sm:text-base text-gray-600">{step.description}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div class="bg-gray-900 rounded-xl p-4 sm:p-6 border border-gray-700 overflow-hidden">
+        <pre class="text-xs sm:text-sm overflow-x-auto"><code class="language-typescript">{t.howItWorks.codeExample}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,54 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+
+const gradientMap = {
+  blue: 'from-blue-50 to-blue-100 border-blue-200',
+  purple: 'from-purple-50 to-purple-100 border-purple-200',
+  green: 'from-green-50 to-green-100 border-green-200',
+  orange: 'from-orange-50 to-orange-100 border-orange-200'
+} as const;
+
+const textColorMap = {
+  blue: { title: 'text-blue-900', desc: 'text-blue-800', item: 'text-blue-700', icon: 'text-blue-600' },
+  purple: { title: 'text-purple-900', desc: 'text-purple-800', item: 'text-purple-700', icon: 'text-purple-600' },
+  green: { title: 'text-green-900', desc: 'text-green-800', item: 'text-green-700', icon: 'text-green-600' },
+  orange: { title: 'text-orange-900', desc: 'text-orange-800', item: 'text-orange-700', icon: 'text-orange-600' }
+} as const;
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-white">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sm:mb-16">
+      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-4">{t.useCases.title}</h2>
+      <p class="text-lg sm:text-xl text-gray-600 px-4">{t.useCases.subtitle}</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6 sm:gap-8">
+      {t.useCases.cases.map((useCase: any) => {
+        const gradients = gradientMap[useCase.color as keyof typeof gradientMap] || 'from-blue-50 to-blue-100 border-blue-200';
+        const textColors = textColorMap[useCase.color as keyof typeof textColorMap] || textColorMap.blue;
+        
+        return (
+          <article class={`bg-gradient-to-br ${gradients} rounded-xl p-6 sm:p-8 border`}>
+            <h3 class={`text-xl sm:text-2xl font-bold ${textColors.title} mb-4`}>{useCase.title}</h3>
+            <p class={`text-sm sm:text-base ${textColors.desc} mb-4`}>{useCase.description}</p>
+            <ul class={`space-y-2 text-sm sm:text-base ${textColors.item}`}>
+              {useCase.benefits.map((benefit: string) => (
+                <li class="flex items-start">
+                  <svg class={`w-5 h-5 mr-2 mt-0.5 flex-shrink-0 ${textColors.icon}`} fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                  </svg>
+                  <span>{benefit}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+        );
+      })}
+    </div>
+  </div>
+</section>

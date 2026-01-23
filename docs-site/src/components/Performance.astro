@@ -1,0 +1,76 @@
+---
+// docs-site/src/components/Performance.astro
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+
+const colorMap = {
+  accent: 'text-accent border-accent',
+  blue: 'text-blue-600 border-blue-500',
+  purple: 'text-purple-600 border-purple-500',
+  pink: 'text-pink-600 border-pink-500'
+} as const;
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-white">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sm:mb-16">
+      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-4">{t.performance.title}</h2>
+      <p class="text-lg sm:text-xl text-gray-600 px-4">{t.performance.subtitle}</p>
+      <p class="text-xs sm:text-sm text-gray-500 mt-2 px-4">{t.performance.environment}</p>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-12">
+      {t.performance.metrics.map((metric: any) => {
+        const colors = colorMap[metric.color as keyof typeof colorMap] || colorMap.accent;
+        const [textColor, borderColor] = colors.split(' ');
+        
+        return (
+          <article class={`metric-card bg-white rounded-xl p-6 text-center border-t-4 ${borderColor}`}>
+            <div class={`text-4xl sm:text-5xl font-bold ${textColor} mb-2`}>
+              {metric.value}
+            </div>
+            <div class="text-sm sm:text-base text-gray-600 font-semibold">
+              {metric.label}
+            </div>
+            <div class="text-xs sm:text-sm text-gray-500 mt-2">
+              {metric.subtitle}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+
+    <article class="bg-white rounded-xl p-6 sm:p-8">
+      <h3 class="text-xl sm:text-2xl font-bold text-primary mb-6 text-center">
+        {t.performance.comparisonTitle}
+      </h3>
+      <div class="space-y-6">
+        {t.performance.comparisons.map((comparison: any) => (
+          <div>
+            <div class="flex justify-between mb-2 flex-wrap gap-2">
+              <span class={`font-semibold text-sm sm:text-base ${comparison.color} ${comparison.bold ? 'font-bold' : ''}`}>
+                {comparison.label}
+              </span>
+              <span class={`text-sm sm:text-base ${comparison.color} ${comparison.bold ? 'font-bold' : ''}`}>
+                {comparison.time}
+              </span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-4" role="progressbar" aria-valuenow={comparison.width} aria-valuemin="0" aria-valuemax="100">
+              <div class={`${comparison.bgColor} h-4 rounded-full`} style={`width: ${comparison.width}%`}></div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <p class="text-xs sm:text-sm text-gray-500 mt-6 text-center px-4">
+        {t.performance.footer}
+        <a href="https://github.com/multipliedtwice/prisma-to-sql#performance" class="text-accent hover:underline">
+          {t.performance.footerLink} →
+        </a>
+      </p>
+    </article>
+  </div>
+</section>

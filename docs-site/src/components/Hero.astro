@@ -1,0 +1,59 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+---
+
+<section class="relative overflow-hidden bg-gradient-to-br from-gray-900 via-primary to-gray-800 text-white py-12 sm:py-16 lg:py-20">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center max-w-4xl mx-auto">
+      <div class="inline-block bg-accent/10 text-accent px-3 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-semibold mb-4 sm:mb-6">
+        {t.hero.badge}
+      </div>
+      
+      <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold mb-4 sm:mb-6 leading-tight px-2">
+        {t.hero.title}<br />
+        <span class="gradient-text">{t.hero.titleHighlight}</span>
+      </h1>
+      
+      <p class="text-base sm:text-lg lg:text-xl text-gray-300 mb-6 sm:mb-8 leading-relaxed px-2">
+        {t.hero.description}<br class="hidden sm:inline" />
+        <strong>{t.hero.descriptionBold}</strong> {t.hero.descriptionSuffix}
+      </p>
+      
+      <div class="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-center px-4">
+        <a href="https://www.npmjs.com/package/prisma-sql" class="w-full sm:w-auto bg-accent hover:bg-green-600 text-white font-bold py-3 sm:py-4 px-6 sm:px-8 rounded-lg text-base sm:text-lg transition text-center">
+          {t.hero.cta1}
+        </a>
+        <a href="https://github.com/multipliedtwice/prisma-to-sql#readme" class="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white font-bold py-3 sm:py-4 px-6 sm:px-8 rounded-lg text-base sm:text-lg transition border border-white/20 text-center">
+          {t.hero.cta2}
+        </a>
+      </div>
+
+      <div class="mt-8 sm:mt-12 flex flex-wrap justify-center gap-4 sm:gap-8 text-xs sm:text-sm text-gray-400 px-2">
+        {t.hero.trustBadges.map((badge: string) => (
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 sm:w-5 sm:h-5 text-accent flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            <span>{badge}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <div class="max-w-4xl mx-auto px-4 mt-12 sm:mt-16 animate-fade-in">
+    <div class="code-block bg-gray-900 border border-gray-700 overflow-hidden rounded-lg">
+      <div class="bg-gray-800 px-4 py-2 flex items-center space-x-2 border-b border-gray-700">
+        <div class="w-3 h-3 rounded-full bg-red-500"></div>
+        <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+        <div class="w-3 h-3 rounded-full bg-green-500"></div>
+        <span class="text-gray-400 text-xs sm:text-sm ml-4 truncate">{t.hero.codeTitle}</span>
+      </div>
+      <pre class="p-3 sm:p-4 lg:p-6 overflow-x-auto text-xs sm:text-sm"><code class="language-typescript">{t.hero.codeSnippet}</code></pre>
+    </div>
+  </div>
+</section>

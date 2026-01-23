@@ -1,0 +1,43 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+
+const bgColorMap = {
+  accent: 'bg-accent',
+  blue: 'bg-blue-500',
+  purple: 'bg-purple-500',
+  pink: 'bg-pink-500',
+  yellow: 'bg-yellow-500',
+  green: 'bg-green-500'
+} as const;
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-gradient-to-br from-gray-900 to-primary text-white">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sm:mb-16">
+      <h2 class="text-3xl sm:text-4xl font-bold mb-4">{t.features.title}</h2>
+      <p class="text-lg sm:text-xl text-gray-300 px-4">{t.features.subtitle}</p>
+    </div>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+      {t.features.items.map((feature: any) => {
+        const bgColor = bgColorMap[feature.color as keyof typeof bgColorMap] || 'bg-accent';
+        
+        return (
+          <article class="feature-card bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+            <div class={`w-12 h-12 ${bgColor} rounded-lg flex items-center justify-center mb-4`}>
+              <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={feature.iconPath}></path>
+              </svg>
+            </div>
+            <h3 class="text-lg sm:text-xl font-bold mb-3">{feature.title}</h3>
+            <p class="text-sm sm:text-base text-gray-300">{feature.description}</p>
+          </article>
+        );
+      })}
+    </div>
+  </div>
+</section>

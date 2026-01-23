@@ -1,0 +1,27 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+---
+
+<section class="py-12 sm:py-16 bg-white border-b border-gray-200">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 text-center">
+      {t.stats.map((stat: any) => (
+        <div class="metric-card p-4 sm:p-6">
+          <div class={`text-3xl sm:text-4xl lg:text-5xl font-bold mb-2 ${stat.color}`}>
+            {stat.value}
+          </div>
+          <div class="text-sm sm:text-base text-gray-600 font-semibold">
+            {stat.label}
+          </div>
+          <div class="text-xs sm:text-sm text-gray-500 mt-1">
+            {stat.subtitle}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

@@ -1,0 +1,32 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-white">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12 sm:mb-16">
+      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-4">{t.faq.title}</h2>
+      <p class="text-lg sm:text-xl text-gray-600 px-4">{t.faq.subtitle}</p>
+    </div>
+
+    <div class="space-y-4 sm:space-y-6">
+      {t.faq.questions.map((item: any) => (
+        <details class="bg-gray-50 rounded-lg p-4 sm:p-6 group">
+          <summary class="font-semibold text-base sm:text-lg text-primary cursor-pointer list-none flex justify-between items-center gap-4">
+            <span>{item.question}</span>
+            <svg class="w-5 h-5 transform group-open:rotate-180 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+            </svg>
+          </summary>
+          <div class="mt-4 text-sm sm:text-base text-gray-600">
+            <p>{item.answer}</p>
+          </div>
+        </details>
+      ))}
+    </div>
+  </div>
+</section>
