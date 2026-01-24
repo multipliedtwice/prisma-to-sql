@@ -1,0 +1,44 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Header from '../../components/Header.astro';
+import Hero from '../../components/Hero.astro';
+import Stats from '../../components/Stats.astro';
+import Problem from '../../components/Problem.astro';
+import Performance from '../../components/Performance.astro';
+import HowItWorks from '../../components/HowItWorks.astro';
+import Features from '../../components/Features.astro';
+import UseCases from '../../components/UseCases.astro';
+import Installation from '../../components/Installation.astro';
+import FAQ from '../../components/FAQ.astro';
+import CTA from '../../components/CTA.astro';
+import Footer from '../../components/Footer.astro';
+
+import ur from '../../i18n/ur.json';
+import TestingCallout from '../../components/TestingCallout.astro';
+import SecurityCallout from '../../components/SecurityCallout.astro';
+
+const t = ur;
+const locale = 'ur';
+---
+
+<Layout 
+  title={t.meta.title}
+  description={t.meta.description}
+  locale={locale}
+  keywords={t.meta.keywords}
+>
+  <Header t={t} locale={locale} />
+  <Hero t={t} />
+  <Stats t={t} />
+  <Problem t={t} />
+  <Performance t={t} />
+  <TestingCallout t={t} locale={locale} />
+  <HowItWorks t={t} />
+  <SecurityCallout t={t} locale={locale} />
+  <Features t={t} />
+  <UseCases t={t} />
+  <Installation t={t} />
+  <FAQ t={t} />
+  <CTA t={t} />
+  <Footer t={t} locale={locale} />
+</Layout>

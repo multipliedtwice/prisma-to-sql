@@ -12,10 +12,13 @@ const { title, description, locale, keywords } = Astro.props
 const canonicalURL = new URL(Astro.url.pathname, Astro.site)
 const ogImage = `${Astro.site}og-image.png`
 const base = '/prisma-to-sql'
+
+const rtlLocales = new Set(['ar', 'ur'])
+const dir = rtlLocales.has(locale) ? 'rtl' : 'ltr'
 ---
 
 <!doctype html>
-<html lang={locale}>
+<html lang={locale} dir={dir}>
   <head>
     <meta charset='UTF-8' />
     <meta

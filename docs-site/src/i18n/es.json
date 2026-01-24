@@ -1,0 +1,904 @@
+{
+  "meta": {
+    "title": "Arregla consultas lentas de Prisma: lecturas 2–7× más rápidas (hasta 53.5×) | Prisma-SQL",
+    "description": "¿Prisma va lento? Acelera lecturas lentas de Prisma 2–7× sin refactors. Evita la ruta de ejecución de lecturas de Prisma con ejecución SQL directa en PostgreSQL y SQLite (hasta 53.5× en filtros de relación de SQLite). Optimización lista para producción para cargas de trabajo de Prisma centradas en lecturas.",
+    "keywords": "prisma lento, prisma es lento, rendimiento prisma, arreglar prisma lento, acelerar prisma, optimización prisma, velocidad de consultas prisma, consultas lentas prisma, problemas de rendimiento prisma, hacer prisma más rápido, postgresql, sqlite"
+  },
+  "header": {
+    "cta": "Arreglar Prisma lento →"
+  },
+  "hero": {
+    "badge": "🚀 La solución para Prisma lento",
+    "title": "Arregla consultas lentas de Prisma",
+    "titleHighlight": "Haz tu API 2–7× más rápida (hasta 53.5×)",
+    "description": "¿Prisma va lento? No estás solo. ¿Te encanta el DX de Prisma pero necesitas mejor rendimiento?",
+    "descriptionBold": "Acelera consultas lentas de Prisma 2–7×",
+    "descriptionSuffix": "(hasta 53.5× en filtros de relación de SQLite) sin cambiar ninguna consulta existente.",
+    "cta1": "Acelerar Prisma ahora",
+    "cta2": "Ver cómo funciona",
+    "trustBadges": [
+      "Lecturas de Prisma más rápidas",
+      "Sin cambios de consulta",
+      "Listo para producción",
+      "137 pruebas E2E"
+    ],
+    "codeTitle": "Arregla Prisma lento en una línea",
+    "codeSnippet": "import { PrismaClient, Prisma } from '@prisma/client'\nimport { speedExtension, convertDMMFToModels } from 'prisma-sql'\nimport postgres from 'postgres'\n\nconst sql = postgres(process.env.DATABASE_URL)\nconst models = convertDMMFToModels(Prisma.dmmf.datamodel)\n\nconst prisma = new PrismaClient().$extends(\n  speedExtension({ postgres: sql, models })\n)\n\nconst users = await prisma.user.findMany({\n  where: { status: 'ACTIVE' },\n  include: { posts: true }\n})"
+  },
+  "stats": [
+    {
+      "value": "2–7×",
+      "label": "Lecturas de Prisma más rápidas",
+      "subtitle": "Aceleración típica",
+      "color": "text-accent"
+    },
+    {
+      "value": "0",
+      "label": "Cambios de consulta",
+      "subtitle": "Mantén tus llamadas Prisma existentes",
+      "color": "text-blue-600"
+    },
+    {
+      "value": "137",
+      "label": "Pruebas E2E",
+      "subtitle": "Solución verificada",
+      "color": "text-purple-600"
+    },
+    {
+      "value": "100%",
+      "label": "Seguridad de tipos",
+      "subtitle": "La misma API de Prisma",
+      "color": "text-pink-600"
+    }
+  ],
+  "problem": {
+    "title": "¿Por qué Prisma es lento?",
+    "subtitle": "Entender la evolución de Prisma y sus características de rendimiento ayuda a explicar por qué existe esta extensión.",
+    "historyTitle": "El recorrido de Prisma: DX primero, el rendimiento importa a escala",
+    "history": [
+      {
+        "period": "🎯 2019: El nacimiento de Prisma moderno",
+        "description": "Prisma 2 se lanzó en 2019, cambiando el panorama de ORMs en TypeScript con acceso a base de datos con seguridad de tipos y tipos generados desde tu esquema. Prisma introdujo una arquitectura basada en engine para traducir consultas, validarlas y ofrecer garantías fuertes que eran difíciles de lograr con ORMs tradicionales de JavaScript."
+      },
+      {
+        "period": "⚡ 2020–2022: Crecimiento rápido y expansión de funcionalidades",
+        "description": "Prisma añadió funciones potentes como escrituras anidadas, transacciones y middleware. El conjunto de funciones creció, pero cada consulta seguía pagando un coste arquitectónico: las consultas se representan, validan, ejecutan y los resultados se moldean para coincidir con la API de Prisma."
+      },
+      {
+        "period": "📊 2023: La sobrecarga se vuelve notable a escala",
+        "description": "A medida que más equipos desplegaron Prisma en cargas de trabajo de alto tráfico, la sobrecarga fija por consulta se volvió medible. Esto se ve especialmente en endpoints con muchas lecturas, analítica, agregaciones y conjuntos de resultados grandes. La sobrecarga no es un bug; es el coste de las garantías y el comportamiento de la API de Prisma."
+      },
+      {
+        "period": "🚀 2024–2025: Continúa el trabajo de rendimiento en Prisma",
+        "description": "Prisma publicó actualizaciones importantes centradas en rendimiento y cambios del engine. Incluso con mejoras, sigue existiendo un coste inevitable por parsear, validar, planificar y moldear resultados frente a ejecutar SQL crudo directamente."
+      },
+      {
+        "period": "🎯 2026: Se lanza la extensión prisma-sql",
+        "description": "Esta extensión se centra en el rendimiento de lectura. Evita la ruta de ejecución de lecturas de Prisma para findMany, findFirst, findUnique, count, aggregate y groupBy, mientras mantiene Prisma para escrituras, migraciones, gestión de esquema y generación de tipos. Valida la compatibilidad con tu versión de Prisma antes del despliegue."
+      }
+    ],
+    "whyExists": {
+      "title": "💡 Por qué existe esta extensión",
+      "description": "Prisma tomó las decisiones arquitectónicas correctas para sus objetivos: seguridad de tipos, experiencia de desarrollo y comportamiento consistente entre bases de datos. Pero esas decisiones crean una sobrecarga que se nota a escala. Esta extensión no reemplaza Prisma: optimiza lecturas para equipos que quieren el DX de Prisma más ejecución más rápida donde importa."
+    },
+    "technical": [
+      {
+        "title": "Capa de traducción de consultas",
+        "description": "Prisma traduce los inputs de tu consulta a SQL específico del motor. Esto permite comportamiento consistente entre bases de datos y la semántica de la API de Prisma, pero añade tiempo de procesamiento antes de que la base de datos vea el SQL.",
+        "iconPath": "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+      },
+      {
+        "title": "Validación y garantías de tipos",
+        "description": "Prisma valida consultas contra el esquema y aplica garantías a nivel de API. Estas salvaguardas previenen clases de bugs, pero también añaden sobrecarga a cada consulta.",
+        "iconPath": "M13 10V3L4 14h7v7l9-11h-7z"
+      },
+      {
+        "title": "Moldeado de resultados",
+        "description": "Los resultados se moldean para coincidir con el comportamiento esperado de la API de Prisma. Esto es excelente para DX y consistencia, pero añade latencia, especialmente en conjuntos de resultados grandes e includes complejos.",
+        "iconPath": "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+      }
+    ],
+    "conclusion": "Esta extensión complementa Prisma ofreciendo una ruta más rápida para consultas de lectura. Conservas todo lo que te gusta de Prisma y obtienes lecturas 2–7× más rápidas en casos típicos (y hasta 53.5× en filtros de relación de SQLite) cuando el rendimiento importa."
+  },
+  "performance": {
+    "title": "¿Cuánto más rápido? Benchmarks reales",
+    "subtitle": "Mira cómo esta extensión acelera Prisma en 137 casos de prueba",
+    "environment": "Entorno de benchmark: MacBook Pro M1 • PostgreSQL 15 • SQLite 3.43",
+    "metrics": [
+      {
+        "value": "2.9×",
+        "label": "Filtros complejos",
+        "subtitle": "Aceleración en PostgreSQL",
+        "color": "accent"
+      },
+      {
+        "value": "3.0×",
+        "label": "Includes anidados",
+        "subtitle": "Aceleración en PostgreSQL",
+        "color": "blue"
+      },
+      {
+        "value": "7.7×",
+        "label": "Consultas simples",
+        "subtitle": "Aceleración en SQLite",
+        "color": "purple"
+      },
+      {
+        "value": "53.5×",
+        "label": "Filtros de relación",
+        "subtitle": "Aceleración en SQLite",
+        "color": "pink"
+      }
+    ],
+    "comparisonTitle": "Prisma estándar vs. Prisma-SQL optimizado",
+    "comparisons": [
+      {
+        "label": "Prisma v7 (Base)",
+        "time": "2.10ms de promedio",
+        "width": 100,
+        "bgColor": "bg-gray-400",
+        "color": "text-gray-700",
+        "bold": false
+      },
+      {
+        "label": "Prisma + extensión (PostgreSQL)",
+        "time": "2.10ms → 1.00ms (2.10× más rápido) ⚡",
+        "width": 48,
+        "bgColor": "bg-gradient-to-r from-accent to-green-600",
+        "color": "text-accent",
+        "bold": true
+      },
+      {
+        "label": "Prisma v7 SQLite (Base)",
+        "time": "5.48ms de promedio",
+        "width": 100,
+        "bgColor": "bg-gray-400",
+        "color": "text-gray-700",
+        "bold": false
+      },
+      {
+        "label": "Prisma + extensión (SQLite)",
+        "time": "5.48ms → 1.00ms (5.48× más rápido) ⚡",
+        "width": 18,
+        "bgColor": "bg-gradient-to-r from-purple-500 to-pink-600",
+        "color": "text-purple-600",
+        "bold": true
+      }
+    ],
+    "footer": "Comparación directa que muestra cómo esta extensión acelera consultas Prisma en operaciones idénticas.",
+    "footerLink": "Ver datos completos de benchmarks"
+  },
+  "howItWorks": {
+    "title": "Cómo optimiza Prisma",
+    "subtitle": "Evita la ruta de ejecución de lecturas de Prisma manteniendo la API y los tipos de Prisma",
+    "steps": [
+      {
+        "title": "Interceptar consultas de Prisma",
+        "description": "La extensión captura operaciones de lectura (findMany, findFirst, findUnique, count, aggregate, groupBy) antes de que se ejecuten"
+      },
+      {
+        "title": "Generar SQL optimizado",
+        "description": "Convierte consultas Prisma en SQL rápido y parametrizado con JOINs optimizados"
+      },
+      {
+        "title": "Ejecutar directamente",
+        "description": "Ejecuta consultas mediante postgres.js o better-sqlite3, evitando la sobrecarga de lectura de Prisma"
+      },
+      {
+        "title": "Devolver resultados compatibles",
+        "description": "Los resultados coinciden con la forma esperada por Prisma. Tipos, IntelliSense y el código de consultas existente permanecen sin cambios"
+      }
+    ],
+    "codeExample": "const users = await prisma.user.findMany({\n  where: { status: 'ACTIVE' },\n  include: { posts: true }\n})\n\n// Direct SQL execution for reads\n// Benchmarked around ~1.00ms on this workload\n// Same Prisma query code"
+  },
+  "features": {
+    "title": "¿Por qué elegir esta extensión de Prisma?",
+    "subtitle": "Obtén velocidad de ejecución de SQL crudo para lecturas manteniendo la experiencia de desarrollo de Prisma",
+    "items": [
+      {
+        "title": "Aceleración instantánea de Prisma",
+        "description": "Una configuración única acelera lecturas de Prisma. Sin refactor, sin migración, sin downtime.",
+        "color": "accent",
+        "iconPath": "M13 10V3L4 14h7v7l9-11h-7z"
+      },
+      {
+        "title": "Mantén tus tipos de Prisma",
+        "description": "Compatibilidad completa con TypeScript. Inferencia de tipos, autocompletado y seguridad en compilación preservados mientras se aceleran lecturas.",
+        "color": "blue",
+        "iconPath": "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+      },
+      {
+        "title": "Solución probada en producción",
+        "description": "137 pruebas E2E validan compatibilidad con versiones recientes de Prisma. Usada para acelerar lecturas de Prisma en apps de producción.",
+        "color": "purple",
+        "iconPath": "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+      },
+      {
+        "title": "Soporte para múltiples bases de datos",
+        "description": "Optimiza lecturas de Prisma en PostgreSQL (incluido Neon, Supabase) y SQLite.",
+        "color": "pink",
+        "iconPath": "M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
+      },
+      {
+        "title": "Opción precompilada",
+        "description": "Un generador opcional crea SQL en build-time, reduciendo la sobrecarga a microsegundos para tus consultas más calientes.",
+        "color": "yellow",
+        "iconPath": "M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+      },
+      {
+        "title": "Listo para serverless (runtimes Node)",
+        "description": "Funciona en runtimes serverless de Node. El soporte para Edge runtime depende de las restricciones del runtime y del driver que uses.",
+        "color": "green",
+        "iconPath": "M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
+      }
+    ]
+  },
+  "useCases": {
+    "title": "Cuándo el rendimiento de Prisma importa más",
+    "subtitle": "Escenarios comunes donde esta extensión marca una diferencia real",
+    "cases": [
+      {
+        "title": "📊 Analítica e informes",
+        "description": "Las agregaciones y operaciones groupBy de Prisma se benefician significativamente de la ejecución SQL directa",
+        "color": "blue",
+        "benefits": [
+          "groupBy 5× más rápido acelera informes",
+          "Consultas aggregate más rápidas",
+          "Métricas en tiempo real con menor latencia"
+        ]
+      },
+      {
+        "title": "🚀 APIs de alto tráfico",
+        "description": "La sobrecarga por consulta se acumula bajo carga, especialmente en endpoints con muchas lecturas",
+        "color": "purple",
+        "benefits": [
+          "Menores tiempos de respuesta de la API",
+          "Manejar más solicitudes por instancia",
+          "Reducir costos de infraestructura"
+        ]
+      },
+      {
+        "title": "☁️ Funciones serverless",
+        "description": "Cada milisegundo cuenta en serverless: reduce latencia de lectura donde importa",
+        "color": "green",
+        "benefits": [
+          "Mejor p95/p99 en lecturas",
+          "Menor costo mediante lecturas más rápidas",
+          "Lecturas más rápidas sin refactors"
+        ]
+      },
+      {
+        "title": "📱 Backends móviles",
+        "description": "Los usuarios notan la latencia: lecturas más rápidas mejoran el UX percibido de inmediato",
+        "color": "orange",
+        "benefits": [
+          "Carga de feed más rápida",
+          "Paginación más rápida",
+          "Interacciones más responsivas"
+        ]
+      }
+    ]
+  },
+  "installation": {
+    "title": "Optimiza Prisma en 3 pasos",
+    "subtitle": "Acelera lecturas de Prisma en menos de 60 segundos",
+    "steps": [
+      {
+        "title": "Instala la extensión de Prisma",
+        "language": "language-bash",
+        "code": "# PostgreSQL\nnpm install prisma-sql postgres\n\n# SQLite\nnpm install prisma-sql better-sqlite3"
+      },
+      {
+        "title": "Añade la extensión al cliente de Prisma",
+        "language": "language-typescript",
+        "code": "import { PrismaClient, Prisma } from '@prisma/client'\nimport { speedExtension, convertDMMFToModels } from 'prisma-sql'\nimport postgres from 'postgres'\n\nconst sql = postgres(process.env.DATABASE_URL)\nconst models = convertDMMFToModels(Prisma.dmmf.datamodel)\n\nconst prisma = new PrismaClient().$extends(\n  speedExtension({ postgres: sql, models })\n)"
+      },
+      {
+        "title": "Usa Prisma normalmente",
+        "language": "language-typescript",
+        "code": "const users = await prisma.user.findMany({\n  where: { status: 'ACTIVE' },\n  include: { posts: true }\n})"
+      }
+    ]
+  },
+  "faq": {
+    "title": "FAQ de rendimiento de Prisma",
+    "subtitle": "Preguntas comunes sobre cómo optimizar lecturas en Prisma",
+    "questions": [
+      {
+        "question": "¿Por qué Prisma tiene sobrecarga?",
+        "answer": "Prisma añade sobrecarga porque implementa garantías de API como validación basada en el esquema, comportamiento de consulta consistente y moldeado de resultados. Esas capas ofrecen una gran experiencia de desarrollo, pero cuestan tiempo comparado con ejecutar SQL crudo directamente."
+      },
+      {
+        "question": "¿Cómo optimizo consultas de Prisma?",
+        "answer": "Optimiza cargas de trabajo de Prisma centradas en lecturas añadiendo esta extensión. Ejecuta operaciones de lectura mediante SQL directo con postgres.js o better-sqlite3, manteniendo la API y los tipos de Prisma. La configuración es un pequeño cambio de inicialización y no requiere refactor de tus consultas existentes."
+      },
+      {
+        "question": "¿Prisma es más lento que SQL crudo?",
+        "answer": "Para muchas cargas de lectura, sí. Hay una sobrecarga arquitectónica frente a ejecutar SQL crudo. Esta extensión busca mantener el DX de Prisma reduciendo la latencia de lectura mediante ejecución SQL directa."
+      },
+      {
+        "question": "¿Puedo acelerar Prisma sin cambiar consultas existentes?",
+        "answer": "Sí. Añade la extensión una vez durante la inicialización del Prisma Client y mantén tu código de consultas Prisma sin cambios. Las operaciones de lectura se ejecutan más rápido mientras tu API, tipos y esquema de Prisma permanecen igual."
+      },
+      {
+        "question": "¿Esto funciona en producción?",
+        "answer": "Sí. Está validado con 137 pruebas E2E y está diseñado para usarse en producción. Verifica siempre la compatibilidad con tu versión de Prisma y ejecuta tus propias pruebas de regresión antes del despliegue."
+      },
+      {
+        "question": "¿Qué causa agregaciones más lentas en Prisma?",
+        "answer": "Las agregaciones y groupBy a menudo amplifican la sobrecarga fija (procesamiento de consulta y moldeado de resultados) y pueden involucrar conjuntos de resultados intermedios más grandes. Esta extensión optimiza esas lecturas generando SQL directamente, lo que típicamente reduce la latencia en endpoints con muchas agregaciones."
+      }
+    ]
+  },
+  "cta": {
+    "title": "¿Listo para acelerar Prisma?",
+    "subtitle": "Únete a desarrolladores que optimizan lecturas de Prisma: 2–7× más rápido (hasta 53.5×)",
+    "button1": "Instalar Prisma-SQL",
+    "button2": "Ver en GitHub"
+  },
+  "footer": {
+    "copyright": "© 2026 Prisma-SQL - Acelera lecturas de Prisma 2–7× (hasta 53.5×)",
+    "tagline": "Haciendo Prisma aún mejor"
+  },
+  "testingCallout": {
+    "badge": "✓ Validado",
+    "title": "¿Cómo aseguramos la corrección?",
+    "description": "Cada consulta se valida contra Prisma con 137 pruebas end-to-end en PostgreSQL y SQLite",
+    "link": "Ver metodología de pruebas →"
+  },
+  "testing": {
+    "meta": {
+      "title": "Metodología de pruebas - Prisma-SQL",
+      "description": "Enfoque de pruebas integral que valida con 137 pruebas E2E que el SQL generado coincide exactamente con la salida de Prisma",
+      "keywords": "pruebas prisma, validación sql, pruebas e2e, pruebas orm, pruebas de base de datos"
+    },
+    "hero": {
+      "badge": "🧪 Aseguramiento de calidad",
+      "title": "Pruebas",
+      "titleHighlight": "Metodología",
+      "subtitle": "137 pruebas end-to-end validan que cada consulta SQL generada coincide exactamente con la salida de Prisma"
+    },
+    "stats": [
+      {
+        "value": "137",
+        "label": "Pruebas E2E",
+        "description": "Cada consulta validada"
+      },
+      {
+        "value": "100%",
+        "label": "Cobertura de paridad",
+        "description": "Coincidencia byte a byte"
+      },
+      {
+        "value": "2",
+        "label": "Motores de base de datos",
+        "description": "PostgreSQL y SQLite"
+      },
+      {
+        "value": "3",
+        "label": "Benchmarks de ORM",
+        "description": "Prisma v6/v7, Drizzle"
+      }
+    ],
+    "validation": {
+      "title": "Cómo validamos la corrección",
+      "subtitle": "Cada prueba sigue un proceso riguroso de 5 pasos para asegurar que el SQL generado produce resultados idénticos a Prisma",
+      "steps": [
+        {
+          "title": "Generar SQL desde una consulta Prisma",
+          "description": "Parsea los argumentos de la consulta Prisma y genera SQL equivalente usando los mismos modelos y esquema. El SQL generado usa consultas parametrizadas para seguridad y rendimiento."
+        },
+        {
+          "title": "Ejecutar ambas consultas en paralelo",
+          "description": "Ejecuta el SQL generado directamente con postgres.js o better-sqlite3, y ejecuta la misma consulta a través de Prisma. Ambas consultan el mismo estado de la base de datos."
+        },
+        {
+          "title": "Normalizar resultados",
+          "description": "Maneja diferencias de tipos (BigInt vs Number, precisión Decimal, serialización de Date) y normaliza el orden de claves de objetos para una comparación justa."
+        },
+        {
+          "title": "Comprobación de igualdad profunda",
+          "description": "Verifica que los resultados coinciden exactamente: mismo número de filas, mismos valores de campos, mismas relaciones anidadas, mismo orden. Cualquier diferencia falla la prueba."
+        },
+        {
+          "title": "Benchmark de rendimiento",
+          "description": "Mide el tiempo de ejecución con 5 ejecuciones de calentamiento y luego promedia 10-50 iteraciones por prueba. Compara contra Prisma v6, Prisma v7 y Drizzle ORM."
+        }
+      ]
+    },
+    "advancedTechniques": {
+      "title": "Técnicas avanzadas de validación",
+      "dataTypes": {
+        "title": "Normalización de tipos de datos",
+        "items": [
+          {
+            "label": "Conversión BigInt",
+            "description": "BigInt de JavaScript → Number para comparación"
+          },
+          {
+            "label": "Manejo de Decimal",
+            "description": "Decimal de Prisma → Float con precisión de 10 dígitos"
+          },
+          {
+            "label": "Normalización de fechas",
+            "description": "Todos los valores DateTime → null (enfoque en datos, no timestamps)"
+          },
+          {
+            "label": "Parseo JSON",
+            "description": "Detección automática y parseo de strings JSON"
+          },
+          {
+            "label": "Ordenación de claves",
+            "description": "Orden alfabético para comparación consistente"
+          }
+        ]
+      },
+      "performance": {
+        "title": "Benchmarking de rendimiento",
+        "items": [
+          {
+            "label": "Fase de calentamiento",
+            "description": "5 iteraciones para preparar caches y JIT"
+          },
+          {
+            "label": "Iteraciones adaptativas",
+            "description": "5-50 ejecuciones según complejidad de la consulta"
+          },
+          {
+            "label": "Medición aislada",
+            "description": "Cada tipo de consulta se mide de forma independiente"
+          },
+          {
+            "label": "Comparación multi-ORM",
+            "description": "Prisma v6, v7, Drizzle, SQL generado"
+          },
+          {
+            "label": "Tiempo de generación de SQL",
+            "description": "Medición separada de la sobrecarga de generación de consultas"
+          }
+        ]
+      }
+    },
+    "coverage": {
+      "title": "Cobertura de pruebas integral",
+      "subtitle": "Las pruebas cubren cada operación de lectura de Prisma en múltiples niveles de complejidad",
+      "categories": [
+        {
+          "title": "Operaciones de consulta",
+          "items": [
+            "findMany con filtros complejos",
+            "findFirst con skip y paginación",
+            "findUnique por ID y campos únicos",
+            "count con condiciones WHERE",
+            "aggregate (sum, avg, min, max)",
+            "groupBy con cláusulas HAVING"
+          ]
+        },
+        {
+          "title": "Escenarios complejos",
+          "items": [
+            "Includes anidados (4 niveles de profundidad)",
+            "Filtros de relación (some/every/none)",
+            "Distinct con funciones de ventana",
+            "Paginación con cursor",
+            "Select + include combinados",
+            "Conteos de relación (_count)"
+          ]
+        },
+        {
+          "title": "Tipos de filtro",
+          "items": [
+            "Comparación (lt/lte/gt/gte)",
+            "Lógicos (AND/OR/NOT)",
+            "Operaciones de string (contains/startsWith)",
+            "Comprobaciones NULL (is/isNot)",
+            "IN/NOT IN con arrays",
+            "Modos de sensibilidad a mayúsculas/minúsculas"
+          ]
+        }
+      ]
+    },
+    "databaseSpecific": {
+      "postgres": {
+        "title": "Pruebas en PostgreSQL",
+        "items": [
+          "Búsquedas case-insensitive con ILIKE",
+          "Operaciones JSON/JSONB",
+          "Manejo de campos array",
+          "Soporte para tipos compuestos",
+          "Validación de funciones de ventana",
+          "Pruebas de aislamiento de transacciones"
+        ]
+      },
+      "sqlite": {
+        "title": "Pruebas en SQLite",
+        "items": [
+          "Coincidencia de patrones LIKE",
+          "Validación de la extensión JSON1",
+          "Emulación de funciones de ventana",
+          "Optimización DISTINCT",
+          "Correlación de subconsultas",
+          "Manejo de afinidad de texto"
+        ]
+      }
+    },
+    "example": {
+      "title": "Ejemplo de caso de prueba",
+      "subtitle": "Mira cómo validamos una consulta anidada compleja con filtros de relación",
+      "filename": "tests/e2e/postgres.test.ts",
+      "code": "it('nested relation filter', () =>\n  runParityTest(\n    db,\n    benchmarkResults,\n    'findMany nested relation',\n    'Organization',\n    {\n      method: 'findMany',\n      where: {\n        projects: {\n          some: {\n            tasks: { some: { status: 'DONE' } }\n          }\n        }\n      }\n    },\n    () => db.prisma.organization.findMany({\n      where: {\n        projects: {\n          some: {\n            tasks: { some: { status: 'DONE' } }\n          }\n        }\n      },\n      orderBy: { id: 'asc' }\n    }),\n  )\n)\n\n// runParityTest internally:\n// 1. Calls generateSQL() with the args\n// 2. Executes generated SQL directly\n// 3. Executes Prisma query\n// 4. Normalizes both results\n// 5. Deep equality check - fails if any difference\n// 6. Benchmarks execution time"
+    },
+    "executionFlow": {
+      "title": "Qué ocurre durante la ejecución de las pruebas",
+      "steps": [
+        {
+          "number": "1",
+          "title": "Generación de consulta (microsegundos)",
+          "description": "La función generateSQL() parsea los args de Prisma y crea SQL parametrizado. Este paso se mide por separado para medir la sobrecarga de generación."
+        },
+        {
+          "number": "2",
+          "title": "Ejecución paralela (milisegundos)",
+          "description": "Ambas consultas alcanzan el mismo estado de base de datos simultáneamente usando Promise.all(), garantizando comparación justa y condiciones de datos idénticas."
+        },
+        {
+          "number": "3",
+          "title": "Normalización profunda",
+          "description": "Los resultados pasan por normalización recursiva: BigInt→Number, Decimal→Float(10), Date→null, parseo JSON, ordenación de claves. Esto asegura comparación byte a byte."
+        },
+        {
+          "number": "4",
+          "title": "Igualdad estricta",
+          "description": "Comparación por JSON stringify con tolerancia cero. Cualquier diferencia en número de filas, valores de campos, objetos anidados u orden falla la prueba con un diff detallado."
+        },
+        {
+          "number": "5",
+          "title": "Medición de rendimiento",
+          "description": "Tras la validación, 5-50 iteraciones miden el tiempo medio de ejecución. Los resultados incluyen: Prisma v6, Prisma v7, Drizzle ORM, SQL generado y sobrecarga de generación de SQL."
+        }
+      ]
+    },
+    "multiVersion": {
+      "title": "Validación multi-versión",
+      "description": "Cada prueba se ejecuta contra Prisma v6 y v7 para asegurar compatibilidad entre versiones:",
+      "v6": {
+        "title": "Prisma v6 (6.16.3)",
+        "items": [
+          "Uso directo de PrismaClient",
+          "Arquitectura legacy del engine",
+          "Métricas base de rendimiento"
+        ]
+      },
+      "v7": {
+        "title": "Prisma v7 (7.2.0)",
+        "items": [
+          "Arquitectura basada en adapters",
+          "@prisma/adapter-pg y adapter-better-sqlite3",
+          "Nuevas optimizaciones del engine"
+        ]
+      }
+    },
+    "benchmarkReports": {
+      "title": "Reportes automáticos de benchmarks",
+      "description": "Todos los resultados de benchmarks se generan automáticamente y se guardan como archivos JSON para transparencia total:",
+      "files": [
+        "benchmark-results/v6-postgres-latest.json",
+        "benchmark-results/v7-postgres-latest.json",
+        "benchmark-results/v6-sqlite-latest.json",
+        "benchmark-results/v7-sqlite-latest.json"
+      ],
+      "footer": "Cada archivo contiene: nombre de prueba, tiempo de ejecución Prisma, tiempo de SQL generado, tiempo de Drizzle, ratios de aceleración y timestamp ISO."
+    },
+    "cta": {
+      "title": "Explora la suite completa de pruebas",
+      "subtitle": "Las 137 pruebas son open source. Revisa el código de pruebas, benchmarks y la lógica de validación.",
+      "button1": "Ver suite de pruebas →",
+      "button2": "Ver benchmarks"
+    }
+  },
+  "sqlPrevention": {
+    "meta": {
+      "title": "Prevención de inyección SQL - Seguridad Prisma-SQL",
+      "description": "Metodología de prevención de inyección SQL usando enlace de parámetros, validación basada en esquema y 137 pruebas enfocadas en seguridad (suite actual)",
+      "keywords": "prevención de inyección sql, consultas parametrizadas, seguridad sql, seguridad de base de datos, seguridad prisma"
+    },
+    "hero": {
+      "badge": "🔒 Seguridad primero",
+      "title": "Inyección SQL",
+      "titleHighlight": "Prevención",
+      "subtitle": "Los valores proporcionados por el usuario nunca se interpolan en el texto SQL — los valores se enlazan mediante placeholders de parámetros (dependiente del dialecto, p. ej. $1 o ?)"
+    },
+    "stats": [
+      {
+        "value": "100%",
+        "label": "Enlace por parámetros",
+        "description": "Todos los valores del usuario usan placeholders"
+      },
+      {
+        "value": "Cero",
+        "label": "Interpolación de valores",
+        "description": "Los datos del usuario nunca aparecen en el texto SQL"
+      },
+      {
+        "value": "Garantizado",
+        "label": "Conservación de orden",
+        "description": "Los placeholders mapean a params 1:1"
+      },
+      {
+        "value": "137",
+        "label": "Pruebas de seguridad",
+        "description": "Cobertura de intentos de inyección (suite actual)"
+      }
+    ],
+    "threat": {
+      "title": "Entendiendo la inyección SQL",
+      "subtitle": "La inyección SQL sigue siendo una de las vulnerabilidades más críticas en aplicaciones web",
+      "description": "La inyección SQL ocurre cuando datos no confiables se incorporan al texto SQL sin un enlace seguro por parámetros. Los atacantes pueden manipular el significado de la consulta para acceder a datos no autorizados, modificar registros o provocar operaciones no deseadas.",
+      "examples": {
+        "title": "Patrones comunes de ataque",
+        "items": [
+          {
+            "name": "Evasión de autenticación",
+            "attack": "admin' OR '1'='1",
+            "description": "Intenta eludir el login haciendo que la condición WHERE siempre sea verdadera"
+          },
+          {
+            "name": "Exfiltración de datos",
+            "attack": "' UNION SELECT password FROM users--",
+            "description": "Usa UNION para intentar extraer datos de otras tablas"
+          },
+          {
+            "name": "Comandos destructivos",
+            "attack": "'; DROP TABLE users; --",
+            "description": "Intenta añadir sentencias extra para borrar datos"
+          },
+          {
+            "name": "Abuso de bug de orden de parámetros",
+            "attack": "Exploit: si placeholders y params no coinciden, los checks de autorización pueden usar valores incorrectos",
+            "description": "Ejemplo: WHERE userId=$1 AND isAdmin=$2, pero params=[true, 123] en vez de [123, true] puede conceder acceso admin incorrectamente"
+          }
+        ]
+      }
+    },
+    "protection": {
+      "title": "Estrategia de protección en múltiples capas",
+      "subtitle": "Cada consulta pasa por múltiples capas de validación de seguridad",
+      "layers": [
+        {
+          "title": "Capa 1: Enlace automático de parámetros",
+          "description": "Todos los valores proporcionados por el usuario se convierten en parámetros enlazados. Los valores no entran al texto SQL como literales.",
+          "guarantees": [
+            "Los valores del usuario se representan con placeholders específicos del dialecto (p. ej. $1 o ?)",
+            "Los arrays se parametrizan (placeholders expandidos o parámetros array según dialecto/estrategia)",
+            "NULL y valores opcionales se manejan sin concatenar input del usuario al texto SQL",
+            "Valores de fecha/hora se parametrizan",
+            "Valores JSON se parametrizan"
+          ]
+        },
+        {
+          "title": "Capa 2: Validación de nombres de campos",
+          "description": "Cada nombre de campo se valida contra los metadatos del esquema de Prisma antes de generar la consulta.",
+          "guarantees": [
+            "Solo se permiten campos definidos en el esquema",
+            "Filtros de relación validados mediante metadatos del esquema",
+            "No se aceptan nombres de campo arbitrarios",
+            "Campos no soportados o computados se rechazan cuando corresponde",
+            "Se rechazan payloads de prototype pollution (p. ej. __proto__, constructor)"
+          ]
+        },
+        {
+          "title": "Capa 3: Sanitización de identificadores",
+          "description": "Nombres de tablas, columnas y aliases se validan y se citan/escapan de forma segura según sea requerido.",
+          "guarantees": [
+            "Se rechazan caracteres de control",
+            "Palabras reservadas se citan cuando es necesario",
+            "Soporte para calificación de esquema cuando está configurado",
+            "Escape de comillas dobles (o equivalente del dialecto) para identificadores",
+            "Se aplica longitud máxima de identificadores según dialecto"
+          ]
+        },
+        {
+          "title": "Capa 4: Validación de operadores",
+          "description": "Solo se permiten operadores conocidos y seguros para cada tipo de campo.",
+          "guarantees": [
+            "Operadores string: contains, startsWith, endsWith",
+            "Operadores numéricos: lt, lte, gt, gte",
+            "Operadores de array: in, notIn con validación de tipos",
+            "Operadores lógicos: AND, OR, NOT validados estructuralmente",
+            "Operadores desconocidos se rechazan inmediatamente"
+          ]
+        },
+        {
+          "title": "Capa 5: Garantía de orden de parámetros",
+          "description": "Un orden estricto asegura que cada placeholder mapea exactamente a un parámetro en el orden de inserción, evitando desajustes.",
+          "guarantees": [
+            "Contador secuencial evita reordenamiento",
+            "Construcción de SQL y del array de params en sincronía",
+            "Sin buffers intermedios ni reordenamientos",
+            "Verificación por tests: SQL generado y params siempre alinean",
+            "Correspondencia 1 a 1: placeholder N → params[N-1] (o mapeo equivalente según dialecto)"
+          ]
+        }
+      ]
+    },
+    "formalProofs": {
+      "title": "Garantías formales de seguridad",
+      "subtitle": "Esbozos de prueba de resistencia a inyección bajo supuestos de diseño (enlace de parámetros, sin bypass de SQL crudo, uso correcto del driver)",
+      "proofs": [
+        {
+          "title": "Teorema 1: Aislamiento de valores",
+          "statement": "Para todo valor proporcionado por el usuario V, no existe ruta de ejecución donde V aparezca como texto SQL en el string de consulta generado.",
+          "proof": "Por construcción, todas las rutas que manejan valores del usuario llaman a addParameter(value) que:\n1. Almacena el valor en un array params separado\n2. Devuelve un token placeholder para el texto SQL\n3. Solo el token placeholder se agrega al string SQL\n4. El driver recibe el texto SQL y los valores de parámetros por separado\n∴ Los valores del usuario no se parsean como sintaxis SQL",
+          "code": "const addParameter = (params: any[], value: any) => {\n  params.push(value)\n  const index = params.length\n  return `$${index}`\n}"
+        },
+        {
+          "title": "Teorema 2: Clausura de nombres de campos",
+          "statement": "El conjunto de nombres de campo F en cualquier consulta generada es un subconjunto de los campos definidos en el esquema S, es decir, F ⊆ S.",
+          "proof": "Para cada referencia de campo:\n1. Se extrae el nombre del campo del objeto de consulta\n2. Se busca en metadatos del esquema\n3. Si el campo no existe, se lanza error\n4. Solo campos validados llegan a la generación de SQL\n∴ No pueden aparecer nombres de campos arbitrarios en SQL",
+          "code": "const validateField = (field: string, model: Model) => {\n  if (!model.fields.has(field)) {\n    throw new Error(`Field ${field} does not exist`)\n  }\n  return model.fields.get(field)\n}"
+        },
+        {
+          "title": "Teorema 3: Seguridad de operadores",
+          "statement": "Para cualquier operador O aplicado al campo F, O es miembro de los operadores permitidos para el tipo T de F.",
+          "proof": "Algoritmo de validación de operadores:\n1. Extraer el tipo de campo T del esquema\n2. Definir allowed_ops(T) = { operadores válidos para el tipo T }\n3. Para el operador O en la consulta:\n   - Si O ∉ allowed_ops(T), lanzar error\n   - Si no, aplicar el operador usando enlace de parámetros\n∴ Solo se usan operadores apropiados al tipo",
+          "code": "const ALLOWED_OPS: Record<string, string[]> = {\n  String: ['contains', 'startsWith', 'endsWith'],\n  Int: ['lt', 'lte', 'gt', 'gte']\n}\nif (!ALLOWED_OPS[fieldType]?.includes(operator)) {\n  throw new Error('Invalid operator')\n}"
+        },
+        {
+          "title": "Teorema 4: Seguridad de identificadores",
+          "statement": "Todos los identificadores SQL I se validan para prevenir caracteres de control y asegurar un quoting/escaping seguro según dialecto.",
+          "proof": "Procesamiento de identificadores:\n1. Rechazar si contiene caracteres de control\n2. Escapar comillas internas según reglas del dialecto\n3. Citar identificadores cuando es necesario (palabras reservadas o caracteres especiales)\n4. Aplicar límites de longitud por dialecto\n∴ Los identificadores no pueden romper la sintaxis SQL ni introducir tokens inyectados",
+          "code": "const quoteIdentifier = (id: string) => {\n  if (/[\\x00-\\x1F]/.test(id)) {\n    throw new Error('Invalid characters')\n  }\n  const escaped = id.replace(/\"/g, '\"\"')\n  const needsQuoting = /[^a-z0-9_]/i.test(id) || isReservedKeyword(id)\n  return needsQuoting ? `\"${escaped}\"` : id\n}"
+        },
+        {
+          "title": "Teorema 5: Consistencia del orden de parámetros",
+          "statement": "Para cada posición de placeholder N emitida en el texto SQL, params[N-1] contiene el valor exacto destinado a esa posición, sin reordenamientos ni desajustes.",
+          "proof": "Garantía de orden de parámetros:\n1. Un único tracker mantiene el orden de inserción\n2. Cada llamada add() agrega el valor a params y emite inmediatamente el siguiente placeholder\n3. La construcción del SQL y del array params avanza en sincronía\n4. No hay reordenamientos intermedios\n∴ Se mantiene correspondencia 1 a 1 durante todo el proceso",
+          "code": "class ParameterTracker {\n  private params: any[] = []\n\n  add(value: any): string {\n    this.params.push(value)\n    return `$${this.params.length}`\n  }\n\n  getParams(): any[] {\n    return this.params\n  }\n}\n\nconst tracker = new ParameterTracker()\nconst sql = `WHERE email = ${tracker.add(email)} AND age > ${tracker.add(age)}`\nconst params = tracker.getParams()"
+        }
+      ]
+    },
+    "testCoverage": {
+      "title": "Cobertura integral de pruebas de seguridad",
+      "subtitle": "137 pruebas validan protección contra vectores comunes de inyección SQL y casos límite (suite actual)",
+      "categories": [
+        {
+          "title": "Parametrización de valores (basic.test.ts)",
+          "tests": [
+            "Strings con comillas: user'with'quotes",
+            "Strings con punto y coma: user;extra",
+            "Keywords SQL como valores: DROP TABLE users",
+            "Inyección compleja: '; DROP TABLE users; --",
+            "Ataques UNION: ' UNION SELECT * FROM users--",
+            "Ataques booleanos: admin' OR '1'='1",
+            "Inyección de comentarios: test@example.com' -- comment"
+          ]
+        },
+        {
+          "title": "Validación de nombres de campos (identifiers.test.ts)",
+          "tests": [
+            "Rechazar nombres de campo maliciosos en SELECT",
+            "Rechazar nombres de campo maliciosos en WHERE",
+            "Rechazar nombres de campo maliciosos en ORDER BY",
+            "Rechazar inyección SQL en nombres de campo",
+            "Rechazar campos inexistentes",
+            "Rechazar prototype pollution: __proto__, constructor"
+          ]
+        },
+        {
+          "title": "Seguridad de patrones LIKE (like-patterns.test.ts)",
+          "tests": [
+            "Inyección de comodín: %' OR '1'='1",
+            "Inyección con guion bajo: test_' OR '1'='1",
+            "Manejo de backslash: test\\\\'; DROP--",
+            "Múltiples comodines: %_%'; DROP--",
+            "Inyección case-insensitive: '; UNION SELECT--"
+          ]
+        },
+        {
+          "title": "Seguridad de operadores de array (array-operators.test.ts)",
+          "tests": [
+            "IN con arrays maliciosos: ['; DROP--', 'UNION SELECT--']",
+            "NOT IN con inyección: ['; TRUNCATE--', 'DELETE FROM--']",
+            "Manejo de array vacío",
+            "Validación de arrays grandes (100+ items)",
+            "Manejo de arrays con tipos mixtos"
+          ]
+        },
+        {
+          "title": "Casos límite (edge-cases.test.ts)",
+          "tests": [
+            "Inyección Unicode: \\u0027 OR \\u00271\\u0027=\\u00271",
+            "Inyección codificada en hex: 0x31=0x31--",
+            "URL encoded: %27%3B%20DROP%20TABLE",
+            "Consultas apiladas: '; DROP TABLE users; SELECT",
+            "Time-based blind (según dialecto): WAITFOR DELAY '00:00:05'--",
+            "Basada en UNION: UNION ALL SELECT null, password",
+            "Intentos de inyección de segundo orden"
+          ]
+        },
+        {
+          "title": "Verificación de orden de parámetros (basic.test.ts)",
+          "tests": [
+            "Posiciones de placeholders secuenciales",
+            "El array de parámetros coincide con el orden de placeholders",
+            "Consultas complejas mantienen el orden a través de condiciones",
+            "Condiciones OR/AND anidadas preservan la secuencia de parámetros",
+            "Filtros de relación mantienen el mapeo correcto de parámetros"
+          ]
+        }
+      ]
+    },
+    "codeExamples": {
+      "title": "Seguro vs. inseguro: comparación de código",
+      "unsafe": {
+        "title": "❌ Inseguro: concatenación de strings",
+        "code": "const email = req.body.email\nconst sql = \"SELECT * FROM users WHERE email = '\" + email + \"'\""
+      },
+      "safe": {
+        "title": "✅ Seguro: enlace automático de parámetros",
+        "code": "const email = req.body.email\nconst { sql, params } = toSQL('User', 'findMany', {\n  where: { email }\n})\n\nconst result = { sql, params }"
+      }
+    },
+    "implementation": {
+      "title": "Detalles de implementación",
+      "sections": [
+        {
+          "title": "Gestión de parámetros",
+          "description": "Un tracking centralizado de parámetros asegura que cada valor del usuario se enlace como parámetro y mantenga orden estable",
+          "code": "class ParameterTracker {\n  private params: any[] = []\n\n  add(value: any): string {\n    this.params.push(value)\n    return `$${this.params.length}`\n  }\n\n  getParams(): any[] {\n    return this.params\n  }\n}"
+        },
+        {
+          "title": "Validación de campos",
+          "description": "La validación basada en esquema previene acceso arbitrario a campos",
+          "code": "function validateField(\n  fieldName: string,\n  model: ModelInfo\n): FieldInfo {\n  const field = model.fields.get(fieldName)\n  if (!field) {\n    throw new Error(\n      `Field \"${fieldName}\" does not exist`\n    )\n  }\n  return field\n}"
+        },
+        {
+          "title": "Citado de identificadores",
+          "description": "Validación y quoting de identificadores consciente del dialecto previene inyección basada en identificadores",
+          "code": "function quoteIdentifier(identifier: string): string {\n  if (/[\\x00-\\x1F]/.test(identifier)) {\n    throw new Error('Invalid control characters')\n  }\n\n  const escaped = identifier.replace(/\"/g, '\"\"')\n  const needsQuoting = /[^a-z0-9_]/i.test(identifier) || isReservedKeyword(identifier)\n\n  if (needsQuoting) {\n    return `\"${escaped}\"`\n  }\n\n  return identifier\n}"
+        }
+      ]
+    },
+    "bestPractices": {
+      "title": "Mejores prácticas de seguridad",
+      "practices": [
+        {
+          "title": "Nunca desactivar la validación",
+          "description": "No omitas la validación del esquema ni las comprobaciones de campos. Son capas críticas de seguridad.",
+          "do": "Usa la librería tal como está diseñada con validación completa",
+          "dont": "Omitir validación del esquema o inyectar SQL crudo en el texto de consulta"
+        },
+        {
+          "title": "Mantener el esquema actualizado",
+          "description": "Asegúrate de que tu esquema Prisma refleje con precisión la estructura de tu base de datos.",
+          "do": "Ejecuta prisma db pull y prisma generate tras cambios de esquema",
+          "dont": "Usar DMMF o definiciones de esquema desactualizadas"
+        },
+        {
+          "title": "Validar tipos de entrada",
+          "description": "TypeScript aporta seguridad en compilación, pero la validación en runtime añade defensa en profundidad.",
+          "do": "Usa los tipos generados por Prisma para argumentos de consulta",
+          "dont": "Convertir input del usuario a any antes de pasarlo a consultas"
+        },
+        {
+          "title": "Monitorear patrones de consulta",
+          "description": "Registra y monitorea SQL generado y parámetros en producción para detectar anomalías y mal uso.",
+          "do": "Habilita logging de consultas y revisa patrones",
+          "dont": "Ejecutar en producción sin monitoreo"
+        }
+      ]
+    },
+    "securityCallout": {
+      "badge": "🔒 Seguridad verificada",
+      "title": "¿Cómo prevenimos inyección SQL?",
+      "description": "Validación multi-capa con enlace de parámetros, chequeos de campos basados en esquema y 137 pruebas de seguridad (suite actual)",
+      "link": "Ver detalles de seguridad →"
+    },
+    "cta": {
+      "title": "Seguridad por diseño",
+      "subtitle": "La protección contra inyección SQL está integrada en cada capa de esta librería. Revisa las pruebas de seguridad y los detalles de implementación directamente.",
+      "button1": "Ver pruebas de seguridad →",
+      "button2": "Ver código fuente"
+    }
+  }
+}

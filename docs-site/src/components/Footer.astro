@@ -7,21 +7,49 @@ interface Props {
 
 const { t, locale } = Astro.props;
 
+const rtlLocales = new Set(['ar', 'ur']);
+const isRTL = rtlLocales.has(locale);
+
+const makePath = (code: string) => {
+  const base = '/prisma-to-sql';
+  if (code === 'en') return `${base}/`;
+  return `${base}/${code}/`;
+};
+
 const languages = [
-  { code: 'en', label: 'English', path: '/prisma-to-sql/' },
-  { code: 'ru', label: 'Русский', path: '/prisma-to-sql/ru/' },
-  { code: 'zh', label: '中文', path: '/prisma-to-sql/zh/' }
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Español' },
+  { code: 'fr', label: 'Français' },
+  { code: 'pt', label: 'Português' },
+  { code: 'hi', label: 'हिन्दी' },
+  { code: 'bn', label: 'বাংলা' },
+  { code: 'ar', label: 'العربية' },
+  { code: 'ur', label: 'اردو' },
+  { code: 'ru', label: 'Русский' },
+  { code: 'zh', label: '中文' }
+].map((l) => ({ ...l, path: makePath(l.code) }));
+
+// Assumption: these pages exist as routes under each locale.
+// Edit slugs here if your routes differ.
+const footerLinks = [
+  { slug: 'testing', label: 'Testing' },
+  { slug: 'sql-injection-prevention', label: 'SQL Injection Prevention' }
 ];
+
+const makeInternalLink = (slug: string) => {
+  const base = makePath(locale);
+  return `${base}${slug}/`;
+};
 ---
 
 <footer class="bg-gray-900 text-gray-400 py-8 sm:py-12">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="border-t border-gray-800 pt-6 sm:pt-8">
-      <div class="flex flex-col items-center gap-4">
-        <div class="flex gap-3 sm:gap-4 text-xs sm:text-sm flex-wrap justify-center">
+      <div class={`flex flex-col gap-4 ${isRTL ? 'items-end' : 'items-center'}`}>
+        <div class={`flex gap-3 sm:gap-4 text-xs sm:text-sm flex-wrap ${isRTL ? 'justify-end' : 'justify-center'}`}>
           {languages.map((lang, index) => (
             <>
-              <a 
+              <a
                 href={lang.path}
                 class={`hover:text-white transition ${locale === lang.code ? 'text-white font-semibold' : ''}`}
               >
@@ -31,7 +59,22 @@ const languages = [
             </>
           ))}
         </div>
-        <div class="text-xs sm:text-sm text-center px-4">
+
+        <div class={`flex gap-4 text-xs sm:text-sm flex-wrap ${isRTL ? 'justify-end' : 'justify-center'}`}>
+          {footerLinks.map((link, index) => (
+            <>
+              <a
+                href={makeInternalLink(link.slug)}
+                class="hover:text-white transition link-underlined"
+              >
+                {link.label}
+              </a>
+              {index < footerLinks.length - 1 && <span class="text-gray-600">|</span>}
+            </>
+          ))}
+        </div>
+
+        <div class={`text-xs sm:text-sm px-4 ${isRTL ? 'text-right' : 'text-center'}`}>
           <p>{t.footer.copyright}</p>
           <p class="mt-2 text-gray-500">{t.footer.tagline}</p>
         </div>
