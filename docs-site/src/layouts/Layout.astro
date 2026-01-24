@@ -15,6 +15,43 @@ const base = '/prisma-to-sql'
 
 const rtlLocales = new Set(['ar', 'ur'])
 const dir = rtlLocales.has(locale) ? 'rtl' : 'ltr'
+
+const locales = ['en', 'es', 'fr', 'pt', 'hi', 'bn', 'ar', 'ur', 'ru', 'zh']
+
+const normalizeBase = (p: string) => {
+  if (p === base) return `${base}/`
+  return p
+}
+
+const stripLocaleFromPath = (pathname: string) => {
+  const path = normalizeBase(pathname)
+  if (!path.startsWith(`${base}/`)) return path
+
+  const afterBase = path.slice(`${base}/`.length)
+  const firstSeg = afterBase.split('/')[0]
+
+  if (locales.includes(firstSeg)) {
+    const rest = afterBase.slice(firstSeg.length)
+    return `${base}${rest || '/'}`
+  }
+
+  return path
+}
+
+const pathWithoutLocale = stripLocaleFromPath(Astro.url.pathname)
+
+const makeLocalizedPath = (code: string) => {
+  if (code === 'en') return pathWithoutLocale
+  const rest = pathWithoutLocale.slice(base.length)
+  return `${base}/${code}${rest}`
+}
+
+const alternateLinks = locales.map((code) => ({
+  code,
+  href: new URL(makeLocalizedPath(code), Astro.site).toString()
+}))
+
+const xDefault = alternateLinks.find((x) => x.code === 'en')?.href
 ---
 
 <!doctype html>
@@ -42,6 +79,12 @@ const dir = rtlLocales.has(locale) ? 'rtl' : 'ltr'
     <meta name='robots' content='index, follow' />
 
     <link rel='canonical' href={canonicalURL} />
+
+    {alternateLinks.map((l) => (
+      <link rel="alternate" hreflang={l.code} href={l.href} />
+    ))}
+    {xDefault && <link rel="alternate" hreflang="x-default" href={xDefault} />}
+
     <link rel='preconnect' href='https://cdnjs.cloudflare.com' crossorigin />
     <link rel='dns-prefetch' href='https://cdnjs.cloudflare.com' />
 
@@ -83,59 +126,6 @@ const dir = rtlLocales.has(locale) ? 'rtl' : 'ltr'
       href={`${base}/apple-touch-icon.png`}
     />
     <link rel='manifest' href={`${base}/site.webmanifest`} />
-
-    <style>
-      .gradient-text {
-        background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
-      .metric-card {
-        transition:
-          transform 0.2s,
-          box-shadow 0.2s;
-      }
-      .metric-card:hover {
-        transform: translateY(-4px);
-        box-shadow:
-          0 20px 25px -5px rgba(0, 0, 0, 0.1),
-          0 10px 10px -5px rgba(0, 0, 0, 0.04);
-      }
-      .feature-card {
-        transition: all 0.3s ease;
-      }
-      .feature-card:hover {
-        transform: translateY(-2px);
-      }
-      @keyframes fadeIn {
-        from {
-          opacity: 0;
-          transform: translateY(20px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      .animate-fade-in {
-        animation: fadeIn 0.6s ease-out;
-      }
-      pre {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-      }
-      pre::-webkit-scrollbar {
-        height: 6px;
-      }
-      pre::-webkit-scrollbar-track {
-        background: #1f2937;
-      }
-      pre::-webkit-scrollbar-thumb {
-        background: #4b5563;
-        border-radius: 3px;
-      }
-    </style>
 
     <slot name='head' />
   </head>
