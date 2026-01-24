@@ -21,7 +21,7 @@ tests/prisma/schema-postgres.prisma
 tests/prisma/schema-sqlite.prisma
 tests/prisma/schema-sqlite.prisma
 tests/prisma/schema.prisma
-!docs/
+docs
 docs-site/node_modules/
 docs-site/dist/
 docs-site/.astro/

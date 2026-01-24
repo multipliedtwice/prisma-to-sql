@@ -12,5 +12,8 @@
     "@astrojs/tailwind": "^6.0.2",
     "astro": "^5.16.14",
     "tailwindcss": "^3.4.17"
+  },
+  "devDependencies": {
+    "@astrojs/sitemap": "^3.7.0"
   }
 }
