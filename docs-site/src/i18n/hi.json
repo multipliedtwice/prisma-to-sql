@@ -143,14 +143,14 @@
         ],
         "highlights": [
           {
-            "label": "Distinct Queries",
+            "label": "DISTINCT क्वेरी",
             "value": "6.3×",
-            "description": "vs Prisma v6"
+            "description": "Prisma v6 की तुलना में"
           },
           {
-            "label": "Relation Filters",
+            "label": "रिलेशन फ़िल्टर",
             "value": "5.5×",
-            "description": "vs Prisma v6 (\"none\"-फ़िल्टर)"
+            "description": "Prisma v6 की तुलना में (\"none\"-फ़िल्टर)"
           }
         ]
       },
@@ -194,14 +194,14 @@
         ],
         "highlights": [
           {
-            "label": "Simple Queries",
+            "label": "सरल क्वेरी",
             "value": "12.6×",
-            "description": "vs Prisma v6"
+            "description": "Prisma v6 की तुलना में"
           },
           {
-            "label": "Relation Filters",
+            "label": "रिलेशन फ़िल्टर",
             "value": "69.7×",
-            "description": "vs Prisma v6 (\"none\"-फ़िल्टर)"
+            "description": "Prisma v6 की तुलना में (\"none\"-फ़िल्टर)"
           }
         ]
       }

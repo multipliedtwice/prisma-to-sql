@@ -143,14 +143,14 @@
         ],
         "highlights": [
           {
-            "label": "Distinct Queries",
+            "label": "استعلامات DISTINCT",
             "value": "6.3×",
-            "description": "vs Prisma v6"
+            "description": "مقارنة بـ Prisma v6"
           },
           {
-            "label": "Relation Filters",
+            "label": "مرشحات العلاقات",
             "value": "5.5×",
-            "description": "vs Prisma v6 (\"none\"-فلتر)"
+            "description": "مقارنة بـ Prisma v6 (\"none\"-فلتر)"
           }
         ]
       },
@@ -194,14 +194,14 @@
         ],
         "highlights": [
           {
-            "label": "Simple Queries",
+            "label": "استعلامات بسيطة",
             "value": "12.6×",
-            "description": "vs Prisma v6"
+            "description": "مقارنة بـ Prisma v6"
           },
           {
-            "label": "Relation Filters",
+            "label": "مرشحات العلاقات",
             "value": "69.7×",
-            "description": "vs Prisma v6 (\"none\"-فلتر)"
+            "description": "مقارنة بـ Prisma v6 (\"none\"-فلتر)"
           }
         ]
       }

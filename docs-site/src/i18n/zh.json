@@ -145,14 +145,14 @@
         ],
         "highlights": [
           {
-            "label": "Distinct Queries",
+            "label": "DISTINCT 查询",
             "value": "6.3×",
-            "description": "vs Prisma v6"
+            "description": "对比 Prisma v6"
           },
           {
-            "label": "Relation Filters",
+            "label": "关系过滤",
             "value": "5.5×",
-            "description": "vs Prisma v6 (\"none\"-过滤器)"
+            "description": "对比 Prisma v6（\"none\"-过滤器）"
           }
         ]
       },
@@ -196,14 +196,14 @@
         ],
         "highlights": [
           {
-            "label": "Simple Queries",
+            "label": "简单查询",
             "value": "12.6×",
-            "description": "vs Prisma v6"
+            "description": "对比 Prisma v6"
           },
           {
-            "label": "Relation Filters",
+            "label": "关系过滤",
             "value": "69.7×",
-            "description": "vs Prisma v6 (\"none\"-过滤器)"
+            "description": "对比 Prisma v6（\"none\"-过滤器）"
           }
         ]
       }

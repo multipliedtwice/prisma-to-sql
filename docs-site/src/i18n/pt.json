@@ -143,12 +143,12 @@
         ],
         "highlights": [
           {
-            "label": "Distinct Queries",
+            "label": "Consultas DISTINCT",
             "value": "6.3×",
             "description": "vs Prisma v6"
           },
           {
-            "label": "Relation Filters",
+            "label": "Filtros de relação",
             "value": "5.5×",
             "description": "vs Prisma v6 (\"none\"-filtro)"
           }
@@ -194,12 +194,12 @@
         ],
         "highlights": [
           {
-            "label": "Simple Queries",
+            "label": "Consultas simples",
             "value": "12.6×",
             "description": "vs Prisma v6"
           },
           {
-            "label": "Relation Filters",
+            "label": "Filtros de relação",
             "value": "69.7×",
             "description": "vs Prisma v6 (\"none\"-filtro)"
           }

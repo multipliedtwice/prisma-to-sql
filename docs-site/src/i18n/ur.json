@@ -100,7 +100,7 @@
   },
   "performance": {
     "title": "کتنا تیز؟ حقیقی بینچ مارکس",
-    "subtitle": "Prisma v6، v7، Drizzle ORM، اور Prisma-SQL کے درمیان جامع موازنہ",
+    "subtitle": "Prisma v6، v7، Drizzle ORM اور Prisma-SQL کے درمیان جامع موازنہ",
     "environment": "بینچ مارک ماحول: MacBook Pro M1 • PostgreSQL 15 • SQLite 3.43 • ہر ڈیٹابیس کے لیے 137 ٹیسٹ کیسز",
     "databases": [
       {
@@ -143,14 +143,14 @@
         ],
         "highlights": [
           {
-            "label": "Distinct Queries",
+            "label": "DISTINCT کوئریز",
             "value": "6.3×",
-            "description": "vs Prisma v6"
+            "description": "Prisma v6 کے مقابلے میں"
           },
           {
-            "label": "Relation Filters",
+            "label": "ریلیشن فلٹرز",
             "value": "5.5×",
-            "description": "vs Prisma v6 (\"none\"-فلٹر)"
+            "description": "Prisma v6 کے مقابلے میں (\"none\"-فلٹر)"
           }
         ]
       },
@@ -194,14 +194,14 @@
         ],
         "highlights": [
           {
-            "label": "Simple Queries",
+            "label": "سادہ کوئریز",
             "value": "12.6×",
-            "description": "vs Prisma v6"
+            "description": "Prisma v6 کے مقابلے میں"
           },
           {
-            "label": "Relation Filters",
+            "label": "ریلیشن فلٹرز",
             "value": "69.7×",
-            "description": "vs Prisma v6 (\"none\"-فلٹر)"
+            "description": "Prisma v6 کے مقابلے میں (\"none\"-فلٹر)"
           }
         ]
       }
