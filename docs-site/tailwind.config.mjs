@@ -4,6 +4,7 @@ export default {
     './src/**/*.{astro,html,js,jsx,md,mdx,svelte,ts,tsx,vue}',
     './src/**/*.astro',
   ],
+  safelist: ["bg-gray-400"],
   theme: {
     extend: {
       colors: {
