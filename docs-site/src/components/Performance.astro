@@ -6,70 +6,93 @@ interface Props {
 const { t } = Astro.props;
 
 const colorMap = {
-  accent: 'text-accent border-accent',
-  blue: 'text-blue-600 border-blue-500',
-  purple: 'text-purple-600 border-purple-500',
-  pink: 'text-pink-600 border-pink-500'
+  accent: { text: 'text-accent', border: 'border-accent' },
+  blue: { text: 'text-blue-600', border: 'border-blue-500' },
+  purple: { text: 'text-purple-600', border: 'border-purple-500' },
+  pink: { text: 'text-pink-600', border: 'border-pink-500' }
 } as const;
 ---
 
 <section class="py-12 sm:py-16 lg:py-20 bg-white">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="text-center mb-12 sm:mb-16">
-      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-4">{t.performance.title}</h2>
+    <div class="text-center mb-10 sm:mb-14">
+      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-3">{t.performance.title}</h2>
       <p class="text-lg sm:text-xl text-gray-600 px-4">{t.performance.subtitle}</p>
       <p class="text-xs sm:text-sm text-gray-500 mt-2 px-4">{t.performance.environment}</p>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-12">
-      {t.performance.metrics.map((metric: any) => {
-        const colors = colorMap[metric.color as keyof typeof colorMap] || colorMap.accent;
-        const [textColor, borderColor] = colors.split(' ');
-        
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      {t.performance.databases.map((db: any) => {
+        const theme = colorMap[db.color as keyof typeof colorMap] ?? colorMap.accent;
+
         return (
-          <article class={`metric-card bg-white rounded-xl p-6 text-center border-t-4 ${borderColor}`}>
-            <div class={`text-4xl sm:text-5xl font-bold ${textColor} mb-2`}>
-              {metric.value}
+          <article class={`rounded-2xl border-2 ${theme.border} bg-white p-6 sm:p-8`}>
+            <header class="mb-6">
+              <h3 class={`text-2xl sm:text-3xl font-bold ${theme.text} mb-2`}>{db.name}</h3>
+              <p class="text-sm text-gray-600">{db.subtitle}</p>
+            </header>
+
+            <div class="space-y-4">
+              {db.comparisons.map((comparison: any) => (
+                <div class="rounded-xl">
+                  <div class="flex items-baseline justify-between gap-3 mb-2">
+                    <div class={`text-sm ${comparison.isBaseline ? 'font-semibold' : 'font-bold'} text-gray-900`}>
+                      {comparison.label}
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                      <div class={`text-sm ${comparison.isBaseline ? 'font-semibold' : 'font-bold'} tabular-nums ${comparison.color}`}>
+                        {comparison.time}
+                      </div>
+                      {comparison.speedup && (
+                        <div class="text-xs font-medium text-gray-500">
+                          {comparison.speedup} faster
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div class="h-2.5 rounded-full bg-gray-200">
+                    <div
+                      class={`${comparison.bgColor} h-2.5 rounded-full transition-all duration-500`}
+                      style={`width: ${comparison.width}%`}
+                      role="progressbar"
+                      aria-valuenow={comparison.width}
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-label={`${comparison.label}: ${comparison.time}`}
+                    ></div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div class="text-sm sm:text-base text-gray-600 font-semibold">
-              {metric.label}
-            </div>
-            <div class="text-xs sm:text-sm text-gray-500 mt-2">
-              {metric.subtitle}
-            </div>
+
+            {db.highlights && (
+              <div class="mt-6 pt-6 border-t border-gray-200">
+                <div class="grid grid-cols-2 gap-4">
+                  {db.highlights.map((highlight: any) => (
+                    <div class="text-center">
+                      <div class={`text-2xl font-bold ${theme.text}`}>{highlight.value}</div>
+                      <div class="text-xs text-gray-600 mt-1">{highlight.label}</div>
+                      <div class="text-xs text-gray-500">{highlight.description}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </article>
         );
       })}
     </div>
 
-    <article class="bg-white rounded-xl p-6 sm:p-8">
-      <h3 class="text-xl sm:text-2xl font-bold text-primary mb-6 text-center">
-        {t.performance.comparisonTitle}
-      </h3>
-      <div class="space-y-6">
-        {t.performance.comparisons.map((comparison: any) => (
-          <div>
-            <div class="flex justify-between mb-2 flex-wrap gap-2">
-              <span class={`font-semibold text-sm sm:text-base ${comparison.color} ${comparison.bold ? 'font-bold' : ''}`}>
-                {comparison.label}
-              </span>
-              <span class={`text-sm sm:text-base ${comparison.color} ${comparison.bold ? 'font-bold' : ''}`}>
-                {comparison.time}
-              </span>
-            </div>
-            <div class="w-full bg-gray-200 rounded-full h-4" role="progressbar" aria-valuenow={comparison.width} aria-valuemin="0" aria-valuemax="100" aria-label={`${comparison.label}: ${comparison.time}`}>
-              <div class={`${comparison.bgColor} h-4 rounded-full transition-all`} style={`width: ${comparison.width}%`}></div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <p class="text-xs sm:text-sm text-gray-600 mt-6 text-center px-4">
-        {t.performance.footer}
-        <a href="https://github.com/multipliedtwice/prisma-to-sql#performance" class="text-accent hover:text-green-700 underline decoration-2 underline-offset-2">
-          {t.performance.footerLink} →
-        </a>
-      </p>
-    </article>
+    <p class="text-xs sm:text-sm text-gray-600 mt-8 text-center px-4">
+      {t.performance.footer}
+      <a
+        target="_blank"
+        href="https://github.com/multipliedtwice/prisma-to-sql/tree/main/benchmark-results"
+        class="ml-2 text-accent hover:text-green-700 underline decoration-2 underline-offset-2"
+      >
+        {t.performance.footerLink} →
+      </a>
+    </p>
   </div>
 </section>

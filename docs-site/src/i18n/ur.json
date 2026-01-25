@@ -99,72 +99,115 @@
     "conclusion": "یہ extension Prisma کو complement کرتی ہے اور read queries کے لیے ایک تیز راستہ دیتی ہے۔ آپ Prisma کی پسندیدہ چیزیں برقرار رکھتے ہیں اور typical cases میں 2–7× تیز reads (اور SQLite relation filters میں زیادہ سے زیادہ 53.5×) حاصل کرتے ہیں جب performance اہم ہو۔"
   },
   "performance": {
-    "title": "کتنا تیز؟ حقیقی benchmarks",
-    "subtitle": "دیکھیں یہ extension 137 test cases میں Prisma کو کیسے accelerate کرتی ہے",
-    "environment": "Benchmark environment: MacBook Pro M1 • PostgreSQL 15 • SQLite 3.43",
-    "metrics": [
+    "title": "کتنا تیز؟ حقیقی بینچ مارکس",
+    "subtitle": "Prisma v6، v7، Drizzle ORM، اور Prisma-SQL کے درمیان جامع موازنہ",
+    "environment": "بینچ مارک ماحول: MacBook Pro M1 • PostgreSQL 15 • SQLite 3.43 • ہر ڈیٹابیس کے لیے 137 ٹیسٹ کیسز",
+    "databases": [
       {
-        "value": "2.9×",
-        "label": "Complex filters",
-        "subtitle": "PostgreSQL speedup",
-        "color": "accent"
+        "name": "PostgreSQL",
+        "color": "accent",
+        "subtitle": "57 ٹیسٹ کیسز کا اوسط",
+        "comparisons": [
+          {
+            "label": "Prisma v6",
+            "time": "2.10ms",
+            "width": 100,
+            "bgColor": "bg-gray-400",
+            "color": "text-gray-700",
+            "isBaseline": true
+          },
+          {
+            "label": "Prisma v7",
+            "time": "1.95ms",
+            "width": 93,
+            "bgColor": "bg-gray-400",
+            "color": "text-gray-700",
+            "speedup": "1.08×"
+          },
+          {
+            "label": "Drizzle ORM",
+            "time": "1.40ms",
+            "width": 67,
+            "bgColor": "bg-gray-400",
+            "color": "text-gray-700",
+            "speedup": "1.50×"
+          },
+          {
+            "label": "Prisma-SQL ⚡",
+            "time": "0.90ms",
+            "width": 43,
+            "bgColor": "bg-gradient-to-r from-accent to-green-600",
+            "color": "text-accent",
+            "speedup": "2.34×"
+          }
+        ],
+        "highlights": [
+          {
+            "label": "Distinct Queries",
+            "value": "6.3×",
+            "description": "vs Prisma v6"
+          },
+          {
+            "label": "Relation Filters",
+            "value": "5.5×",
+            "description": "vs Prisma v6 (\"none\"-فلٹر)"
+          }
+        ]
       },
       {
-        "value": "3.0×",
-        "label": "Nested includes",
-        "subtitle": "PostgreSQL speedup",
-        "color": "blue"
-      },
-      {
-        "value": "7.7×",
-        "label": "Simple queries",
-        "subtitle": "SQLite speedup",
-        "color": "purple"
-      },
-      {
-        "value": "53.5×",
-        "label": "Relation filters",
-        "subtitle": "SQLite speedup",
-        "color": "pink"
+        "name": "SQLite",
+        "color": "purple",
+        "subtitle": "56 ٹیسٹ کیسز کا اوسط",
+        "comparisons": [
+          {
+            "label": "Prisma v6",
+            "time": "5.48ms",
+            "width": 100,
+            "bgColor": "bg-gray-400",
+            "color": "text-gray-700",
+            "isBaseline": true
+          },
+          {
+            "label": "Prisma v7",
+            "time": "4.12ms",
+            "width": 75,
+            "bgColor": "bg-gray-400",
+            "color": "text-gray-700",
+            "speedup": "1.33×"
+          },
+          {
+            "label": "Drizzle ORM",
+            "time": "2.11ms",
+            "width": 39,
+            "bgColor": "bg-gray-400",
+            "color": "text-gray-700",
+            "speedup": "2.60×"
+          },
+          {
+            "label": "Prisma-SQL ⚡",
+            "time": "0.73ms",
+            "width": 13,
+            "bgColor": "bg-gradient-to-r from-purple-500 to-pink-600",
+            "color": "text-purple-600",
+            "speedup": "7.50×"
+          }
+        ],
+        "highlights": [
+          {
+            "label": "Simple Queries",
+            "value": "12.6×",
+            "description": "vs Prisma v6"
+          },
+          {
+            "label": "Relation Filters",
+            "value": "69.7×",
+            "description": "vs Prisma v6 (\"none\"-فلٹر)"
+          }
+        ]
       }
     ],
-    "comparisonTitle": "Standard Prisma بمقابلہ Optimized Prisma-SQL",
-    "comparisons": [
-      {
-        "label": "Prisma v7 (Baseline)",
-        "time": "2.10ms average",
-        "width": 100,
-        "bgColor": "bg-gray-400",
-        "color": "text-gray-700",
-        "bold": false
-      },
-      {
-        "label": "Prisma + Extension (PostgreSQL)",
-        "time": "2.10ms → 1.00ms (2.10× faster) ⚡",
-        "width": 48,
-        "bgColor": "bg-gradient-to-r from-accent to-green-600",
-        "color": "text-accent",
-        "bold": true
-      },
-      {
-        "label": "Prisma v7 SQLite (Baseline)",
-        "time": "5.48ms average",
-        "width": 100,
-        "bgColor": "bg-gray-400",
-        "color": "text-gray-700",
-        "bold": false
-      },
-      {
-        "label": "Prisma + Extension (SQLite)",
-        "time": "5.48ms → 1.00ms (5.48× faster) ⚡",
-        "width": 18,
-        "bgColor": "bg-gradient-to-r from-purple-500 to-pink-600",
-        "color": "text-purple-600",
-        "bold": true
-      }
-    ],
-    "footer": "Direct comparison دکھاتا ہے کہ یہ extension ایک جیسے operations میں Prisma queries کو کیسے تیز کرتی ہے۔",
-    "footerLink": "مکمل benchmark data دیکھیں"
+    "footer": "بینچ مارکس ہر ڈیٹابیس کے لیے 137 E2E ٹیسٹس پر مبنی ہیں۔ Prisma v6.16.3, Prisma v7.2.0, Drizzle ORM latest.",
+    "footerLink": "مکمل بینچ مارک ڈیٹا دیکھیں"
   },
   "howItWorks": {
     "title": "یہ Prisma کو کیسے optimize کرتی ہے",
