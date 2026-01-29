@@ -294,7 +294,7 @@ const dmmf = await loadDmmf();
 console.log(dmmf.datamodel.models.map((m) => m.name));
 ```
 
-Probably would be a good idea to run this on generation step or cache to avoid recomputations on each request.
+Probably would be a good idea to run this on generation step or cache the result to avoid recomputations on each request.
 
 ### Debug Mode
 
