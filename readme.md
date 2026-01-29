@@ -272,6 +272,30 @@ Benchmarks from 137 E2E tests comparing identical queries:
 
 ## Configuration
 
+### Prisma V7 and DMMF
+
+You can use `@prisma/internals` to retrieve DMMF from schema, smth like this:
+
+```ts
+import { getDMMF } from "@prisma/internals";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import type { DMMF } from "@prisma/generator-helper";
+
+const schemaPath = resolve(process.cwd(), "prisma/schema.prisma");
+const datamodel = readFileSync(schemaPath, "utf8");
+
+export async function loadDmmf(): Promise<DMMF.Document> {
+  return (await getDMMF({ datamodel })) as DMMF.Document;
+}
+
+// Example usage
+const dmmf = await loadDmmf();
+console.log(dmmf.datamodel.models.map((m) => m.name));
+```
+
+Probably would be a good idea to run this on generation step or cache to avoid recomputations on each request.
+
 ### Debug Mode
 
 See generated SQL for every query:
