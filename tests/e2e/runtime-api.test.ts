@@ -2,11 +2,17 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import postgres from 'postgres'
 import Database from 'better-sqlite3'
 
-import { speedExtension, createPrismaSQL, createToSQL } from '../../src/index'
+import {
+  speedExtension,
+  createPrismaSQL,
+  createToSQL,
+  convertDMMFToModels,
+} from '../../src/index'
 import { createTestDB, type TestDB } from '../helpers/db'
 import { seedDatabase, type SeedResult } from '../helpers/seed-db'
 import { normalizeValue, sortByField } from '../helpers/compare'
 import { Prisma } from '../generated/client'
+import { DMMF } from '@prisma/generator-helper'
 
 let pgDb: TestDB
 let sqliteDb: TestDB
@@ -14,7 +20,7 @@ let seed: SeedResult
 let pgClient: ReturnType<typeof postgres>
 let sqliteClient: Database.Database
 
-const dmmf = Prisma.dmmf
+const dmmf = Prisma.dmmf.datamodel as DMMF.Datamodel
 
 describe('Runtime API Tests', () => {
   describe('speedExtension - PostgreSQL', () => {
@@ -176,7 +182,7 @@ describe('Runtime API Tests', () => {
       const prisma = pgDb.prisma.$extends(
         speedExtension({
           postgres: pgClient,
-          dmmf,
+
           onQuery: (info) => queries.push(info),
         }),
       )
@@ -199,8 +205,7 @@ describe('Runtime API Tests', () => {
       const prisma = pgDb.prisma.$extends(
         speedExtension({
           postgres: pgClient,
-          dmmf,
-          models: ['User'],
+
           onQuery: (info) => queries.push(info.model),
         }),
       )
@@ -218,7 +223,7 @@ describe('Runtime API Tests', () => {
       const prisma = pgDb.prisma.$extends(
         speedExtension({
           postgres: pgClient,
-          dmmf,
+
           onQuery: (info) => queries.push(info.model),
         }),
       )
@@ -323,7 +328,7 @@ describe('Runtime API Tests', () => {
       const prisma = pgDb.prisma.$extends(
         speedExtension({
           postgres: invalidClient,
-          dmmf,
+
           debug: true,
         }),
       )
@@ -481,7 +486,7 @@ describe('Runtime API Tests', () => {
     it('creates instance and generates valid SQL', () => {
       const db = createPrismaSQL({
         client: legacyPgClient,
-        dmmf,
+
         dialect: 'postgres',
         execute: (c, sql, params) =>
           c.unsafe(sql, params as any[]) as Promise<unknown[]>,
@@ -501,7 +506,7 @@ describe('Runtime API Tests', () => {
     it('throws on unknown model', () => {
       const db = createPrismaSQL({
         client: legacyPgClient,
-        dmmf,
+
         dialect: 'postgres',
         execute: (c, sql, params) =>
           c.unsafe(sql, params as any[]) as Promise<unknown[]>,
@@ -513,7 +518,7 @@ describe('Runtime API Tests', () => {
     it('findMany matches Prisma output', async () => {
       const db = createPrismaSQL({
         client: legacyPgClient,
-        dmmf,
+
         dialect: 'postgres',
         execute: (c, sql, params) =>
           c.unsafe(sql, params as any[]) as Promise<unknown[]>,
@@ -537,7 +542,7 @@ describe('Runtime API Tests', () => {
 
   describe('createToSQL (Standalone API)', () => {
     it('generates SQL without client', () => {
-      const toSQL = createToSQL(dmmf, 'postgres')
+      const toSQL = createToSQL(convertDMMFToModels(dmmf), 'postgres')
 
       const { sql, params } = toSQL('User', 'findMany', {
         where: { status: 'ACTIVE' },
@@ -551,7 +556,7 @@ describe('Runtime API Tests', () => {
     })
 
     it('generates SQLite SQL with ? placeholders', () => {
-      const toSQL = createToSQL(dmmf, 'sqlite')
+      const toSQL = createToSQL(convertDMMFToModels(dmmf), 'sqlite')
 
       const { sql, params } = toSQL('User', 'findMany', {
         where: { status: 'ACTIVE' },
@@ -566,8 +571,8 @@ describe('Runtime API Tests', () => {
     })
 
     it('works with both dialects', () => {
-      const pgSQL = createToSQL(dmmf, 'postgres')
-      const sqliteSQL = createToSQL(dmmf, 'sqlite')
+      const pgSQL = createToSQL(convertDMMFToModels(dmmf), 'postgres')
+      const sqliteSQL = createToSQL(convertDMMFToModels(dmmf), 'sqlite')
 
       const pgResult = pgSQL('User', 'findMany', { where: { id: 'test' } })
       const sqliteResult = sqliteSQL('User', 'findMany', {
@@ -582,19 +587,17 @@ describe('Runtime API Tests', () => {
 
   describe('dmmf Compatibility', () => {
     it('datamodel structure is correct', () => {
-      const datamodel = dmmf.datamodel
+      expect(dmmf).toBeDefined()
+      expect(dmmf.models).toBeInstanceOf(Array)
+      expect(dmmf.models.length).toBeGreaterThan(0)
 
-      expect(datamodel).toBeDefined()
-      expect(datamodel.models).toBeInstanceOf(Array)
-      expect(datamodel.models.length).toBeGreaterThan(0)
-
-      const userModel = datamodel.models.find((m: any) => m.name === 'User')
+      const userModel = dmmf.models.find((m: any) => m.name === 'User')
       expect(userModel).toBeDefined()
       expect(userModel!.fields).toBeInstanceOf(Array)
     })
 
     it('createToSQL parses dmmf correctly', () => {
-      const toSQL = createToSQL(dmmf, 'postgres')
+      const toSQL = createToSQL(convertDMMFToModels(dmmf), 'postgres')
 
       expect(() => toSQL('User', 'findMany', {})).not.toThrow()
       expect(() => toSQL('Task', 'findMany', {})).not.toThrow()
