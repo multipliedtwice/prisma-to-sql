@@ -45,7 +45,6 @@ generatorHandler({
       version,
       defaultOutput: './generated/sql',
       prettyName: 'prisma-sql-generator',
-      requiresGenerators: ['prisma-client-js'],
     }
   },
 
