@@ -3,6 +3,7 @@ import { OrderByType } from './builder/shared/order-by-utils'
 
 export interface Field {
   name: string
+  dbName: string
   type: string
   isRequired: boolean
   isRelation: boolean
@@ -11,7 +12,6 @@ export interface Field {
   foreignKey?: string
   references?: string
   isForeignKeyLocal?: boolean
-  dbName?: string
 }
 
 export interface Model {
