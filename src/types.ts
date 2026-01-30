@@ -1,3 +1,4 @@
+// src/types.ts
 import { OrderByType } from './builder/shared/order-by-utils'
 
 export interface Field {
@@ -10,12 +11,13 @@ export interface Field {
   foreignKey?: string
   references?: string
   isForeignKeyLocal?: boolean
+  dbName?: string
 }
 
 export interface Model {
   name: string
   tableName: string
-  fields: readonly Field[]
+  fields: Field[]
 }
 
 export interface PrismaQueryArgs {
