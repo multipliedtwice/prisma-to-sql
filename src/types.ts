@@ -15,7 +15,7 @@ export interface Field {
 export interface Model {
   name: string
   tableName: string
-  fields: Field[]
+  fields: readonly Field[]
 }
 
 export interface PrismaQueryArgs {
@@ -26,9 +26,9 @@ export interface PrismaQueryArgs {
   cursor?: Record<string, unknown>
   take?: number | string
   skip?: number | string
-  distinct?: string[]
+  distinct?: readonly string[]
 
-  by?: string[]
+  by?: readonly string[]
   having?: Record<string, unknown>
 
   _count?: unknown
