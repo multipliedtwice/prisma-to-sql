@@ -1,23 +1,54 @@
-// tests/sql-injection/basic.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { Prisma, PrismaClient } from '../generated/client'
+import { readFileSync, writeFileSync, unlinkSync } from 'fs'
+import { join } from 'path'
 import { createToSQL, convertDMMFToModels } from '../../src'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
-import { DMMF } from '@prisma/generator-helper'
+import { getDatamodel } from '../helpers/datamodel'
+
+const PRISMA_DIR = join(process.cwd(), 'tests', 'prisma')
+const SCHEMA_PATH = join(PRISMA_DIR, 'schema-postgres.prisma')
+const SCHEMA_PATH_V7 = join(PRISMA_DIR, 'schema-postgres-v7.prisma')
+
+function mergeSchema(): void {
+  const base = readFileSync(join(PRISMA_DIR, 'base.prisma'), 'utf-8')
+
+  const header = `generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/postgres"
+}
+
+datasource db {
+  provider = "postgresql"
+}`
+
+  writeFileSync(SCHEMA_PATH, `${header}\n\n${base}`)
+  writeFileSync(SCHEMA_PATH_V7, `${header}\n\n${base}`)
+}
+
+function cleanupSchema(): void {
+  try {
+    unlinkSync(SCHEMA_PATH)
+  } catch {}
+  try {
+    unlinkSync(SCHEMA_PATH_V7)
+  } catch {}
+}
 
 describe('SQL Injection - Basic Protection', () => {
-  let prisma: PrismaClient
   let toSQL: ReturnType<typeof createToSQL>
 
-  beforeAll(() => {
-    prisma = new PrismaClient()
-    const models = convertDMMFToModels(Prisma.dmmf.datamodel as DMMF.Datamodel)
+  beforeAll(async () => {
+    mergeSchema()
+
+    const datamodel = await getDatamodel('postgres')
+    const models = convertDMMFToModels(datamodel)
+
     setGlobalDialect('postgres')
     toSQL = createToSQL(models, 'postgres')
   })
 
   afterAll(async () => {
-    await prisma.$disconnect()
+    cleanupSchema()
   })
 
   describe('Value Parameterization', () => {
@@ -212,6 +243,35 @@ describe('SQL Injection - Basic Protection', () => {
       })
 
       expect(params).toContain("test'; DROP--")
+    })
+  })
+
+  describe('Field -> Column Mapping (@map)', () => {
+    it('should use mapped column names in WHERE', () => {
+      const { sql, params } = toSQL('User', 'findMany', {
+        where: { isDeleted: false },
+      })
+
+      expect(params).toEqual([false])
+      expect(sql).toMatch(/\b\w+\.(?:")?is_deleted(?:")?\b/)
+    })
+
+    it('should use mapped column names in SELECT', () => {
+      const { sql } = toSQL('User', 'findMany', {
+        select: { id: true, avatarUrl: true, isDeleted: true },
+      })
+
+      expect(sql).toMatch(/\b\w+\.(?:")?avatar_url(?:")?\b/)
+      expect(sql).toMatch(/\b\w+\.(?:")?is_deleted(?:")?\b/)
+    })
+
+    it('should use mapped column names in ORDER BY', () => {
+      const { sql } = toSQL('User', 'findMany', {
+        orderBy: { isDeleted: 'asc' },
+      })
+
+      expect(sql).toMatch(/\bORDER BY\b/i)
+      expect(sql).toMatch(/\b\w+\.(?:")?isDeleted(?:")?\s+ASC\b/i)
     })
   })
 })

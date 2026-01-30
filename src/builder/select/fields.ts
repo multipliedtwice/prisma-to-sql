@@ -4,7 +4,7 @@ import {
   getScalarFieldSet,
   getRelationFieldSet,
 } from '../shared/model-field-cache'
-import { col, sqlStringLiteral } from '../shared/sql-utils'
+import { col, colWithAlias, sqlStringLiteral } from '../shared/sql-utils'
 import {
   hasProperty,
   isNotNullish,
@@ -72,7 +72,7 @@ function buildDefaultScalarFields(model: Model, alias: string): string[] {
   for (const f of model.fields) {
     if (f.isRelation) continue
     const excluded = excludedPrefixes.some((p) => f.name.startsWith(p))
-    if (!excluded) out.push(col(alias, f.name))
+    if (!excluded) out.push(colWithAlias(alias, f.name, model))
   }
 
   if (!isNonEmptyArray(out)) {
@@ -102,7 +102,9 @@ export function buildSelectFields(
   const { scalarSelected, hasRelationSelection, hasCount } =
     analyzeSelectEntries(entries, scalarSet, relationSet)
 
-  const fields = scalarSelected.map((field) => col(alias, field))
+  const fields = scalarSelected.map((field) =>
+    colWithAlias(alias, field, model),
+  )
 
   if (!isNonEmptyArray(fields)) {
     if (hasRelationSelection) return ''
@@ -122,7 +124,9 @@ function buildAllScalarParts(model: Model, alias: string): string[] {
 
   const parts: string[] = []
   for (const field of scalarFields) {
-    parts.push(`${sqlStringLiteral(field.name)}, ${col(alias, field.name)}`)
+    parts.push(
+      `${sqlStringLiteral(field.name)}, ${col(alias, field.name, model)}`,
+    )
   }
   return parts
 }
@@ -145,12 +149,13 @@ function buildSelectedScalarParts(
   entries: readonly SelectEntry[],
   scalarNames: ReadonlySet<string>,
   alias: string,
+  model: Model,
 ): string[] {
   const parts: string[] = []
   for (const [key, value] of entries) {
     if (!scalarNames.has(key)) continue
     if (value === true) {
-      parts.push(`${sqlStringLiteral(key)}, ${col(alias, key)}`)
+      parts.push(`${sqlStringLiteral(key)}, ${col(alias, key, model)}`)
     }
   }
   return parts
@@ -185,9 +190,12 @@ export function buildRelationSelect(
     const entries = toSelectEntries(sel)
     validateRelationSelectKeys(entries, scalarNames, relationNames)
 
-    return buildSelectedScalarParts(entries, scalarNames, relAlias).join(
-      SQL_SEPARATORS.FIELD_LIST,
-    )
+    return buildSelectedScalarParts(
+      entries,
+      scalarNames,
+      relAlias,
+      relModel,
+    ).join(SQL_SEPARATORS.FIELD_LIST)
   }
 
   return buildAllScalarParts(relModel, relAlias).join(SQL_SEPARATORS.FIELD_LIST)

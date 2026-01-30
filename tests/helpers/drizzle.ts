@@ -19,24 +19,30 @@ import {
 } from 'drizzle-orm'
 import postgres from 'postgres'
 import Database from 'better-sqlite3'
-import * as pgSchema from '../drizzle/schema'
-import * as sqliteSchema from '../drizzle/schema'
+import * as schemaAll from '../drizzle/schema'
 
 export type PostgresDrizzleDB = {
-  db: ReturnType<typeof drizzlePg<typeof pgSchema>>
+  db: ReturnType<typeof drizzlePg>
   client: postgres.Sql
   dialect: 'postgres'
-  schema: typeof pgSchema
 }
 
 export type SqliteDrizzleDB = {
-  db: ReturnType<typeof drizzleSqlite<typeof sqliteSchema>>
+  db: ReturnType<typeof drizzleSqlite>
   client: Database.Database
   dialect: 'sqlite'
-  schema: typeof sqliteSchema
 }
 
 export type DrizzleDB = PostgresDrizzleDB | SqliteDrizzleDB
+
+function pickSchema(prefix: 'pg' | 'sqlite') {
+  return Object.fromEntries(
+    Object.entries(schemaAll).filter(([k]) => k.startsWith(prefix)),
+  ) as Record<string, unknown>
+}
+
+const pgSchema = pickSchema('pg')
+const sqliteSchema = pickSchema('sqlite')
 
 export function createDrizzleDB(
   dialect: 'postgres',
@@ -55,14 +61,14 @@ export function createDrizzleDB(
       connectionString ||
         'postgresql://postgres:postgres@localhost:5433/prisma_test',
     )
-    const db = drizzlePg(client, { schema: pgSchema })
-    return { db, client, dialect: 'postgres', schema: pgSchema }
-  } else {
-    const dbPath = connectionString || './tests/prisma/db.sqlite'
-    const client = new Database(dbPath)
-    const db = drizzleSqlite(client, { schema: sqliteSchema })
-    return { db, client, dialect: 'sqlite', schema: sqliteSchema }
+    const db = drizzlePg(client, { schema: pgSchema as any })
+    return { db, client, dialect: 'postgres' }
   }
+
+  const dbPath = connectionString || './tests/prisma/db.sqlite'
+  const client = new Database(dbPath)
+  const db = drizzleSqlite(client, { schema: sqliteSchema as any })
+  return { db, client, dialect: 'sqlite' }
 }
 
 export {

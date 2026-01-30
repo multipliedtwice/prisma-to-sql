@@ -2,7 +2,7 @@ import { Model, Field } from '../types'
 import { SPECIAL_FIELDS } from './shared/constants'
 import { createError } from './shared/errors'
 import { getRelationFieldSet } from './shared/model-field-cache'
-import { quote, normalizeKeyList } from './shared/sql-utils'
+import { quoteColumn, normalizeKeyList } from './shared/sql-utils'
 import { isNotNullish } from './shared/validators/type-guards'
 
 export function isRelationField(fieldName: string, model: Model): boolean {
@@ -48,6 +48,8 @@ function getReferenceFieldNames(
 
 export function joinCondition(
   field: Field,
+  parentModel: Model,
+  childModel: Model,
   parentAlias: string,
   childAlias: string,
 ): string {
@@ -76,11 +78,11 @@ export function joinCondition(
     const ref = refFields[i]
 
     const left = field.isForeignKeyLocal
-      ? `${childAlias}.${quote(ref)}`
-      : `${childAlias}.${quote(fk)}`
+      ? `${childAlias}.${quoteColumn(childModel, ref)}`
+      : `${childAlias}.${quoteColumn(childModel, fk)}`
     const right = field.isForeignKeyLocal
-      ? `${parentAlias}.${quote(fk)}`
-      : `${parentAlias}.${quote(ref)}`
+      ? `${parentAlias}.${quoteColumn(parentModel, fk)}`
+      : `${parentAlias}.${quoteColumn(parentModel, ref)}`
 
     parts.push(`${left} = ${right}`)
   }

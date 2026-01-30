@@ -1,4 +1,4 @@
-import { PrismaQueryArgs } from '../types'
+import { PrismaQueryArgs, Model } from '../types'
 import { SQL_SEPARATORS, SQL_TEMPLATES } from './shared/constants'
 import { col, quote } from './shared/sql-utils'
 import { ParamStore } from './shared/param-store'
@@ -158,6 +158,7 @@ function buildOrderByFragment(
   entries: OrderByEntry[],
   alias: string,
   dialect: SqlDialect,
+  model?: Model,
 ): string {
   if (entries.length === 0) return ''
 
@@ -165,7 +166,7 @@ function buildOrderByFragment(
 
   for (const e of entries) {
     const dir = e.direction.toUpperCase()
-    const c = col(alias, e.field)
+    const c = col(alias, e.field, model)
 
     if (dialect === 'postgres') {
       const nulls = isNotNullish(e.nulls)
@@ -222,6 +223,7 @@ function buildCursorFilterParts(
   cursor: Record<string, unknown>,
   cursorAlias: string,
   params: ParamStore,
+  model?: Model,
 ): {
   whereSql: string
   placeholdersByField: Map<string, string>
@@ -235,7 +237,7 @@ function buildCursorFilterParts(
   const parts: string[] = []
 
   for (const [field, value] of entries) {
-    const c = `${cursorAlias}.${quote(field)}`
+    const c = `${cursorAlias}.${quote(model ? String(col('', field, model)).slice(1) : field)}`
     if (value === null) {
       parts.push(`${c} IS NULL`)
       continue
@@ -256,8 +258,15 @@ function cursorValueExpr(
   cursorAlias: string,
   cursorWhereSql: string,
   field: string,
+  model?: Model,
 ): string {
-  return `(SELECT ${cursorAlias}.${quote(field)} ${SQL_TEMPLATES.FROM} ${tableName} ${cursorAlias} ${SQL_TEMPLATES.WHERE} ${cursorWhereSql} ${SQL_TEMPLATES.LIMIT} 1)`
+  const colName = model
+    ? String(col(cursorAlias, field, model))
+        .split('.')
+        .slice(1)
+        .join('.')
+    : quote(field)
+  return `(SELECT ${cursorAlias}.${colName} ${SQL_TEMPLATES.FROM} ${tableName} ${cursorAlias} ${SQL_TEMPLATES.WHERE} ${cursorWhereSql} ${SQL_TEMPLATES.LIMIT} 1)`
 }
 
 function buildCursorRowExistsExpr(
@@ -295,11 +304,12 @@ function buildOuterCursorMatch(
   outerAlias: string,
   placeholdersByField: Map<string, string>,
   params: ParamStore,
+  model?: Model,
 ): string {
   const parts: string[] = []
 
   for (const [field, value] of Object.entries(cursor)) {
-    const c = col(outerAlias, field)
+    const c = col(outerAlias, field, model)
     if (value === null) {
       parts.push(`${c} IS NULL`)
       continue
@@ -346,6 +356,7 @@ export function buildCursorCondition(
   alias: string,
   params: ParamStore,
   dialect?: SqlDialect,
+  model?: Model,
 ): string {
   const d = dialect ?? getGlobalDialect()
 
@@ -356,7 +367,7 @@ export function buildCursorCondition(
 
   const cursorAlias = '__tp_cursor_src'
   const { whereSql: cursorWhereSql, placeholdersByField } =
-    buildCursorFilterParts(cursor, cursorAlias, params)
+    buildCursorFilterParts(cursor, cursorAlias, params, model)
 
   let orderEntries = buildOrderEntries(orderBy)
 
@@ -380,6 +391,7 @@ export function buildCursorCondition(
     alias,
     placeholdersByField,
     params,
+    model,
   )
 
   const orClauses: string[] = []
@@ -389,14 +401,26 @@ export function buildCursorCondition(
 
     for (let i = 0; i < level; i++) {
       const e = orderEntries[i]
-      const c = col(alias, e.field)
-      const v = cursorValueExpr(tableName, cursorAlias, cursorWhereSql, e.field)
+      const c = col(alias, e.field, model)
+      const v = cursorValueExpr(
+        tableName,
+        cursorAlias,
+        cursorWhereSql,
+        e.field,
+        model,
+      )
       andParts.push(buildCursorEqualityExpr(c, v))
     }
 
     const e = orderEntries[level]
-    const c = col(alias, e.field)
-    const v = cursorValueExpr(tableName, cursorAlias, cursorWhereSql, e.field)
+    const c = col(alias, e.field, model)
+    const v = cursorValueExpr(
+      tableName,
+      cursorAlias,
+      cursorWhereSql,
+      e.field,
+      model,
+    )
     const nulls = e.nulls ?? defaultNullsFor(d, e.direction)
     andParts.push(buildCursorInequalityExpr(c, e.direction, nulls, v))
 
@@ -411,22 +435,24 @@ export function buildOrderBy(
   orderBy: unknown,
   alias: string,
   dialect?: SqlDialect,
+  model?: Model,
 ): string {
   const entries = buildOrderEntries(orderBy)
   if (entries.length === 0) return ''
 
   const d = dialect ?? getGlobalDialect()
-  return buildOrderByFragment(entries, alias, d)
+  return buildOrderByFragment(entries, alias, d, model)
 }
 
 export function buildOrderByClause(
   args: PrismaQueryArgs,
   alias: string,
   dialect?: SqlDialect,
+  model?: Model,
 ): string {
   if (!isNotNullish(args.orderBy)) return ''
 
-  const result = buildOrderBy(args.orderBy, alias, dialect)
+  const result = buildOrderBy(args.orderBy, alias, dialect, model)
 
   if (!isNonEmptyString(result)) {
     throw new Error(

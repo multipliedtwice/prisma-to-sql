@@ -1,6 +1,7 @@
 import { SqlDialect } from '../../sql-builder-dialect'
 import { needsQuoting } from './validators/sql-validators'
 import { isEmptyString, isNotNullish } from './validators/type-guards'
+import type { Model } from '../../types'
 
 const NUL = String.fromCharCode(0)
 
@@ -189,7 +190,40 @@ export function quote(id: string): string {
   return id
 }
 
-export function col(alias: string, field: string): string {
+function pickDbFieldName(field: any): string | undefined {
+  const candidates = [
+    field?.dbName,
+    field?.columnName,
+    field?.databaseName,
+    field?.mappedName,
+  ]
+  for (const c of candidates) {
+    if (typeof c === 'string') {
+      const s = c.trim()
+      if (s.length > 0) return s
+    }
+  }
+  return undefined
+}
+
+export function resolveColumnName(
+  model: Model | undefined,
+  fieldName: string,
+): string {
+  if (!model) return fieldName
+  const f = (model.fields as any[]).find((x) => x?.name === fieldName)
+  if (!f) return fieldName
+  return pickDbFieldName(f) ?? fieldName
+}
+
+export function quoteColumn(
+  model: Model | undefined,
+  fieldName: string,
+): string {
+  return quote(resolveColumnName(model, fieldName))
+}
+
+export function col(alias: string, field: string, model?: Model): string {
   if (isEmptyString(alias)) {
     throw new Error('col: alias is required and cannot be empty')
   }
@@ -198,7 +232,31 @@ export function col(alias: string, field: string): string {
     throw new Error('col: field is required and cannot be empty')
   }
 
-  return `${alias}.${quote(field)}`
+  const columnName = resolveColumnName(model, field)
+  return `${alias}.${quote(columnName)}`
+}
+
+export function colWithAlias(
+  alias: string,
+  field: string,
+  model?: Model,
+): string {
+  if (isEmptyString(alias)) {
+    throw new Error('colWithAlias: alias is required and cannot be empty')
+  }
+
+  if (isEmptyString(field)) {
+    throw new Error('colWithAlias: field is required and cannot be empty')
+  }
+
+  const columnName = resolveColumnName(model, field)
+  const columnRef = `${alias}.${quote(columnName)}`
+
+  if (columnName !== field) {
+    return `${columnRef} AS ${quote(field)}`
+  }
+
+  return columnRef
 }
 
 export function sqlStringLiteral(value: string): string {

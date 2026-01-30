@@ -4,19 +4,15 @@
 
 Speed up Prisma reads **2-7x** by executing queries via postgres.js or better-sqlite3 instead of Prisma's query engine.
 
-
 **Same API. Same types. Just faster.**
 
 ```typescript
-import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { PrismaClient } from '@prisma/client'
+import { speedExtension } from './generated/sql'
 import postgres from 'postgres'
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(
-  speedExtension({ postgres: sql, models }),
-)
+const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 
 // Just use Prisma normally - queries are automatically faster
 const users = await prisma.user.findMany({
@@ -54,19 +50,54 @@ npm install prisma-sql better-sqlite3
 
 ## Quick Start
 
+### Step 1: Add Generator to Schema
+
+Add the SQL generator to your `schema.prisma`:
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+generator sql {
+  provider = "prisma-sql-generator"
+}
+
+model User {
+  id     Int    @id @default(autoincrement())
+  email  String @unique
+  status String
+  posts  Post[]
+}
+
+model Post {
+  id       Int    @id @default(autoincrement())
+  title    String
+  authorId Int
+  author   User   @relation(fields: [authorId], references: [id])
+}
+```
+
+### Step 2: Generate
+
+```bash
+npx prisma generate
+```
+
+This creates `./generated/sql/index.ts` with pre-converted models and optimized queries.
+
+### Step 3: Use the Extension
+
 **PostgreSQL:**
 
 ```typescript
-import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { PrismaClient } from '@prisma/client'
+import { speedExtension } from './generated/sql'
 import postgres from 'postgres'
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(process.env.DATABASE_URL)
 
-const prisma = new PrismaClient().$extends(
-  speedExtension({ postgres: sql, models }),
-)
+const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 
 // Use Prisma exactly as before - it's just faster now
 const users = await prisma.user.findMany({
@@ -78,21 +109,18 @@ const users = await prisma.user.findMany({
 **SQLite:**
 
 ```typescript
-import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { PrismaClient } from '@prisma/client'
+import { speedExtension } from './generated/sql'
 import Database from 'better-sqlite3'
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const db = new Database('./data.db')
 
-const prisma = new PrismaClient().$extends(
-  speedExtension({ sqlite: db, models }),
-)
+const prisma = new PrismaClient().$extends(speedExtension({ sqlite: db }))
 
 const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
 ```
 
-That's it! All your read queries are now 2-7x faster with zero code changes.
+That's it! All your read queries are now 2-7x faster with zero runtime overhead.
 
 ## Performance
 
@@ -272,44 +300,16 @@ Benchmarks from 137 E2E tests comparing identical queries:
 
 ## Configuration
 
-### Prisma V7 and DMMF
-
-You can use `@prisma/internals` to retrieve DMMF from schema, smth like this:
-
-```ts
-import { getDMMF } from "@prisma/internals";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import type { DMMF } from "@prisma/generator-helper";
-
-const schemaPath = resolve(process.cwd(), "prisma/schema.prisma");
-const datamodel = readFileSync(schemaPath, "utf8");
-
-export async function loadDmmf(): Promise<DMMF.Document> {
-  return (await getDMMF({ datamodel })) as DMMF.Document;
-}
-
-// Example usage
-const dmmf = await loadDmmf();
-console.log(dmmf.datamodel.models.map((m) => m.name));
-```
-
-Probably would be a good idea to run this on generation step or cache the result to avoid recomputations on each request.
-
 ### Debug Mode
 
 See generated SQL for every query:
 
 ```typescript
-import { convertDMMFToModels } from 'prisma-sql'
-import { Prisma } from '@prisma/client'
-
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+import { speedExtension } from './generated/sql'
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
     postgres: sql,
-    models,
     debug: true, // Logs SQL for every query
   }),
 )
@@ -320,12 +320,11 @@ const prisma = new PrismaClient().$extends(
 Track query performance:
 
 ```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+import { speedExtension } from './generated/sql'
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
     postgres: sql,
-    models,
     onQuery: (info) => {
       console.log(`${info.model}.${info.method}: ${info.duration}ms`)
 
@@ -350,24 +349,8 @@ interface QueryInfo {
   sql: string // The executed SQL
   params: unknown[] // SQL parameters
   duration: number // Query duration in ms
-  prebaked: boolean // true if using generated SQL (see Advanced Usage)
+  prebaked: boolean // true if using @optimize directive
 }
-```
-
-### Selective Models
-
-Only accelerate specific models:
-
-```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-
-const prisma = new PrismaClient().$extends(
-  speedExtension({
-    postgres: sql,
-    models,
-    allowedModels: ['User', 'Post'], // Only speed up these models
-  }),
-)
 ```
 
 ## Supported Queries
@@ -498,20 +481,11 @@ await prisma.task.groupBy({
 
 ## Advanced Usage
 
-### Generator Mode - Prebaked SQL Queries
+### Prebaked SQL Queries (@optimize)
 
-For maximum performance, prebake your most common queries at build time. This reduces overhead from ~0.2ms (runtime) to ~0.03ms.
+For maximum performance, prebake your most common queries at build time using `@optimize` directives. This reduces overhead from ~0.2ms (runtime) to ~0.03ms.
 
-**1. Add generator to your schema:**
-
-```prisma
-// schema.prisma
-generator sql {
-  provider = "prisma-sql-generator"
-}
-```
-
-**2. Add optimize directives to your models:**
+**Add optimize directives to your models:**
 
 ```prisma
 /// @optimize {
@@ -533,21 +507,18 @@ model User {
 }
 ```
 
-**3. Generate:**
+**Generate:**
 
 ```bash
 npx prisma generate
 ```
 
-**4. Use the generated extension:**
+**Use:**
 
 ```typescript
-import { PrismaClient } from '@prisma/client'
-import { createExtension } from '../path/to/generated/sql'
-import postgres from 'postgres'
+import { speedExtension } from './generated/sql'
 
-const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(createExtension({ postgres: sql }))
+const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 
 // ⚡ PREBAKED - Uses pre-generated SQL (~0.03ms overhead)
 const activeUsers = await prisma.user.findMany({
@@ -594,30 +565,15 @@ model User {
 generator sql {
   provider = "prisma-sql-generator"
 
-  // Optional: Override auto-detected dialect
-  // dialect = "postgres"  // or "sqlite"
+  # Optional: Override auto-detected dialect
+  # dialect = "postgres"  # or "sqlite"
 
-  // Optional: Custom output directory
-  // output = "./generated/sql"
+  # Optional: Custom output directory
+  # output = "./generated/sql"
 
-  // Optional: Skip invalid directives instead of failing
-  // skipInvalid = "true"
+  # Optional: Skip invalid directives instead of failing
+  # skipInvalid = "true"
 }
-```
-
-### Access Original Prisma
-
-```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-const prisma = new PrismaClient().$extends(
-  speedExtension({ postgres: sql, models }),
-)
-
-// Fast (via raw SQL)
-const fast = await prisma.user.findMany()
-
-// Slow (via Prisma engine)
-const slow = await prisma.$original.user.findMany()
 ```
 
 ### Edge Runtime
@@ -625,15 +581,12 @@ const slow = await prisma.$original.user.findMany()
 **Vercel Edge Functions:**
 
 ```typescript
-import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { PrismaClient } from '@prisma/client'
+import { speedExtension } from './generated/sql'
 import postgres from 'postgres'
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(
-  speedExtension({ postgres: sql, models }),
-)
+const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 
 export const config = { runtime: 'edge' }
 
@@ -648,11 +601,10 @@ export default async function handler(req: Request) {
 For Cloudflare Workers, use the standalone SQL generation API:
 
 ```typescript
-import { createToSQL, convertDMMFToModels } from 'prisma-sql'
-import { Prisma } from '@prisma/client'
+import { createToSQL } from 'prisma-sql'
+import { MODELS } from './generated/sql'
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-const toSQL = createToSQL(models, 'sqlite')
+const toSQL = createToSQL(MODELS, 'sqlite')
 
 export default {
   async fetch(request: Request, env: Env) {
@@ -682,7 +634,8 @@ Build Time:
        ↓
   generated/sql/index.ts
        ↓
-  QUERIES = {
+  export const MODELS = [...]  // Pre-converted models
+  const QUERIES = {            // Pre-generated SQL
     User: {
       findMany: {
         '{"where":{"status":"ACTIVE"}}': {
@@ -693,6 +646,7 @@ Build Time:
       }
     }
   }
+  export function speedExtension() { ... }
 
 Runtime:
   prisma.user.findMany({ where: { status: 'ACTIVE' } })
@@ -788,15 +742,12 @@ const users = await prisma.user.findMany()
 **After:**
 
 ```typescript
-import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { PrismaClient } from '@prisma/client'
+import { speedExtension } from './generated/sql'
 import postgres from 'postgres'
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(
-  speedExtension({ postgres: sql, models }),
-)
+const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 
 const users = await prisma.user.findMany() // Same API, just faster
 ```
@@ -821,15 +772,12 @@ const users = await db
 **After:**
 
 ```typescript
-import { PrismaClient, Prisma } from '@prisma/client'
-import { speedExtension, convertDMMFToModels } from 'prisma-sql'
+import { PrismaClient } from '@prisma/client'
+import { speedExtension } from './generated/sql'
 import postgres from 'postgres'
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 const sql = postgres(DATABASE_URL)
-const prisma = new PrismaClient().$extends(
-  speedExtension({ postgres: sql, models }),
-)
+const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
 
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
@@ -867,22 +815,29 @@ Enable `debug: true` to see which queries are accelerated vs fallback.
 
 ## Troubleshooting
 
-### "speedExtension requires models parameter"
+### "speedExtension requires postgres or sqlite client"
 
-Convert DMMF at module level:
+Make sure you're importing from the generated file and passing the database client:
 
 ```typescript
-import { Prisma } from '@prisma/client'
-import { convertDMMFToModels } from 'prisma-sql'
+import { speedExtension } from './generated/sql'
+import postgres from 'postgres'
 
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
-
+const sql = postgres(process.env.DATABASE_URL)
 const prisma = new PrismaClient().$extends(
-  speedExtension({
-    postgres: sql,
-    models,
-  }),
+  speedExtension({ postgres: sql }), // ✅ Pass postgres client
 )
+```
+
+### "Generated code is for postgres, but you provided sqlite"
+
+The generator auto-detects your database from `schema.prisma`. If you need to override:
+
+```prisma
+generator sql {
+  provider = "prisma-sql-generator"
+  dialect  = "postgres"  # or "sqlite"
+}
 ```
 
 ### "Results don't match Prisma Client"
@@ -890,13 +845,14 @@ const prisma = new PrismaClient().$extends(
 Enable debug mode and compare SQL:
 
 ```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+import { speedExtension } from './generated/sql'
 
-speedExtension({
-  postgres: sql,
-  models,
-  debug: true, // Shows generated SQL
-})
+const prisma = new PrismaClient().$extends(
+  speedExtension({
+    postgres: sql,
+    debug: true, // Shows generated SQL
+  }),
+)
 ```
 
 Compare with Prisma's query log:
@@ -928,57 +884,16 @@ Some queries won't see dramatic improvements:
 Use `onQuery` to measure actual speedup:
 
 ```typescript
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
+import { speedExtension } from './generated/sql'
 
-speedExtension({
-  postgres: sql,
-  models,
-  onQuery: (info) => {
-    console.log(`${info.method} took ${info.duration}ms`)
-  },
-})
-```
-
-## Local Development
-
-### Testing the Generator Locally
-
-**1. Build the package:**
-
-```bash
-cd prisma-sql
-npm install
-npm run build
-```
-
-**2. Link globally:**
-
-```bash
-npm link
-```
-
-**3. Use in your project:**
-
-```bash
-cd your-project
-npm link prisma-sql
-npx prisma generate
-```
-
-**Alternative: Use file path directly in schema:**
-
-```prisma
-generator sql {
-  provider = "node ../path/to/prisma-sql/dist/generator.cjs"
-}
-```
-
-**Unlink when done:**
-
-```bash
-npm unlink prisma-sql  # In your project
-cd prisma-sql
-npm unlink              # In prisma-sql directory
+const prisma = new PrismaClient().$extends(
+  speedExtension({
+    postgres: sql,
+    onQuery: (info) => {
+      console.log(`${info.method} took ${info.duration}ms`)
+    },
+  }),
+)
 ```
 
 ## FAQ
@@ -987,7 +902,7 @@ npm unlink              # In prisma-sql directory
 A: Yes. You need Prisma for schema management, migrations, types, and write operations. This extension only speeds up reads.
 
 **Q: Does it work with my existing schema?**  
-A: Yes. No schema changes required. It works with your existing Prisma schema and generated client.
+A: Yes. No schema changes required except adding the generator. It works with your existing Prisma schema and generated client.
 
 **Q: What about writes (create, update, delete)?**  
 A: Writes still use Prisma Client. This extension only accelerates reads.
@@ -1005,10 +920,10 @@ A: The extension runs after middlewares. For middleware to see actual SQL, use P
 A: Yes. Those methods are unaffected.
 
 **Q: What's the overhead of SQL generation?**  
-A: Runtime mode: ~0.2ms per query. Generator mode: ~0.03ms for prebaked queries. Still 2-7x faster than Prisma overall.
+A: Runtime mode: ~0.2ms per query. Generator mode with `@optimize`: ~0.03ms for prebaked queries. Still 2-7x faster than Prisma overall.
 
-**Q: Should I use generator mode or runtime mode?**  
-A: Start with runtime mode (simpler). Add generator mode for your hottest queries later if needed.
+**Q: Do I need @optimize directives?**  
+A: No! The generator works without them. `@optimize` directives are optional for squeezing out the last bit of performance on your hottest queries.
 
 ## Examples
 
@@ -1030,16 +945,13 @@ npm test
 Benchmark your own queries:
 
 ```typescript
-import { speedExtension, convertDMMFToModels } from 'prisma-sql'
-import { Prisma } from '@prisma/client'
+import { speedExtension } from './generated/sql'
 
 const queries: { name: string; duration: number }[] = []
-const models = convertDMMFToModels(Prisma.dmmf.datamodel)
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
     postgres: sql,
-    models,
     onQuery: (info) => {
       queries.push({
         name: `${info.model}.${info.method}`,
@@ -1090,13 +1002,18 @@ Please ensure:
 └────────────────────┬────────────────────────────────┘
                      │
          ┌───────────▼──────────┐
-         │  Speed Extension     │
-         │  Intercepts query    │
+         │  Generated Extension │
+         │  Uses internal MODELS│
+         └───────────┬──────────┘
+                     │
+         ┌───────────▼──────────┐
+         │  Check for prebaked  │
+         │  query in QUERIES    │
          └───────────┬──────────┘
                      │
          ┌───────────▼──────────┐
          │  Generate SQL        │
-         │  Parser + Builder    │
+         │  (if not prebaked)   │
          └───────────┬──────────┘
                      │
          ┌───────────▼──────────┐

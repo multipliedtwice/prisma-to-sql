@@ -355,7 +355,7 @@ function buildRelation(
     ctx.dialect,
   )
   const relAlias = ctx.aliasGen.next(fieldName)
-  const join = joinCondition(field, ctx.alias, relAlias)
+  const join = joinCondition(field, ctx.model, relModel, ctx.alias, relAlias)
 
   const args: RelationFilterArgs = {
     fieldName,

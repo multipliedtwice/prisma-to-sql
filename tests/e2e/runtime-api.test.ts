@@ -33,7 +33,7 @@ describe('Runtime API Tests', () => {
 
     it('basic usage - findMany', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const users = await prisma.user.findMany({
@@ -51,7 +51,7 @@ describe('Runtime API Tests', () => {
 
     it('findFirst returns single result or null', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const user = await prisma.user.findFirst({
@@ -74,7 +74,7 @@ describe('Runtime API Tests', () => {
 
     it('findUnique returns single result or null', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const user = await prisma.user.findUnique({
@@ -91,7 +91,7 @@ describe('Runtime API Tests', () => {
 
     it('count returns number', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const count = await prisma.user.count({
@@ -108,7 +108,7 @@ describe('Runtime API Tests', () => {
 
     it('aggregate returns object', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const result = await prisma.task.aggregate({
@@ -129,7 +129,7 @@ describe('Runtime API Tests', () => {
 
     it('groupBy returns array', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const results = await prisma.task.groupBy({
@@ -150,7 +150,7 @@ describe('Runtime API Tests', () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf, debug: true }),
+        speedExtension({ postgres: pgClient, debug: true }),
       )
 
       await prisma.user.findMany({ where: { status: 'ACTIVE' } })
@@ -232,7 +232,7 @@ describe('Runtime API Tests', () => {
 
     it('includes work correctly', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const projects = await prisma.project.findMany({
@@ -257,7 +257,7 @@ describe('Runtime API Tests', () => {
 
     it('nested includes work correctly', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const users = await prisma.user.findMany({
@@ -279,7 +279,7 @@ describe('Runtime API Tests', () => {
 
     it('complex where clauses work', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const args = {
@@ -302,7 +302,7 @@ describe('Runtime API Tests', () => {
 
     it('relation filters work', async () => {
       const prisma = pgDb.prisma.$extends(
-        speedExtension({ postgres: pgClient, dmmf }),
+        speedExtension({ postgres: pgClient }),
       )
 
       const users = await prisma.user.findMany({
@@ -357,7 +357,7 @@ describe('Runtime API Tests', () => {
 
     it('basic usage - findMany', async () => {
       const prisma = sqliteDb.prisma.$extends(
-        speedExtension({ sqlite: sqliteClient, dmmf }),
+        speedExtension({ sqlite: sqliteClient }),
       )
 
       const users = await prisma.user.findMany({
@@ -375,7 +375,7 @@ describe('Runtime API Tests', () => {
 
     it('findFirst returns single result', async () => {
       const prisma = sqliteDb.prisma.$extends(
-        speedExtension({ sqlite: sqliteClient, dmmf }),
+        speedExtension({ sqlite: sqliteClient }),
       )
 
       const user = await prisma.user.findFirst({
@@ -389,7 +389,7 @@ describe('Runtime API Tests', () => {
 
     it('count returns number', async () => {
       const prisma = sqliteDb.prisma.$extends(
-        speedExtension({ sqlite: sqliteClient, dmmf }),
+        speedExtension({ sqlite: sqliteClient }),
       )
 
       const count = await prisma.task.count({
@@ -406,7 +406,7 @@ describe('Runtime API Tests', () => {
 
     it('includes work correctly', async () => {
       const prisma = sqliteDb.prisma.$extends(
-        speedExtension({ sqlite: sqliteClient, dmmf }),
+        speedExtension({ sqlite: sqliteClient }),
       )
 
       const projects = await prisma.project.findMany({
@@ -421,7 +421,7 @@ describe('Runtime API Tests', () => {
 
     it('distinct with window function', async () => {
       const prisma = sqliteDb.prisma.$extends(
-        speedExtension({ sqlite: sqliteClient, dmmf, debug: true }),
+        speedExtension({ sqlite: sqliteClient, debug: true }),
       )
 
       const tasks = await prisma.task.findMany({
@@ -441,7 +441,7 @@ describe('Runtime API Tests', () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
       const prisma = sqliteDb.prisma.$extends(
-        speedExtension({ sqlite: sqliteClient, dmmf, debug: true }),
+        speedExtension({ sqlite: sqliteClient, debug: true }),
       )
 
       await prisma.user.findMany({ where: { status: 'ACTIVE' } })

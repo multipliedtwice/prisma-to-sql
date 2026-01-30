@@ -456,9 +456,10 @@ function buildOrderBySql(
   finalOrderByInput: unknown,
   relAlias: string,
   dialect: SqlDialect,
+  relModel: Model,
 ): string {
   return isNotNullish(finalOrderByInput)
-    ? buildOrderBy(finalOrderByInput, relAlias, dialect)
+    ? buildOrderBy(finalOrderByInput, relAlias, dialect, relModel)
     : ''
 }
 
@@ -607,7 +608,13 @@ function buildSingleInclude(
 
   const relAlias = ctx.aliasGen.next(relName)
   const isList = typeof field.type === 'string' && field.type.endsWith('[]')
-  const joinPredicate = joinCondition(field, ctx.parentAlias, relAlias)
+  const joinPredicate = joinCondition(
+    field,
+    ctx.model,
+    relModel,
+    ctx.parentAlias,
+    relAlias,
+  )
 
   const whereInput = readWhereInput(relArgs)
   const relSelect = buildSelectWithNestedIncludes(
@@ -641,7 +648,12 @@ function buildSingleInclude(
     hasPagination,
   )
 
-  const orderBySql = buildOrderBySql(finalOrderByInput, relAlias, ctx.dialect)
+  const orderBySql = buildOrderBySql(
+    finalOrderByInput,
+    relAlias,
+    ctx.dialect,
+    relModel,
+  )
 
   if (!isList) {
     const sql = buildOneToOneIncludeSql({

@@ -82,10 +82,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@dee-wan/schema-parser@npm:1.3.0":
-  version: 1.3.0
-  resolution: "@dee-wan/schema-parser@npm:1.3.0"
-  checksum: 6506607b6c13edfb78951359b61dcc5437785beffae274692c48db7e3a85543d4f92cc4b808f13e80eef1d546507cf569a2154d704e2215b9389dcf0d6b3e87a
+"@dee-wan/schema-parser@npm:1.4.0":
+  version: 1.4.0
+  resolution: "@dee-wan/schema-parser@npm:1.4.0"
+  checksum: 321710096ff89d8bf78db632c970bc4a279adf2e3e412a85bee127489d15e8df6203a11121f8f2bcc7208db78652859ebf0d27dc5e9bb2ec03beb5f24e893aba
   languageName: node
   linkType: hard
 
@@ -3237,7 +3237,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "prisma-sql@workspace:."
   dependencies:
-    "@dee-wan/schema-parser": 1.3.0
+    "@dee-wan/schema-parser": 1.4.0
     "@faker-js/faker": ^10.2.0
     "@prisma/adapter-better-sqlite3": ^7.2.0
     "@prisma/adapter-pg": ^7.2.0

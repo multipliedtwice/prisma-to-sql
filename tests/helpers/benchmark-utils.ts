@@ -1,6 +1,6 @@
 import type { DMMF } from '@prisma/generator-helper'
 import type { DirectiveProps } from '@dee-wan/schema-parser'
-import { datamodel } from './datamodel'
+import { getDatamodel } from './datamodel'
 import { generateSQL } from '../../src/sql-generator'
 import { deepEqual, normalizeValue, sortByField } from './compare'
 
@@ -28,6 +28,7 @@ export interface TestDB {
 export function createQuery(
   modelName: string,
   q: Record<string, unknown>,
+  datamodel: DMMF.Datamodel,
 ): DirectiveProps {
   const model = datamodel.models.find((m) => m.name === modelName)!
   const method = q.method as string
@@ -73,7 +74,15 @@ export async function runParityTest<T>(
     drizzleQuery,
   } = options
 
-  const directive = createQuery(model, args)
+  // Detect dialect from database connection
+  const isPostgres =
+    db.prisma?._engineConfig?.datasources?.db?.url?.includes('postgres') ||
+    process.env.DATABASE_URL?.includes('postgres')
+  const dialect = isPostgres ? 'postgres' : 'sqlite'
+
+  // Load datamodel for current dialect
+  const datamodel = await getDatamodel(dialect)
+  const directive = createQuery(model, args, datamodel)
 
   let estimatedPrismaMs = 0
   if (benchmark) {

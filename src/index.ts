@@ -1,8 +1,9 @@
 import {
-  convertDMMFToModels,
   type Model,
   DirectiveProps,
+  convertDMMFToModels,
 } from '@dee-wan/schema-parser'
+import { DMMF } from '@prisma/generator-helper'
 import { buildWhereClause } from './builder/where'
 import { buildSelectSql } from './builder/select'
 import {
@@ -27,7 +28,8 @@ interface SqlResult {
 interface SpeedExtensionConfig {
   postgres?: any
   sqlite?: any
-  models: Model[]
+  models?: Model[]
+  dmmf?: DMMF.Document
   debug?: boolean
   allowedModels?: string[]
   onQuery?: (info: QueryInfo) => void
@@ -331,11 +333,40 @@ async function handleMethodCall(
   }
 }
 
+/**
+ * Runtime-only Prisma extension for SQL acceleration.
+ *
+ * ⚠️ RECOMMENDED: Use generated extension instead for zero overhead!
+ *
+ * @example
+ * // RECOMMENDED: Generated extension (no models/dmmf needed)
+ * import { speedExtension } from './generated/sql'
+ * const prisma = new PrismaClient().$extends(
+ *   speedExtension({ postgres: sql })
+ * )
+ *
+ * @example
+ * // Runtime with pre-converted models
+ * import { speedExtension } from 'prisma-sql'
+ * import { MODELS } from './generated/sql'
+ * const prisma = new PrismaClient().$extends(
+ *   speedExtension({ postgres: sql, models: MODELS })
+ * )
+ *
+ * @example
+ * // Runtime with DMMF (auto-converts on startup)
+ * import { speedExtension } from 'prisma-sql'
+ * import { Prisma } from '@prisma/client'
+ * const prisma = new PrismaClient().$extends(
+ *   speedExtension({ postgres: sql, dmmf: Prisma.dmmf })
+ * )
+ */
 export function speedExtension(config: SpeedExtensionConfig) {
   const {
     postgres,
     sqlite,
-    models,
+    models: providedModels,
+    dmmf,
     debug = false,
     allowedModels,
     onQuery,
@@ -351,11 +382,44 @@ export function speedExtension(config: SpeedExtensionConfig) {
     )
   }
 
-  if (!models || !Array.isArray(models) || models.length === 0) {
+  let models: Model[]
+
+  if (providedModels) {
+    models = providedModels
+  } else if (dmmf) {
+    models = convertDMMFToModels(dmmf.datamodel)
+  } else {
     throw new Error(
-      'speedExtension requires models parameter. ' +
-        'Convert DMMF first: speedExtension({ models: convertDMMFToModels(Prisma.dmmf.datamodel) })',
+      'speedExtension requires either models or dmmf parameter.\n\n' +
+        '⚠️  RECOMMENDED APPROACH:\n' +
+        '   Use the generated extension for zero runtime overhead:\n\n' +
+        '   import { speedExtension } from "./generated/sql"\n' +
+        '   const prisma = new PrismaClient().$extends(\n' +
+        '     speedExtension({ postgres: sql })\n' +
+        '   )\n\n' +
+        '   1. Add generator to schema.prisma:\n' +
+        '      generator sql {\n' +
+        '        provider = "prisma-sql-generator"\n' +
+        '      }\n\n' +
+        '   2. Run: npx prisma generate\n\n' +
+        '   3. Import from generated file\n\n' +
+        '❌ RUNTIME-ONLY MODE:\n' +
+        '   If you cannot use the generator, provide models or dmmf:\n\n' +
+        '   import { speedExtension } from "prisma-sql"\n' +
+        '   import { MODELS } from "./generated/sql"\n' +
+        '   const prisma = new PrismaClient().$extends(\n' +
+        '     speedExtension({ postgres: sql, models: MODELS })\n' +
+        '   )\n\n' +
+        '   Or with DMMF (auto-converts on startup):\n\n' +
+        '   import { Prisma } from "@prisma/client"\n' +
+        '   const prisma = new PrismaClient().$extends(\n' +
+        '     speedExtension({ postgres: sql, dmmf: Prisma.dmmf })\n' +
+        '   )',
     )
+  }
+
+  if (!Array.isArray(models) || models.length === 0) {
+    throw new Error('speedExtension: models array is empty or invalid')
   }
 
   const dialect: SqlDialect = postgres ? 'postgres' : 'sqlite'
@@ -389,7 +453,7 @@ export function speedExtension(config: SpeedExtensionConfig) {
     }
 
     return prisma.$extends({
-      name: 'speed-extension',
+      name: 'prisma-sql-speed',
 
       client: {
         $original: prisma,
@@ -433,13 +497,33 @@ function createToSQLFunction(
   }
 }
 
-export function createToSQL(models: Model[], dialect: SqlDialect) {
+/**
+ * Create a SQL generator function from models.
+ *
+ * @example
+ * import { createToSQL } from 'prisma-sql'
+ * import { MODELS } from './generated/sql'
+ *
+ * const toSQL = createToSQL(MODELS, 'postgres')
+ * const { sql, params } = toSQL('User', 'findMany', {
+ *   where: { status: 'ACTIVE' }
+ * })
+ */
+export function createToSQL(
+  modelsOrDmmf: Model[] | DMMF.Document,
+  dialect: SqlDialect,
+) {
+  const models = Array.isArray(modelsOrDmmf)
+    ? modelsOrDmmf
+    : convertDMMFToModels((modelsOrDmmf as DMMF.Document).datamodel)
+
   return createToSQLFunction(models, dialect)
 }
 
 interface PrismaSQLConfig<TClient> {
   client: TClient
-  models: Model[]
+  models?: Model[]
+  dmmf?: DMMF.Document
   dialect: SqlDialect
   execute: (
     client: TClient,
@@ -448,11 +532,39 @@ interface PrismaSQLConfig<TClient> {
   ) => Promise<unknown[]>
 }
 
+/**
+ * Create a Prisma SQL client for environments where extensions aren't supported.
+ *
+ * @example
+ * import { createPrismaSQL } from 'prisma-sql'
+ * import { MODELS } from './generated/sql'
+ *
+ * const prismaSQL = createPrismaSQL({
+ *   client: sql,
+ *   models: MODELS,
+ *   dialect: 'postgres',
+ *   execute: (client, sql, params) => client.unsafe(sql, params)
+ * })
+ *
+ * const users = await prismaSQL.query('User', 'findMany', {
+ *   where: { status: 'ACTIVE' }
+ * })
+ */
 export function createPrismaSQL<TClient>(config: PrismaSQLConfig<TClient>) {
-  const { client, models, dialect, execute } = config
+  const { client, models: providedModels, dmmf, dialect, execute } = config
 
-  if (!models || !Array.isArray(models) || models.length === 0) {
-    throw new Error('createPrismaSQL requires non-empty models array')
+  let models: Model[]
+
+  if (providedModels) {
+    models = providedModels
+  } else if (dmmf) {
+    models = convertDMMFToModels(dmmf.datamodel)
+  } else {
+    throw new Error('createPrismaSQL requires either models or dmmf parameter')
+  }
+
+  if (!Array.isArray(models) || models.length === 0) {
+    throw new Error('createPrismaSQL: models array is empty or invalid')
   }
 
   const toSQL = createToSQLFunction(models, dialect)

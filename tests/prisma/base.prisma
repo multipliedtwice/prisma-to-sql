@@ -19,9 +19,10 @@ model User {
   id            Int       @id @default(autoincrement())
   email         String    @unique
   name          String?
-  avatarUrl     String?
+  avatarUrl     String?   @map("avatar_url")
   role          String    @default("USER")
   status        String    @default("ACTIVE")
+  isDeleted     Boolean   @default(false) @map("is_deleted")
   metadata      String?
   tags          String    @default("[]")  // JSON array as string, not String[]
   lastLoginAt   DateTime?

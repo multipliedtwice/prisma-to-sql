@@ -17,7 +17,6 @@ async function mergeSchema(dialect: 'postgres' | 'sqlite'): Promise<string> {
   const prismaDir = path.join(process.cwd(), 'tests', 'prisma')
 
   if (PRISMA_VERSION === 7) {
-    // For v7, use the pre-existing v7 schema files
     const schemaPath = path.join(prismaDir, `${dialect}-v7.prisma`)
     const basePath = path.join(prismaDir, 'base.prisma')
 
@@ -31,7 +30,6 @@ async function mergeSchema(dialect: 'postgres' | 'sqlite'): Promise<string> {
     await fs.writeFile(outputPath, `${header}\n${base}`)
     return outputPath
   } else {
-    // v6 approach
     const headerPath = path.join(prismaDir, `${dialect}.prisma`)
     const basePath = path.join(prismaDir, 'base.prisma')
     const outputPath = path.join(prismaDir, `schema-${dialect}.prisma`)
@@ -86,7 +84,6 @@ async function generatePrismaClient(
       }
     }
   } else {
-    // Prisma v7 - use config file approach
     const configFile =
       dialect === 'postgres' ? 'postgres-v7.config.ts' : 'sqlite-v7.config.ts'
 
@@ -134,7 +131,6 @@ async function createPostgresDB(): Promise<TestDB> {
       },
     }
   } else {
-    // Import from the v7 generated path
     const { PrismaClient } = await import('../generated/postgres-v7/client')
     const { PrismaPg } = await import('@prisma/adapter-pg')
 
@@ -164,6 +160,7 @@ async function createSqliteDB(): Promise<TestDB> {
   if (PRISMA_VERSION === 6) {
     const { PrismaClient } = await import('../generated/sqlite/client')
     const prisma = new PrismaClient({
+      // @ts-ignore
       datasources: { db: { url: SQLITE_URL } },
     })
     const sqliteClient = new Database(SQLITE_DB_PATH)
@@ -181,8 +178,8 @@ async function createSqliteDB(): Promise<TestDB> {
       },
     }
   } else {
-    // Import from the v7 generated path
     const { PrismaClient } = await import('../generated/sqlite-v7/client')
+    // @ts-ignore
     const { PrismaBetterSqlite3 } = await import(
       '@prisma/adapter-better-sqlite3'
     )

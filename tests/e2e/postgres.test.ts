@@ -995,6 +995,12 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           }),
         {
           sortField: undefined,
+          drizzleQuery: () =>
+            (drizzle.db as any).query.pgProjects.findMany({
+              with: { tasks: true },
+              limit: 5,
+              orderBy: (t: any, o: any) => [o.asc(t.id)],
+            }),
         },
       ))
 
@@ -1020,6 +1026,13 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           }),
         {
           sortField: undefined,
+          drizzleQuery: () =>
+            (drizzle.db as any).query.pgTasks.findMany({
+              where: (t: any, o: any) => o.isNotNull(t.assigneeId),
+              with: { assignee: true },
+              limit: 5,
+              orderBy: (t: any, o: any) => [o.asc(t.id)],
+            }),
         },
       ))
 
@@ -1063,6 +1076,24 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           }),
         {
           sortField: undefined,
+          drizzleQuery: () =>
+            (drizzle.db as any).query.pgOrganizations.findMany({
+              with: {
+                projects: {
+                  limit: 2,
+                  orderBy: (t: any, o: any) => [o.asc(t.id)],
+                  with: {
+                    tasks: {
+                      limit: 3,
+                      orderBy: (t: any, o: any) => [o.asc(t.id)],
+                      with: { comments: true },
+                    },
+                  },
+                },
+              },
+              limit: 2,
+              orderBy: (t: any, o: any) => [o.asc(t.id)],
+            }),
         },
       ))
 
@@ -1116,6 +1147,30 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           }),
         {
           sortField: undefined,
+          drizzleQuery: () =>
+            (drizzle.db as any).query.pgOrganizations.findMany({
+              with: {
+                projects: {
+                  limit: 2,
+                  orderBy: (t: any, o: any) => [o.asc(t.id)],
+                  with: {
+                    tasks: {
+                      limit: 2,
+                      orderBy: (t: any, o: any) => [o.asc(t.id)],
+                      with: {
+                        comments: {
+                          limit: 2,
+                          orderBy: (t: any, o: any) => [o.asc(t.id)],
+                          with: { reactions: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              limit: 2,
+              orderBy: (t: any, o: any) => [o.asc(t.id)],
+            }),
         },
       ))
 
@@ -1151,6 +1206,18 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           }),
         {
           sortField: undefined,
+          drizzleQuery: () =>
+            (drizzle.db as any).query.pgProjects.findMany({
+              with: {
+                tasks: {
+                  where: (t: any, o: any) => o.eq(t.status, 'DONE'),
+                  orderBy: (t: any, o: any) => [o.asc(t.id)],
+                  limit: 5,
+                },
+              },
+              limit: 5,
+              orderBy: (t: any, o: any) => [o.asc(t.id)],
+            }),
         },
       ))
 
@@ -1184,6 +1251,17 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           }),
         {
           sortField: undefined,
+          drizzleQuery: () =>
+            (drizzle.db as any).query.pgUsers.findMany({
+              with: {
+                assignedTasks: {
+                  columns: { id: true, title: true, status: true },
+                  orderBy: (t: any, o: any) => [o.asc(t.id)],
+                },
+              },
+              limit: 5,
+              orderBy: (t: any, o: any) => [o.asc(t.id)],
+            }),
         },
       ))
   })
@@ -1551,6 +1629,19 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           }),
         {
           sortField: undefined,
+          drizzleQuery: () =>
+            (drizzle.db as any).query.pgUsers.findMany({
+              columns: { id: true, email: true },
+              with: {
+                assignedTasks: {
+                  columns: { id: true, title: true, status: true },
+                  orderBy: (t: any, o: any) => [o.asc(t.id)],
+                  limit: 3,
+                },
+              },
+              limit: 5,
+              orderBy: (t: any, o: any) => [o.asc(t.id)],
+            }),
         },
       ))
   })
