@@ -32,13 +32,13 @@ jobs:
         with:
           node-version: 22.x
           registry-url: https://registry.npmjs.org
-          cache: 'yarn'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: npm ci
 
       - name: Build package
-        run: yarn build
+        run: npm run build
 
   publish:
     needs: test
@@ -55,13 +55,13 @@ jobs:
         with:
           node-version: 22.x
           registry-url: https://registry.npmjs.org
-          cache: 'yarn'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: npm ci
 
       - name: Build package
-        run: yarn build
+        run: npm run build
 
       - name: Publish to NPM 🚀
         run: npx semantic-release
@@ -80,15 +80,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22.x
-          cache: 'yarn'
+          cache: 'npm'
 
       - name: Install dependencies
         run: |
-          yarn install --immutable
-          cd docs-site && yarn install --immutable
+          npm ci
+          cd docs-site && npm ci
 
       - name: Build Astro site
-        run: cd docs-site && yarn build
+        run: cd docs-site && npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
