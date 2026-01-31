@@ -76,17 +76,18 @@ function aggExprForField(
   aggKey: AggregateKey,
   field: string,
   alias: string,
+  model?: Model,
 ): string {
   if (aggKey === '_count') {
-    return field === '_all' ? `COUNT(*)` : `COUNT(${col(alias, field)})`
+    return field === '_all' ? `COUNT(*)` : `COUNT(${col(alias, field, model)})`
   }
   if (field === '_all') {
     throw new Error(`'${aggKey}' does not support '_all'`)
   }
-  if (aggKey === '_sum') return `SUM(${col(alias, field)})`
-  if (aggKey === '_avg') return `AVG(${col(alias, field)})`
-  if (aggKey === '_min') return `MIN(${col(alias, field)})`
-  return `MAX(${col(alias, field)})`
+  if (aggKey === '_sum') return `SUM(${col(alias, field, model)})`
+  if (aggKey === '_avg') return `AVG(${col(alias, field, model)})`
+  if (aggKey === '_min') return `MIN(${col(alias, field, model)})`
+  return `MAX(${col(alias, field, model)})`
 }
 
 function buildComparisonOp(op: string): string {
@@ -390,7 +391,7 @@ function buildHavingForAggregateFirstShape(
     assertHavingAggTarget(aggKey, field, model)
     if (!isPlainObject(filter) || Object.keys(filter).length === 0) continue
 
-    const expr = aggExprForField(aggKey, field, alias)
+    const expr = aggExprForField(aggKey, field, alias, model)
     out.push(...buildHavingOpsForExpr(expr, filter, params, dialect))
   }
 
@@ -421,7 +422,7 @@ function buildHavingForFieldFirstShape(
     const entries = Object.entries(aggFilter)
     if (entries.length === 0) continue
 
-    const expr = aggExprForField(aggKey, fieldName, alias)
+    const expr = aggExprForField(aggKey, fieldName, alias, model)
     for (const [op, val] of entries) {
       if (op === 'mode') continue
       const built = buildSimpleComparison(expr, op, val, params, dialect)
@@ -484,10 +485,11 @@ function pushCountField(
   fields: string[],
   alias: string,
   fieldName: string,
+  model?: Model,
 ): void {
   const outAlias = `_count.${fieldName}`
   fields.push(
-    `COUNT(${col(alias, fieldName)}) ${SQL_TEMPLATES.AS} ${quote(outAlias)}`,
+    `COUNT(${col(alias, fieldName, model)}) ${SQL_TEMPLATES.AS} ${quote(outAlias)}`,
   )
 }
 
@@ -517,7 +519,7 @@ function addCountFields(
 
   for (const [f] of selected) {
     assertCountableScalarField(fieldMap, model, f)
-    pushCountField(fields, alias, f)
+    pushCountField(fields, alias, f, model)
   }
 }
 
@@ -555,10 +557,11 @@ function pushAggregateFieldSql(
   alias: string,
   agg: AggregateKey,
   fieldName: string,
+  model?: Model,
 ): void {
   const outAlias = `${agg}.${fieldName}`
   fields.push(
-    `${aggFn}(${col(alias, fieldName)}) ${SQL_TEMPLATES.AS} ${quote(outAlias)}`,
+    `${aggFn}(${col(alias, fieldName, model)}) ${SQL_TEMPLATES.AS} ${quote(outAlias)}`,
   )
 }
 
@@ -585,7 +588,7 @@ function addAggregateFields(
         fieldName,
       )
       assertAggregateFieldType(agg, field.type, fieldName, model.name)
-      pushAggregateFieldSql(fields, aggFn, alias, agg, fieldName)
+      pushAggregateFieldSql(fields, aggFn, alias, agg, fieldName, model)
     }
   }
 }
@@ -683,7 +686,7 @@ function buildGroupBySelectParts(
   model: Model,
   byFields: string[],
 ): { groupCols: string[]; groupFields: string; selectFields: string } {
-  const groupCols = byFields.map((f) => col(alias, f))
+  const groupCols = byFields.map((f) => col(alias, f, model))
   const groupFields = groupCols.join(SQL_SEPARATORS.FIELD_LIST)
 
   const aggFields = buildAggregateFields(args, alias, model)

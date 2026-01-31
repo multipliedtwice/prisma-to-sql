@@ -1,0 +1,34 @@
+generator client {
+  provider        = "prisma-client"
+  runtime         = "nodejs"
+  engineType      = "client"
+  compilerBuild   = "fast"
+  moduleFormat    = "cjs"
+  output          = "../.generated"
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
+  previewFeatures = ["relationJoins", "strictUndefinedChecks", "nativeDistinct", "postgresqlExtensions", "views"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [pg_trgm]
+}
+
+generator json {
+  provider     = "prisma-json-types-generator"
+  clientOutput = "../.generated"
+  allowAny     = false
+}
+
+generator sql {
+  provider    = "../dist/generator.cjs"
+  dialect     = "postgres"
+  output      = "../.generated/sql"
+  skipInvalid = true
+}
+
+generator markdown {
+  provider = "prisma-markdown"
+  output   = "../../ERD.md"
+  title    = "ERD"
+}

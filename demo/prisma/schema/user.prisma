@@ -1,0 +1,107 @@
+enum UserFlag {
+  RED    @map("red")
+  WHITE  @map("white")
+  GREEN  @map("green")
+  YELLOW @map("yellow")
+}
+
+enum UserPermission {
+  FAQS             @map("faqs")
+  KICK             @map("kick")
+  USERS            @map("users")
+  CHATS            @map("chats")
+  SLOTS            @map("slots")
+  BLOGS            @map("blogs")
+  MERCHS           @map("merchs")
+  REWARDS          @map("rewards")
+  CASINOS          @map("casinos")
+  PROVIDERS        @map("providers")
+  LOOTBOXES        @map("lootboxes")
+  MILESTONES       @map("milestones")
+  BONUS_HUNTS      @map("bonus_hunts")
+  POINTS_SHOP      @map("points_shop")
+  PROMO_CODES      @map("promo_codes")
+  TOURNAMENTS      @map("tournaments")
+  LEADERBOARDS     @map("leaderboards")
+  WIN_TRACKERS     @map("win_trackers")
+  SLOTS_BATTLES    @map("slots_battles")
+  NOTIFICATIONS    @map("notifications")
+  SESSION_TRACKERS @map("session_trackers")
+}
+
+model User {
+  id String @id @default(uuid()) @map("id") @db.Uuid()
+
+  isDeleted     Boolean @default(false) @map("is_deleted")
+  isChatBlocked Boolean @default(false) @map("is_chat_blocked")
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+  chatReadAt DateTime @default(now()) @map("chat_read_at")
+
+  username  String  @unique @map("username")
+  avatarUrl String? @map("avatar_url")
+  about     String? @map("about")
+
+  email         String  @unique @map("email")
+  emailVerified Boolean @default(false) @map("email_verified")
+
+  policyAgreed          Boolean @default(false) @map("policy_aggreed")
+  multiAccountsDetected Boolean @default(false) @map("multi_accounts_detected")
+
+  password String? @map("password")
+
+  telegram   String? @map("telegram")
+  kickUrl    String? @map("kick_url")
+  youtubeUrl String? @map("youtube_url")
+
+  discordId           String? @unique @map("discord_id")
+  discordRefreshToken String? @unique @map("discord_refresh_token")
+
+  kickId           Int?    @unique @map("kick_id")
+  kickSlug         String? @unique @map("kick_slug")
+  kickAccessToken  String? @unique @map("kick_access_token")
+  kickRefreshToken String? @unique @map("kick_refresh_token")
+
+  razedId          String? @unique @map("razed_id")
+  razedAccessToken String? @unique @map("razed_access_token")
+
+  countryCode String  @map("country_code")
+  country     Country @relation(fields: [countryCode], references: [countryCode], onUpdate: Cascade, onDelete: Cascade)
+
+  flag        UserFlag         @default(WHITE) @map("flag")
+  permissions UserPermission[] @default([]) @map("permissions")
+
+  balance          Int @default(0) @map("balance")
+  experiencePoints Int @default(0) @map("experience_points")
+
+  @@index([createdAt(sort: Asc)], type: BTree, name: "users:created_at:asc_btree")
+  @@index([createdAt(sort: Desc)], type: BTree, name: "users:created_at:desc_btree")
+  @@index([updatedAt(sort: Asc)], type: BTree, name: "users:updated_at:asc_btree")
+  @@index([updatedAt(sort: Desc)], type: BTree, name: "users:updated_at:desc_btree")
+  @@index([isDeleted(sort: Asc)], type: BTree, name: "users:is_deleted:asc_btree")
+  @@index([isDeleted(sort: Desc)], type: BTree, name: "users:is_deleted:desc_btree")
+  @@index([discordId(sort: Asc)], type: BTree, name: "users:discord_id:asc_btree")
+  @@index([discordId(sort: Desc)], type: BTree, name: "users:discord_id:desc_btree")
+  @@index([kickId(sort: Asc)], type: BTree, name: "users:kick_id:asc_btree")
+  @@index([kickId(sort: Desc)], type: BTree, name: "users:kick_id:desc_btree")
+  @@index([razedId(sort: Asc)], type: BTree, name: "users:razed_id:asc_btree")
+  @@index([razedId(sort: Desc)], type: BTree, name: "users:razed_id:desc_btree")
+  @@index([username(sort: Asc)], type: BTree, name: "users:username:asc_btree")
+  @@index([username(sort: Desc)], type: BTree, name: "users:username:desc_btree")
+  @@index([username(ops: raw("gin_trgm_ops"))], type: Gin, name: "users:username:gin")
+  @@index([email(sort: Asc)], type: BTree, name: "users:email:asc_btree")
+  @@index([email(sort: Desc)], type: BTree, name: "users:email:desc_btree")
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, name: "users:email:gin")
+  @@index([telegram(sort: Asc)], type: BTree, name: "users:telegram:asc_btree")
+  @@index([telegram(sort: Desc)], type: BTree, name: "users:telegram:desc_btree")
+  @@index([telegram(ops: raw("gin_trgm_ops"))], type: Gin, name: "users:telegram:gin")
+  @@index([permissions(ops: ArrayOps)], type: Gin, name: "users:permissions:gin")
+  @@index([flag(sort: Asc)], type: BTree, name: "users:flag:asc_btree")
+  @@index([flag(sort: Desc)], type: BTree, name: "users:flag:desc_btree")
+  @@index([balance(sort: Asc)], type: BTree, name: "users:balance:asc_btree")
+  @@index([balance(sort: Desc)], type: BTree, name: "users:balance:desc_btree")
+  @@index([username, password], type: BTree, name: "users:username_password:btree")
+  @@index([email, password], type: BTree, name: "users:email_password:btree")
+  @@map("users")
+}

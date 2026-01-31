@@ -104,8 +104,11 @@ function replaceOrderByAlias(
 function buildDistinctColumns(
   distinct: readonly string[],
   fromAlias: string,
+  model?: any,
 ): string {
-  return distinct.map((f) => col(fromAlias, f)).join(SQL_SEPARATORS.FIELD_LIST)
+  return distinct
+    .map((f) => col(fromAlias, f, model))
+    .join(SQL_SEPARATORS.FIELD_LIST)
 }
 
 function buildOutputColumns(
@@ -133,8 +136,9 @@ function buildWindowOrder(args: {
   baseOrder: string
   idField: any
   fromAlias: string
+  model?: any
 }): string {
-  const { baseOrder, idField, fromAlias } = args
+  const { baseOrder, idField, fromAlias, model } = args
 
   const orderFields = baseOrder
     .split(SQL_SEPARATORS.ORDER_BY)
@@ -147,7 +151,7 @@ function buildWindowOrder(args: {
 
   if (hasIdInOrder) return baseOrder
 
-  const idTiebreaker = idField ? `, ${col(fromAlias, 'id')} ASC` : ''
+  const idTiebreaker = idField ? `, ${col(fromAlias, 'id', model)} ASC` : ''
   return `${baseOrder}${idTiebreaker}`
 }
 
@@ -172,19 +176,22 @@ function buildSqliteDistinctQuery(
     includeNames,
     hasCount,
   )
-  const distinctCols = buildDistinctColumns([...distinct], from.alias)
+  const distinctCols = buildDistinctColumns([...distinct], from.alias, model)
 
   const fallbackOrder = [...distinct]
-    .map((f) => `${col(from.alias, f)} ASC`)
+    .map((f) => `${col(from.alias, f, model)} ASC`)
     .join(SQL_SEPARATORS.FIELD_LIST)
 
-  const idField = model.fields.find((f) => f.name === 'id' && !f.isRelation)
+  const idField = model.fields.find(
+    (f: any) => f.name === 'id' && !f.isRelation,
+  )
   const baseOrder = isNonEmptyString(orderBy) ? orderBy : fallbackOrder
 
   const windowOrder = buildWindowOrder({
     baseOrder,
     idField,
     fromAlias: from.alias,
+    model,
   })
 
   const outerOrder = isNonEmptyString(orderBy)
@@ -358,9 +365,10 @@ function withCountJoins(
 function buildPostgresDistinctOnClause(
   fromAlias: string,
   distinct?: readonly string[],
+  model?: any,
 ): string | null {
   if (!isNonEmptyArray(distinct)) return null
-  const distinctCols = buildDistinctColumns([...distinct], fromAlias)
+  const distinctCols = buildDistinctColumns([...distinct], fromAlias, model)
   return `${SQL_TEMPLATES.DISTINCT_ON} (${distinctCols})`
 }
 
@@ -401,6 +409,7 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
     cursorClause,
     params,
     dialect,
+    model,
   } = spec
 
   const useWindowDistinct = hasWindowDistinct(spec)
@@ -424,7 +433,7 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
 
   const distinctOn =
     dialect === 'postgres'
-      ? buildPostgresDistinctOnClause(from.alias, distinct)
+      ? buildPostgresDistinctOnClause(from.alias, distinct, model)
       : null
   if (distinctOn) parts.push(distinctOn)
 

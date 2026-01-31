@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": false,
+    "declarationMap": false,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "exactOptionalPropertyTypes": false,
+    "allowSyntheticDefaultImports": true,
+    "target": "es2023",
+    "lib": ["es2023"],
+    "sourceMap": true,
+    "inlineSources": true,
+    "inlineSourceMap": false,
+    "sourceRoot": "./",
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "useDefineForClassFields": false,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": false,
+    "typeRoots": ["./node_modules/@types", "./@types"],
+    "paths": { "@prisma/client": ["./prisma/.generated/client"] }
+  }
+}

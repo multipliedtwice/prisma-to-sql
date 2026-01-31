@@ -1,0 +1,12 @@
+services:
+  postgresql:
+    image: postgres:18.1
+    restart: on-failure
+    ports:
+      - "5432:5432"
+    volumes:
+      - "./docker/postgresql:/var/lib/postgresql"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: reproduce_db

@@ -1,0 +1,41 @@
+{
+  "name": "reproduce",
+  "version": "1.0.0",
+  "author": "Arthur Lazarenko",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": "22 || 24"
+  },
+  "scripts": {
+    "prisma:generate": "npx prisma generate --config=prisma.config.ts",
+    "prisma:migrate": "npx prisma migrate deploy --config=prisma.config.ts",
+    "prisma:seed": "npx prisma db seed --config=prisma.config.ts",
+    "start": "yarn prisma:generate && yarn prisma:migrate && yarn prisma:seed && npx tsx src/main.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.3.0",
+    "@prisma/client": "7.3.0",
+    "bcrypt": "6.0.0",
+    "dotenv": "17.2.3",
+    "postgres": "3.4.8",
+    "prisma-sql": "file:..",
+    "reflect-metadata": "0.2.2"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "6.0.0",
+    "@types/node": "25.1.0",
+    "@types/pg": "8.16.0",
+    "globals": "17.2.0",
+    "prettier": "3.8.1",
+    "prettier-plugin-sql": "0.19.2",
+    "prisma": "7.3.0",
+    "prisma-json-types-generator": "4.1.1",
+    "prisma-markdown": "4.0.0",
+    "source-map-support": "0.5.21",
+    "ts-loader": "9.5.4",
+    "tsconfig-paths": "4.2.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.54.0"
+  }
+}

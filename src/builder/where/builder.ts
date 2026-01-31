@@ -266,7 +266,7 @@ function buildScalarField(
   ctx: BuildContext,
 ): QueryResult {
   const field = assertFieldExists(fieldName, ctx.model, ctx.path)
-  const expr = col(ctx.alias, fieldName)
+  const expr = col(ctx.alias, fieldName, ctx.model)
 
   if (value === null) {
     return freezeResult(`${expr} ${SQL_TEMPLATES.IS_NULL}`, EMPTY_JOINS)
