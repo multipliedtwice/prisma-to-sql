@@ -23,6 +23,7 @@ tests/prisma/schema-sqlite.prisma
 tests/prisma/schema.prisma
 docs
 docs-site/node_modules/
+docs-site/node_modules
 docs-site/dist/
 docs-site/.astro/
 docs/.DS_Store

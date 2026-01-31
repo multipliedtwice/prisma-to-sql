@@ -85,7 +85,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
-          cd docs-site && npm ci
+          cd docs-site && npm install
 
       - name: Build Astro site
         run: cd docs-site && npm run build
