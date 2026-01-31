@@ -4,8 +4,21 @@ import { speedExtension } from '../prisma/.generated/sql';
 
 async function reproduce() {
   const prisma = new PrismaClient<typeof PRISMA_OPTIONS>(PRISMA_OPTIONS);
-  const client = prisma.$extends(speedExtension(EXTENSION_OPTIONS));
+  
+  const client = prisma
+  ?.$extends(
+    speedExtension({
+      ...EXTENSION_OPTIONS,
+      onQuery: (info) => {
+        console.log(`⏱️  ${info.model}.${info.method}: ${info.duration}ms ${info.prebaked ? '⚡ PREBAKED' : '🔨 RUNTIME'}`);
+      }
+    })
+  );
 
+  console.log('Starting query...\n');
+  
+  const startTime = performance.now();
+  
   const user = await client.user.findFirst({
     where: {
       kickId: null,
@@ -21,7 +34,11 @@ async function reproduce() {
     },
   });
 
-  console.log(user);
+  const endTime = performance.now();
+  const totalTime = endTime - startTime;
+
+  console.log('\n✅ Result:', user);
+  console.log(`\n📊 Total execution time: ${totalTime.toFixed(2)}ms`);
 }
 
 reproduce();

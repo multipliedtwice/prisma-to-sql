@@ -11,7 +11,7 @@
     "prisma:generate": "npx prisma generate --config=prisma.config.ts",
     "prisma:migrate": "npx prisma migrate deploy --config=prisma.config.ts",
     "prisma:seed": "npx prisma db seed --config=prisma.config.ts",
-    "start": "yarn prisma:generate && yarn prisma:migrate && yarn prisma:seed && npx tsx src/main.ts"
+    "start": "npm run prisma:generate && npm run prisma:migrate && npm run prisma:seed && npx tsx src/main.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "7.3.0",
@@ -19,7 +19,7 @@
     "bcrypt": "6.0.0",
     "dotenv": "17.2.3",
     "postgres": "3.4.8",
-    "prisma-sql": "file:..",
+    "prisma-sql": "file:../dist",
     "reflect-metadata": "0.2.2"
   },
   "devDependencies": {

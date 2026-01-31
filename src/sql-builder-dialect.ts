@@ -238,7 +238,7 @@ export function getArrayType(prismaType: string, dialect: SqlDialect): string {
     case 'DateTime':
       return 'timestamptz[]'
     default:
-      return 'text[]'
+      return `"${baseType}"[]`
   }
 }
 

@@ -41,6 +41,17 @@
     "sonar-cli": "sonar-scanner   -Dsonar.projectKey=prisma-sql   -Dsonar.sources=./src   -Dsonar.host.url=http://localhost:9000   -Dsonar.login=sqp_9fe07460d0aa83f711d0edf4f317f05019d0613b",
     "sonar": "yarn sonar-cli && npx tsx scripts/sonar.ts"
   },
+  "workspaces": {
+    "packages": [
+      "demo"
+    ],
+    "nohoist": [
+      "**/prisma",
+      "**/prisma/**",
+      "**/@prisma/**",
+      "**/prisma-*"
+    ]
+  },
   "keywords": [
     "prisma",
     "sql",
