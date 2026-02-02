@@ -56,7 +56,7 @@ Add the SQL generator to your `schema.prisma`:
 
 ```prisma
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
 }
 
 generator sql {
