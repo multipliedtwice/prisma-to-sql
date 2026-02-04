@@ -3,6 +3,7 @@ import {
   isDynamicParameter,
   ParamMap,
 } from '@dee-wan/schema-parser'
+import { normalizeValue } from '../../utils/normalize-value'
 
 export interface ParamStore {
   add(value: unknown, dynamicName?: string): string
@@ -118,13 +119,6 @@ function validateState(
 
   validateMappings(mappings)
   assertNextIndexMatches(mappings.length, index)
-}
-
-function normalizeValue(value: unknown): unknown {
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-  return value
 }
 
 function createStoreInternal(

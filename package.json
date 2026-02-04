@@ -73,6 +73,8 @@
     "@faker-js/faker": "^10.2.0",
     "@prisma/adapter-better-sqlite3": "^7.2.0",
     "@prisma/adapter-pg": "^7.2.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.10",
     "@vitest/coverage-v8": "4.0.18",

@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { readFileSync, writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { createToSQL, convertDMMFToModels } from '../../src'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
 import { getDatamodel } from '../helpers/datamodel'
+import { queryCache } from '../../src/query-cache'
 
 const PRISMA_DIR = join(process.cwd(), 'tests', 'prisma')
 const SCHEMA_PATH = join(PRISMA_DIR, 'schema-postgres.prisma')
@@ -34,12 +35,14 @@ describe('Date Parameter Normalization', () => {
 
   beforeAll(async () => {
     mergeSchema()
-
     const datamodel = await getDatamodel('postgres')
     const models = convertDMMFToModels(datamodel)
-
     setGlobalDialect('postgres')
     toSQL = createToSQL(models, 'postgres')
+  })
+
+  beforeEach(() => {
+    queryCache.clear()
   })
 
   afterAll(() => {
@@ -86,7 +89,6 @@ describe('Date Parameter Normalization', () => {
         },
       })
 
-      // Should be ISO string, not Date object
       const dateParam = params.find(
         (p) => typeof p === 'string' && p.includes('T'),
       )
@@ -170,22 +172,28 @@ describe('Date Parameter Normalization', () => {
         },
       })
 
-      // Should be parameterized, not injected
       expect(sql).toMatch(/\$\d+/)
       expect(params).toContain("2024-01-01'; DROP TABLE users; --")
     })
 
-    it('should handle malicious date objects safely', () => {
+    it('should throw on invalid date objects', () => {
       const maliciousDate = new Date('invalid')
 
-      // Invalid dates should be caught during normalization
-      const { params } = toSQL('User', 'findMany', {
-        where: { createdAt: { gte: maliciousDate } },
-      })
+      expect(() => {
+        toSQL('User', 'findMany', {
+          where: { createdAt: { gte: maliciousDate } },
+        })
+      }).toThrow(/Invalid time value/)
+    })
 
-      // Should produce "Invalid Date" string or throw during toISOString
-      const dateParam = params[0]
-      expect(typeof dateParam).toBe('string')
+    it('should throw on NaN date objects', () => {
+      const nanDate = new Date(NaN)
+
+      expect(() => {
+        toSQL('User', 'findMany', {
+          where: { createdAt: { gte: nanDate } },
+        })
+      }).toThrow(/Invalid time value/)
     })
   })
 
@@ -200,7 +208,6 @@ describe('Date Parameter Normalization', () => {
         },
       })
 
-      // Should have normalized date param
       const hasISOString = params.some(
         (p) => typeof p === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(p),
       )
@@ -210,7 +217,6 @@ describe('Date Parameter Normalization', () => {
     it('should handle multiple count queries with date filters', () => {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-      // This mimics the original failing code pattern
       const queries = [
         toSQL('Task', 'count', {
           where: { createdAt: { gte: sevenDaysAgo } },
@@ -226,7 +232,6 @@ describe('Date Parameter Normalization', () => {
         }),
       ]
 
-      // All queries should have valid ISO string params
       for (const { params } of queries) {
         const hasValidDate = params.some(
           (p) =>
@@ -285,19 +290,15 @@ describe('Date Parameter Normalization', () => {
         },
       })
 
-      // For Postgres, array param is passed as-is (already normalized)
-      // For SQLite, it's JSON stringified
       const dateArray = params[0]
 
       if (Array.isArray(dateArray)) {
-        // Postgres dialect - array of ISO strings
         expect(dateArray).toEqual([
           '2024-01-01T00:00:00.000Z',
           '2024-02-01T00:00:00.000Z',
           '2024-03-01T00:00:00.000Z',
         ])
       } else if (typeof dateArray === 'string') {
-        // SQLite dialect - JSON string
         const parsed = JSON.parse(dateArray)
         expect(parsed).toEqual([
           '2024-01-01T00:00:00.000Z',
@@ -316,7 +317,6 @@ describe('Date Parameter Normalization', () => {
         },
       })
 
-      // Empty IN should produce 0=1 (always false)
       expect(sql).toContain('0=1')
     })
   })
