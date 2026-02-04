@@ -271,7 +271,7 @@ describe('SQL Injection - Basic Protection', () => {
       })
 
       expect(sql).toMatch(/\bORDER BY\b/i)
-      expect(sql).toMatch(/\b\w+\.(?:")?isDeleted(?:")?\s+ASC\b/i)
+      expect(sql).toMatch(/\b\w+\.(?:")?is_deleted(?:")?\s+ASC\b/i)
     })
   })
 })

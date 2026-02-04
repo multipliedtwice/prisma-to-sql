@@ -250,7 +250,12 @@ function buildSelectSpec(input: {
     alias,
   )
 
-  const orderByClause = buildOrderByClause(normalizedArgs, alias, dialect)
+  const orderByClause = buildOrderByClause(
+    normalizedArgs,
+    alias,
+    dialect,
+    model,
+  )
   const { take, skip, cursor } = getPaginationParams(method, normalizedArgs)
 
   const params = createParamStoreFrom(
