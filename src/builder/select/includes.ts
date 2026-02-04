@@ -1,5 +1,5 @@
 import { joinCondition, isValidRelationField } from '../joins'
-import { buildOrderBy, readSkipTake } from '../pagination'
+import { buildOrderBy, readSkipTake, parseOrderByValue } from '../pagination'
 import { buildWhereClause } from '../where'
 import { jsonAgg, jsonBuildObject, SqlDialect } from '../../sql-builder-dialect'
 import { buildRelationSelect } from './fields'
@@ -9,6 +9,7 @@ import { SQL_TEMPLATES, SQL_SEPARATORS } from '../shared/constants'
 import {
   buildTableReference,
   quote,
+  quoteColumn,
   sqlStringLiteral,
   normalizeKeyList,
 } from '../shared/sql-utils'
@@ -21,9 +22,15 @@ import {
   isNotNullish,
   isPlainObject,
 } from '../shared/validators/type-guards'
-import { reverseOrderByInput } from '../shared/order-by-utils'
+import {
+  reverseOrderByInput,
+  normalizeOrderByInput,
+} from '../shared/order-by-utils'
 import { addAutoScoped } from '../shared/dynamic-params'
-import { getRelationFieldSet } from '../shared/model-field-cache'
+import {
+  getRelationFieldSet,
+  getScalarFieldSet,
+} from '../shared/model-field-cache'
 
 type DynamicInt = string
 type IntOrDynamic = number | DynamicInt
@@ -110,131 +117,28 @@ function relationEntriesFromArgs(
   return out
 }
 
-function assertScalarField(model: Model, fieldName: string): void {
-  const f = model.fields.find((x) => x.name === fieldName)
-  if (!f) {
-    throw new Error(
-      `orderBy references unknown field '${fieldName}' on model ${model.name}`,
-    )
-  }
-  if (f.isRelation) {
-    throw new Error(
-      `orderBy does not support relation field '${fieldName}' on model ${model.name}`,
-    )
-  }
-}
+function validateOrderByForModel(model: Model, orderBy: unknown): void {
+  if (!isNotNullish(orderBy)) return
 
-function validateOrderByDirection(fieldName: string, v: unknown): void {
-  const s = String(v).toLowerCase()
-  if (s !== 'asc' && s !== 'desc') {
-    throw new Error(
-      `Invalid orderBy direction for '${fieldName}': ${String(v)}`,
-    )
-  }
-}
+  const scalarSet = getScalarFieldSet(model)
+  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue)
 
-function validateOrderByObject(
-  fieldName: string,
-  v: Record<string, unknown>,
-): void {
-  if (!('sort' in v)) {
-    throw new Error(
-      `orderBy for '${fieldName}' must be 'asc' | 'desc' or { sort, nulls? }`,
-    )
-  }
+  for (const item of normalized) {
+    const entries = Object.entries(item)
+    if (entries.length !== 1) {
+      throw new Error('orderBy array entries must have exactly one field')
+    }
 
-  validateOrderByDirection(fieldName, (v as any).sort)
+    const fieldName = String(entries[0][0]).trim()
+    if (fieldName.length === 0) {
+      throw new Error('orderBy field name cannot be empty')
+    }
 
-  if ('nulls' in v && isNotNullish((v as any).nulls)) {
-    const n = String((v as any).nulls).toLowerCase()
-    if (n !== 'first' && n !== 'last') {
+    if (!scalarSet.has(fieldName)) {
       throw new Error(
-        `Invalid orderBy.nulls for '${fieldName}': ${String((v as any).nulls)}`,
+        `orderBy references unknown or non-scalar field '${fieldName}' on model ${model.name}`,
       )
     }
-  }
-
-  const allowed = new Set(['sort', 'nulls'])
-  for (const k of Object.keys(v)) {
-    if (!allowed.has(k)) {
-      throw new Error(`Unsupported orderBy key '${k}' for field '${fieldName}'`)
-    }
-  }
-}
-
-function normalizeOrderByFieldName(name: unknown): string {
-  const fieldName = String(name).trim()
-  if (fieldName.length === 0) {
-    throw new Error('orderBy field name cannot be empty')
-  }
-  return fieldName
-}
-
-function requirePlainObjectForOrderByEntry(
-  v: unknown,
-): Record<string, unknown> {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-    throw new Error('orderBy array entries must be objects')
-  }
-  return v as Record<string, unknown>
-}
-
-function parseSingleFieldOrderByObject(
-  obj: Record<string, unknown>,
-): [string, unknown] {
-  const entries = Object.entries(obj)
-  if (entries.length !== 1) {
-    throw new Error('orderBy array entries must have exactly one field')
-  }
-  const fieldName = normalizeOrderByFieldName(entries[0][0])
-  return [fieldName, entries[0][1]]
-}
-
-function parseOrderByArray(orderBy: unknown[]): Array<[string, unknown]> {
-  return orderBy.map((item) =>
-    parseSingleFieldOrderByObject(requirePlainObjectForOrderByEntry(item)),
-  )
-}
-
-function parseOrderByObject(
-  orderBy: Record<string, unknown>,
-): Array<[string, unknown]> {
-  const out: Array<[string, unknown]> = []
-  for (const [k, v] of Object.entries(orderBy)) {
-    out.push([normalizeOrderByFieldName(k), v])
-  }
-  return out
-}
-
-function getOrderByEntries(orderBy: unknown): Array<[string, unknown]> {
-  if (!isNotNullish(orderBy)) return []
-
-  if (Array.isArray(orderBy)) {
-    return parseOrderByArray(orderBy)
-  }
-
-  if (typeof orderBy === 'object' && orderBy !== null) {
-    return parseOrderByObject(orderBy as Record<string, unknown>)
-  }
-
-  throw new Error('orderBy must be an object or array of objects')
-}
-
-function validateOrderByForModel(model: Model, orderBy: unknown): void {
-  const entries = getOrderByEntries(orderBy)
-  for (const [fieldName, v] of entries) {
-    assertScalarField(model, fieldName)
-    if (typeof v === 'string') {
-      validateOrderByDirection(fieldName, v)
-      continue
-    }
-    if (isPlainObject(v)) {
-      validateOrderByObject(fieldName, v)
-      continue
-    }
-    throw new Error(
-      `orderBy for '${fieldName}' must be 'asc' | 'desc' or { sort, nulls? }`,
-    )
   }
 }
 
@@ -326,17 +230,16 @@ function maybeReverseNegativeTake(
 }
 
 function hasIdTiebreaker(orderByInput: unknown): boolean {
-  const entries = Array.isArray(orderByInput) ? orderByInput : [orderByInput]
-  return entries.some((entry) =>
-    isPlainObject(entry)
-      ? Object.prototype.hasOwnProperty.call(entry, 'id')
-      : false,
+  if (!isNotNullish(orderByInput)) return false
+  const normalized = normalizeOrderByInput(orderByInput, parseOrderByValue)
+  return normalized.some((obj) =>
+    Object.prototype.hasOwnProperty.call(obj, 'id'),
   )
 }
 
 function modelHasScalarId(relModel: Model): boolean {
-  const idField = relModel.fields.find((f) => f.name === 'id')
-  return Boolean(idField && !idField.isRelation)
+  const scalarSet = getScalarFieldSet(relModel)
+  return scalarSet.has('id')
 }
 
 function addIdTiebreaker(orderByInput: unknown): unknown {
@@ -784,59 +687,105 @@ function resolveCountRelationOrThrow(
   return { field, relModel }
 }
 
-function groupByColForCount(field: Field, countAlias: string): string {
-  const fkFields = normalizeKeyList((field as any).foreignKey)
-  const refFields = normalizeKeyList((field as any).references)
-
-  return field.isForeignKeyLocal
-    ? `${countAlias}.${quote(refFields[0] || 'id')}`
-    : `${countAlias}.${quote(fkFields[0])}`
+function defaultReferencesForCount(fkCount: number): string[] {
+  if (fkCount === 1) return ['id']
+  throw new Error(
+    'Relation count for composite keys requires explicit references matching foreignKey length',
+  )
 }
 
-function leftJoinOnForCount(
-  field: Field,
-  parentAlias: string,
-  joinAlias: string,
-): string {
+function resolveCountKeyPairs(field: Field): {
+  relKeyFields: string[]
+  parentKeyFields: string[]
+} {
   const fkFields = normalizeKeyList((field as any).foreignKey)
-  const refFields = normalizeKeyList((field as any).references)
+  if (fkFields.length === 0) {
+    throw new Error('Relation count requires foreignKey')
+  }
 
-  return field.isForeignKeyLocal
-    ? `${joinAlias}.__fk = ${parentAlias}.${quote(fkFields[0])}`
-    : `${joinAlias}.__fk = ${parentAlias}.${quote(refFields[0] || 'id')}`
+  const refsRaw = (field as any).references
+  const refs = normalizeKeyList(refsRaw)
+  const refFields =
+    refs.length > 0 ? refs : defaultReferencesForCount(fkFields.length)
+
+  if (refFields.length !== fkFields.length) {
+    throw new Error(
+      'Relation count requires references count to match foreignKey count',
+    )
+  }
+
+  const relKeyFields = field.isForeignKeyLocal ? refFields : fkFields
+  const parentKeyFields = field.isForeignKeyLocal ? fkFields : refFields
+
+  return { relKeyFields, parentKeyFields }
 }
 
-function subqueryForCount(
-  dialect: SqlDialect,
-  relTable: string,
-  countAlias: string,
-  groupByCol: string,
-): string {
-  return dialect === 'postgres'
-    ? `(SELECT ${groupByCol} AS __fk, COUNT(*)::int AS __cnt FROM ${relTable} ${countAlias} GROUP BY ${groupByCol})`
-    : `(SELECT ${groupByCol} AS __fk, COUNT(*) AS __cnt FROM ${relTable} ${countAlias} GROUP BY ${groupByCol})`
+function subqueryForCount(args: {
+  dialect: SqlDialect
+  relTable: string
+  countAlias: string
+  relModel: Model
+  relKeyFields: string[]
+}): string {
+  const selectKeys = args.relKeyFields
+    .map(
+      (f, i) =>
+        `${args.countAlias}.${quoteColumn(args.relModel, f)} AS "__fk${i}"`,
+    )
+    .join(SQL_SEPARATORS.FIELD_LIST)
+
+  const groupByKeys = args.relKeyFields
+    .map((f) => `${args.countAlias}.${quoteColumn(args.relModel, f)}`)
+    .join(SQL_SEPARATORS.FIELD_LIST)
+
+  const cntExpr =
+    args.dialect === 'postgres' ? 'COUNT(*)::int AS __cnt' : 'COUNT(*) AS __cnt'
+
+  return `(SELECT ${selectKeys}${SQL_SEPARATORS.FIELD_LIST}${cntExpr} FROM ${args.relTable} ${args.countAlias} GROUP BY ${groupByKeys})`
+}
+
+function leftJoinOnForCount(args: {
+  joinAlias: string
+  parentAlias: string
+  parentModel: Model
+  parentKeyFields: string[]
+}): string {
+  const parts = args.parentKeyFields.map(
+    (f, i) =>
+      `${args.joinAlias}."__fk${i}" = ${args.parentAlias}.${quoteColumn(args.parentModel, f)}`,
+  )
+  return parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`
 }
 
 function buildCountJoinAndPair(args: {
   relName: string
   field: Field
   relModel: Model
+  parentModel: Model
   parentAlias: string
   dialect: SqlDialect
+  aliasGen: ReturnType<typeof createAliasGenerator>
 }): { joinSql: string; pairSql: string } {
   const relTable = getRelationTableReference(args.relModel, args.dialect)
 
-  const countAlias = `__tp_cnt_${args.relName}`
-  const groupByCol = groupByColForCount(args.field, countAlias)
-  const subquery = subqueryForCount(
-    args.dialect,
+  const { relKeyFields, parentKeyFields } = resolveCountKeyPairs(args.field)
+
+  const countAlias = args.aliasGen.next(`__tp_cnt_${args.relName}`)
+  const subquery = subqueryForCount({
+    dialect: args.dialect,
     relTable,
     countAlias,
-    groupByCol,
-  )
+    relModel: args.relModel,
+    relKeyFields,
+  })
 
-  const joinAlias = `__tp_cnt_j_${args.relName}`
-  const leftJoinOn = leftJoinOnForCount(args.field, args.parentAlias, joinAlias)
+  const joinAlias = args.aliasGen.next(`__tp_cnt_j_${args.relName}`)
+  const leftJoinOn = leftJoinOnForCount({
+    joinAlias,
+    parentAlias: args.parentAlias,
+    parentModel: args.parentModel,
+    parentKeyFields,
+  })
 
   return {
     joinSql: `LEFT JOIN ${subquery} ${joinAlias} ON ${leftJoinOn}`,
@@ -854,6 +803,7 @@ export function buildRelationCountSql(
 ): RelationCountBuild {
   const joins: string[] = []
   const pairs: string[] = []
+  const aliasGen = createAliasGenerator()
 
   for (const [relName, shouldCount] of Object.entries(countSelect)) {
     if (!shouldCount) continue
@@ -863,8 +813,10 @@ export function buildRelationCountSql(
       relName,
       field: resolved.field,
       relModel: resolved.relModel,
+      parentModel: model,
       parentAlias,
       dialect,
+      aliasGen,
     })
 
     joins.push(built.joinSql)
