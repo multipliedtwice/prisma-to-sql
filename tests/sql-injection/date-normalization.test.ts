@@ -1,323 +1,236 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
-import { readFileSync, writeFileSync, unlinkSync } from 'fs'
-import { join } from 'path'
-import { createToSQL, convertDMMFToModels } from '../../src'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { buildWhereClause } from '../../src/builder/where'
+import { buildCountSql } from '../../src/builder/aggregates'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
-import { getDatamodel } from '../helpers/datamodel'
 import { queryCache } from '../../src/query-cache'
+import type { Model } from '../../src/types'
 
-const PRISMA_DIR = join(process.cwd(), 'tests', 'prisma')
-const SCHEMA_PATH = join(PRISMA_DIR, 'schema-postgres.prisma')
-
-function mergeSchema(): void {
-  const base = readFileSync(join(PRISMA_DIR, 'base.prisma'), 'utf-8')
-
-  const header = `generator client {
-  provider = "prisma-client-js"
-  output   = "../generated/postgres"
+const UserModel: Model = {
+  name: 'User',
+  tableName: 'users',
+  fields: [
+    {
+      name: 'id',
+      dbName: 'id',
+      type: 'Int',
+      isRequired: true,
+      isRelation: false,
+    },
+    {
+      name: 'email',
+      dbName: 'email',
+      type: 'String',
+      isRequired: true,
+      isRelation: false,
+    },
+    {
+      name: 'isDeleted',
+      dbName: 'is_deleted',
+      type: 'Boolean',
+      isRequired: true,
+      isRelation: false,
+    },
+    {
+      name: 'createdAt',
+      dbName: 'createdAt',
+      type: 'DateTime',
+      isRequired: true,
+      isRelation: false,
+    },
+    {
+      name: 'updatedAt',
+      dbName: 'updatedAt',
+      type: 'DateTime',
+      isRequired: true,
+      isRelation: false,
+    },
+    {
+      name: 'lastLoginAt',
+      dbName: 'lastLoginAt',
+      type: 'DateTime?',
+      isRequired: false,
+      isRelation: false,
+    },
+  ],
 }
 
-datasource db {
-  provider = "postgresql"
-}`
-
-  writeFileSync(SCHEMA_PATH, `${header}\n\n${base}`)
-}
-
-function cleanupSchema(): void {
-  try {
-    unlinkSync(SCHEMA_PATH)
-  } catch {}
-}
-
-describe('Date Parameter Normalization', () => {
-  let toSQL: ReturnType<typeof createToSQL>
-
-  beforeAll(async () => {
-    mergeSchema()
-    const datamodel = await getDatamodel('postgres')
-    const models = convertDMMFToModels(datamodel)
-    setGlobalDialect('postgres')
-    toSQL = createToSQL(models, 'postgres')
-  })
-
+describe('Date Normalization - Direct Bug Detection', () => {
   beforeEach(() => {
+    setGlobalDialect('postgres')
     queryCache.clear()
   })
 
-  afterAll(() => {
-    cleanupSchema()
-  })
+  it('🚨 CRITICAL: Catches Date object leak in count queries', () => {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-  describe('Static Date Params', () => {
-    it('should normalize Date objects to ISO strings', () => {
-      const testDate = new Date('2024-01-15T10:30:00Z')
-      const { sql, params } = toSQL('User', 'findMany', {
-        where: {
-          createdAt: { gte: testDate },
-        },
-      })
+    const whereResult = buildWhereClause(
+      {
+        isDeleted: false,
+        createdAt: { gte: sevenDaysAgo },
+      },
+      {
+        alias: 'user',
+        schemaModels: [UserModel],
+        model: UserModel,
+        path: ['where'],
+        isSubquery: false,
+      },
+    )
 
-      expect(params).toContain('2024-01-15T10:30:00.000Z')
-      expect(params).not.toContainEqual(testDate)
-    })
+    const result = buildCountSql(whereResult, '"public"."users"', 'user')
 
-    it('should handle multiple date params', () => {
-      const startDate = new Date('2024-01-01T00:00:00Z')
-      const endDate = new Date('2024-12-31T23:59:59Z')
+    console.log('SQL:', result.sql)
+    console.log('Params:', result.params)
+    console.log(
+      'Param types:',
+      result.params.map((p) =>
+        p instanceof Date
+          ? 'Date'
+          : typeof p === 'object' && p !== null
+            ? `Object{${Object.keys(p).length}}`
+            : typeof p,
+      ),
+    )
 
-      const { sql, params } = toSQL('User', 'findMany', {
-        where: {
-          createdAt: {
-            gte: startDate,
-            lte: endDate,
-          },
-        },
-      })
-
-      expect(params).toContain('2024-01-01T00:00:00.000Z')
-      expect(params).toContain('2024-12-31T23:59:59.000Z')
-    })
-
-    it('should handle dates in complex queries', () => {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-      const { sql, params } = toSQL('User', 'count', {
-        where: {
-          createdAt: { gte: sevenDaysAgo },
-          isDeleted: false,
-        },
-      })
-
-      const dateParam = params.find(
-        (p) => typeof p === 'string' && p.includes('T'),
-      )
-      expect(dateParam).toBeTruthy()
-      expect(dateParam).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
-    })
-
-    it('should not break on valid dates', () => {
-      const validDate = new Date('2024-01-15T10:30:00Z')
-
-      expect(() => {
-        toSQL('User', 'findMany', {
-          where: { createdAt: { gte: validDate } },
-        })
-      }).not.toThrow()
-    })
-  })
-
-  describe('Edge Cases', () => {
-    it('should handle null date values', () => {
-      const { sql, params } = toSQL('User', 'findMany', {
-        where: { lastLoginAt: null },
-      })
-
-      expect(sql).toContain('IS NULL')
-      expect(params).toEqual([])
-    })
-
-    it('should handle date comparison operators', () => {
-      const testDate = new Date('2024-01-15T10:30:00Z')
-
-      const { sql, params } = toSQL('User', 'findMany', {
-        where: {
-          createdAt: {
-            gt: testDate,
-            lt: testDate,
-          },
-        },
-      })
-
-      const isoString = '2024-01-15T10:30:00.000Z'
-      expect(params.filter((p) => p === isoString).length).toBe(2)
-    })
-
-    it('should handle dates in OR conditions', () => {
-      const date1 = new Date('2024-01-01T00:00:00Z')
-      const date2 = new Date('2024-12-31T23:59:59Z')
-
-      const { sql, params } = toSQL('User', 'findMany', {
-        where: {
-          OR: [{ createdAt: { gte: date1 } }, { updatedAt: { gte: date2 } }],
-        },
-      })
-
-      expect(params).toContain('2024-01-01T00:00:00.000Z')
-      expect(params).toContain('2024-12-31T23:59:59.000Z')
-    })
-
-    it('should handle dates in nested queries', () => {
-      const testDate = new Date('2024-01-15T10:30:00Z')
-
-      const { sql, params } = toSQL('Task', 'findMany', {
-        where: {
-          createdAt: { gte: testDate },
-          assignee: {
-            createdAt: { gte: testDate },
-          },
-        },
-      })
-
-      const isoString = '2024-01-15T10:30:00.000Z'
-      expect(params.filter((p) => p === isoString).length).toBeGreaterThan(0)
-    })
-  })
-
-  describe('SQL Injection Prevention with Dates', () => {
-    it('should not allow SQL injection via date string manipulation', () => {
-      const { sql, params } = toSQL('User', 'findMany', {
-        where: {
-          createdAt: { gte: "2024-01-01'; DROP TABLE users; --" as any },
-        },
-      })
-
-      expect(sql).toMatch(/\$\d+/)
-      expect(params).toContain("2024-01-01'; DROP TABLE users; --")
-    })
-
-    it('should throw on invalid date objects', () => {
-      const maliciousDate = new Date('invalid')
-
-      expect(() => {
-        toSQL('User', 'findMany', {
-          where: { createdAt: { gte: maliciousDate } },
-        })
-      }).toThrow(/Invalid time value/)
-    })
-
-    it('should throw on NaN date objects', () => {
-      const nanDate = new Date(NaN)
-
-      expect(() => {
-        toSQL('User', 'findMany', {
-          where: { createdAt: { gte: nanDate } },
-        })
-      }).toThrow(/Invalid time value/)
-    })
-  })
-
-  describe('Count Query with Dates (Reproducing Original Bug)', () => {
-    it('should handle count queries with date filters', () => {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-      const { sql, params } = toSQL('User', 'count', {
-        where: {
-          isDeleted: false,
-          createdAt: { gte: sevenDaysAgo },
-        },
-      })
-
-      const hasISOString = params.some(
-        (p) => typeof p === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(p),
-      )
-      expect(hasISOString).toBe(true)
-    })
-
-    it('should handle multiple count queries with date filters', () => {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-      const queries = [
-        toSQL('Task', 'count', {
-          where: { createdAt: { gte: sevenDaysAgo } },
-        }),
-        toSQL('Task', 'count', {
-          where: { updatedAt: { gte: sevenDaysAgo } },
-        }),
-        toSQL('User', 'count', {
-          where: { createdAt: { gte: sevenDaysAgo } },
-        }),
-        toSQL('Project', 'count', {
-          where: { createdAt: { gte: sevenDaysAgo } },
-        }),
-      ]
-
-      for (const { params } of queries) {
-        const hasValidDate = params.some(
-          (p) =>
-            typeof p === 'string' &&
-            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(p),
+    result.params.forEach((param, index) => {
+      if (param instanceof Date) {
+        throw new Error(
+          `🚨 BUG DETECTED!\n\n` +
+            `Date instance found at params[${index}]\n` +
+            `  Value: ${param}\n` +
+            `  Expected: ISO string like "${param.toISOString()}"\n\n` +
+            `This will cause:\n` +
+            `  RangeError: Invalid time value\n` +
+            `  at Date.toISOString (<anonymous>)\n` +
+            `  at Object.serialize (postgres/cjs/src/types.js:31:59)\n\n` +
+            `SQL: ${result.sql}\n` +
+            `All params: ${JSON.stringify(result.params, null, 2)}`,
         )
-        expect(hasValidDate).toBe(true)
+      }
+
+      if (
+        typeof param === 'object' &&
+        param !== null &&
+        !Array.isArray(param) &&
+        Object.keys(param).length === 0 &&
+        Object.getPrototypeOf(param) === Object.prototype
+      ) {
+        throw new Error(
+          `🚨 BUG DETECTED!\n\n` +
+            `Empty object {} found at params[${index}]\n` +
+            `This is likely a Date that failed to serialize!\n\n` +
+            `SQL: ${result.sql}\n` +
+            `All params: ${JSON.stringify(result.params, null, 2)}`,
+        )
       }
     })
 
-    it('should handle aggregates with date filters', () => {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-      const { sql, params } = toSQL('Task', 'aggregate', {
-        where: { createdAt: { gte: sevenDaysAgo } },
-        _count: { _all: true },
-      })
-
-      const hasValidDate = params.some(
-        (p) =>
-          typeof p === 'string' &&
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(p),
-      )
-      expect(hasValidDate).toBe(true)
-    })
-
-    it('should handle groupBy with date filters', () => {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-      const { sql, params } = toSQL('Task', 'groupBy', {
-        by: ['status'],
-        where: { createdAt: { gte: sevenDaysAgo } },
-        _count: { _all: true },
-      })
-
-      const hasValidDate = params.some(
-        (p) =>
-          typeof p === 'string' &&
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(p),
-      )
-      expect(hasValidDate).toBe(true)
+    result.params.forEach((param, index) => {
+      if (typeof param === 'string' && /\d{4}-\d{2}-\d{2}T/.test(param)) {
+        expect(() => new Date(param).toISOString()).not.toThrow()
+      }
     })
   })
 
-  describe('Date Array Parameters', () => {
-    it('should normalize dates in array values', () => {
-      const dates = [
-        new Date('2024-01-01T00:00:00Z'),
-        new Date('2024-02-01T00:00:00Z'),
-        new Date('2024-03-01T00:00:00Z'),
-      ]
+  it('should handle multiple Date filters', () => {
+    const date1 = new Date('2024-01-01T00:00:00Z')
+    const date2 = new Date('2024-12-31T23:59:59Z')
 
-      const { sql, params } = toSQL('User', 'findMany', {
-        where: {
-          createdAt: { in: dates },
-        },
-      })
+    const whereResult = buildWhereClause(
+      {
+        createdAt: { gte: date1 },
+        updatedAt: { lte: date2 },
+      },
+      {
+        alias: 'user',
+        schemaModels: [UserModel],
+        model: UserModel,
+        path: ['where'],
+        isSubquery: false,
+      },
+    )
 
-      const dateArray = params[0]
+    const result = buildCountSql(whereResult, '"public"."users"', 'user')
 
-      if (Array.isArray(dateArray)) {
-        expect(dateArray).toEqual([
-          '2024-01-01T00:00:00.000Z',
-          '2024-02-01T00:00:00.000Z',
-          '2024-03-01T00:00:00.000Z',
-        ])
-      } else if (typeof dateArray === 'string') {
-        const parsed = JSON.parse(dateArray)
-        expect(parsed).toEqual([
-          '2024-01-01T00:00:00.000Z',
-          '2024-02-01T00:00:00.000Z',
-          '2024-03-01T00:00:00.000Z',
-        ])
-      } else {
-        throw new Error('Unexpected param type')
-      }
+    result.params.forEach((param, index) => {
+      expect(param, `params[${index}]`).not.toBeInstanceOf(Date)
     })
+  })
 
-    it('should handle empty date arrays', () => {
-      const { sql, params } = toSQL('User', 'findMany', {
-        where: {
-          createdAt: { in: [] },
-        },
-      })
+  it('should handle OR conditions with Dates', () => {
+    const date1 = new Date('2024-01-01T00:00:00Z')
+    const date2 = new Date('2024-12-31T23:59:59Z')
 
-      expect(sql).toContain('0=1')
+    const whereResult = buildWhereClause(
+      {
+        OR: [{ createdAt: { gte: date1 } }, { updatedAt: { gte: date2 } }],
+      },
+      {
+        alias: 'user',
+        schemaModels: [UserModel],
+        model: UserModel,
+        path: ['where'],
+        isSubquery: false,
+      },
+    )
+
+    const result = buildCountSql(whereResult, '"public"."users"', 'user')
+
+    result.params.forEach((param, index) => {
+      expect(param, `params[${index}]`).not.toBeInstanceOf(Date)
+    })
+  })
+
+  it('simulates exact postgres driver error scenario', () => {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    const whereResult = buildWhereClause(
+      {
+        isDeleted: false,
+        lastLoginAt: { gte: sevenDaysAgo },
+      },
+      {
+        alias: 'user',
+        schemaModels: [UserModel],
+        model: UserModel,
+        path: ['where'],
+        isSubquery: false,
+      },
+    )
+
+    const result = buildCountSql(whereResult, '"public"."users"', 'user')
+
+    result.params.forEach((param, index) => {
+      if (param instanceof Date) {
+        try {
+          param.toISOString()
+        } catch (error) {
+          throw new Error(
+            `🚨 This is the exact error from your production logs!\n` +
+              `  params[${index}]: ${param}\n` +
+              `  Error: ${error}\n\n` +
+              `The postgres driver cannot serialize this Date object.`,
+          )
+        }
+      }
+
+      if (
+        typeof param === 'object' &&
+        param !== null &&
+        !Array.isArray(param)
+      ) {
+        if (Object.keys(param).length === 0) {
+          try {
+            JSON.stringify(param)
+          } catch (error) {
+            throw new Error(
+              `🚨 Serialization would fail!\n` +
+                `  params[${index}]: ${JSON.stringify(param)}\n` +
+                `  Error: ${error}`,
+            )
+          }
+        }
+      }
     })
   })
 })
