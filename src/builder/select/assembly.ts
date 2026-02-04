@@ -15,13 +15,8 @@ import {
 import { addAutoScoped } from '../shared/dynamic-params'
 import { jsonBuildObject } from '../../sql-builder-dialect'
 import { buildRelationCountSql } from './includes'
-import { normalizeValue } from '../../utils/normalize-value'
 
 const SIMPLE_SELECT_RE_CACHE = new Map<string, RegExp>()
-
-function normalizeFinalParams(params: readonly unknown[]): unknown[] {
-  return params.map(normalizeValue)
-}
 
 function joinNonEmpty(parts: string[], sep: string): string {
   return parts.filter((s) => s.trim().length > 0).join(sep)
@@ -59,20 +54,34 @@ function finalizeSql(
 
   return Object.freeze({
     sql,
-    params: normalizeFinalParams(snapshot.params),
+    params: snapshot.params,
     paramMappings: Object.freeze(snapshot.mappings),
   })
 }
 
-function parseSimpleScalarSelect(select: string, alias: string): string[] {
+/**
+ * SQLite DISTINCT emulation requires scalar select fields to be simple column refs.
+ * This parser accepts:
+ *   - alias.col
+ *   - alias."col"
+ *   - alias.col AS out
+ *   - alias."db_col" AS "field"
+ *
+ * It returns the *output* column names (AS alias if present, otherwise column name).
+ */
+function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
   const raw = select.trim()
   if (raw.length === 0) return []
 
-  let re = SIMPLE_SELECT_RE_CACHE.get(alias)
+  let re = SIMPLE_SELECT_RE_CACHE.get(fromAlias)
   if (!re) {
-    const safeAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    re = new RegExp(`^${safeAlias}\\.(?:"([^"]+)"|([a-z_][a-z0-9_]*))$`, 'i')
-    SIMPLE_SELECT_RE_CACHE.set(alias, re)
+    const safeAlias = fromAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    re = new RegExp(
+      `^${safeAlias}\\.(?:"([^"]+)"|([a-z_][a-z0-9_]*))` +
+        `(?:\\s+AS\\s+(?:"([^"]+)"|([a-z_][a-z0-9_]*)))?$`,
+      'i',
+    )
+    SIMPLE_SELECT_RE_CACHE.set(fromAlias, re)
   }
 
   const parts = raw.split(SQL_SEPARATORS.FIELD_LIST)
@@ -83,13 +92,18 @@ function parseSimpleScalarSelect(select: string, alias: string): string[] {
     const m = p.match(re)
     if (!m) {
       throw new Error(
-        `sqlite distinct emulation requires scalar select fields to be simple columns. Got: ${p}`,
+        `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
       )
     }
-    const name = (m[1] ?? m[2] ?? '').trim()
+
+    const columnName = (m[1] ?? m[2] ?? '').trim()
+    const outAlias = (m[3] ?? m[4] ?? '').trim()
+    const name = outAlias.length > 0 ? outAlias : columnName
+
     if (name.length === 0) {
       throw new Error(`Failed to parse selected column name from: ${p}`)
     }
+
     names.push(name)
   }
 
@@ -122,9 +136,7 @@ function buildOutputColumns(
   hasCount: boolean,
 ): string {
   const outputCols = [...scalarNames, ...includeNames]
-  if (hasCount) {
-    outputCols.push('_count')
-  }
+  if (hasCount) outputCols.push('_count')
 
   const formatted = outputCols
     .map((n) => quote(n))
@@ -153,7 +165,6 @@ function buildWindowOrder(args: {
     (f) =>
       f.startsWith(`${fromAlias}.id `) || f.startsWith(`${fromAlias}."id" `),
   )
-
   if (hasIdInOrder) return baseOrder
 
   const idTiebreaker = idField ? `, ${col(fromAlias, 'id', model)} ASC` : ''
@@ -206,9 +217,7 @@ function buildSqliteDistinctQuery(
   const joins = buildJoinsSql(whereJoins, countJoins)
 
   const conditions: string[] = []
-  if (whereClause && whereClause !== '1=1') {
-    conditions.push(whereClause)
-  }
+  if (whereClause && whereClause !== '1=1') conditions.push(whereClause)
   const whereSql = buildWhereSql(conditions)
 
   const innerSelectList = selectWithIncludes.trim()

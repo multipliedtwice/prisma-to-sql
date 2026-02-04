@@ -1,6 +1,6 @@
 import { PrismaQueryArgs, Model } from '../types'
 import { SQL_SEPARATORS, SQL_TEMPLATES } from './shared/constants'
-import { col, quote } from './shared/sql-utils'
+import { col, quoteColumn } from './shared/sql-utils'
 import { ParamStore } from './shared/param-store'
 import { SqlDialect, getGlobalDialect } from '../sql-builder-dialect'
 import {
@@ -237,7 +237,7 @@ function buildCursorFilterParts(
   const parts: string[] = []
 
   for (const [field, value] of entries) {
-    const c = `${cursorAlias}.${quote(model ? String(col('', field, model)).slice(1) : field)}`
+    const c = `${cursorAlias}.${quoteColumn(model, field)}`
     if (value === null) {
       parts.push(`${c} IS NULL`)
       continue
@@ -260,12 +260,7 @@ function cursorValueExpr(
   field: string,
   model?: Model,
 ): string {
-  const colName = model
-    ? String(col(cursorAlias, field, model))
-        .split('.')
-        .slice(1)
-        .join('.')
-    : quote(field)
+  const colName = quoteColumn(model, field)
   return `(SELECT ${cursorAlias}.${colName} ${SQL_TEMPLATES.FROM} ${tableName} ${cursorAlias} ${SQL_TEMPLATES.WHERE} ${cursorWhereSql} ${SQL_TEMPLATES.LIMIT} 1)`
 }
 
@@ -394,6 +389,21 @@ export function buildCursorCondition(
     model,
   )
 
+  const valueExprByField = new Map<string, string>()
+  const getValueExpr = (field: string): string => {
+    const existing = valueExprByField.get(field)
+    if (existing) return existing
+    const v = cursorValueExpr(
+      tableName,
+      cursorAlias,
+      cursorWhereSql,
+      field,
+      model,
+    )
+    valueExprByField.set(field, v)
+    return v
+  }
+
   const orClauses: string[] = []
 
   for (let level = 0; level < orderEntries.length; level++) {
@@ -402,25 +412,13 @@ export function buildCursorCondition(
     for (let i = 0; i < level; i++) {
       const e = orderEntries[i]
       const c = col(alias, e.field, model)
-      const v = cursorValueExpr(
-        tableName,
-        cursorAlias,
-        cursorWhereSql,
-        e.field,
-        model,
-      )
+      const v = getValueExpr(e.field)
       andParts.push(buildCursorEqualityExpr(c, v))
     }
 
     const e = orderEntries[level]
     const c = col(alias, e.field, model)
-    const v = cursorValueExpr(
-      tableName,
-      cursorAlias,
-      cursorWhereSql,
-      e.field,
-      model,
-    )
+    const v = getValueExpr(e.field)
     const nulls = e.nulls ?? defaultNullsFor(d, e.direction)
     andParts.push(buildCursorInequalityExpr(c, e.direction, nulls, v))
 
