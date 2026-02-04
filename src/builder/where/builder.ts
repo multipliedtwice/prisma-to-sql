@@ -34,6 +34,15 @@ import {
 
 type LogicalOperator = 'AND' | 'OR' | 'NOT'
 
+const MAX_QUERY_DEPTH = 50
+const EMPTY_JOINS: readonly string[] = Object.freeze([])
+const JSON_OPS = new Set([
+  Ops.PATH,
+  Ops.STRING_CONTAINS,
+  Ops.STRING_STARTS_WITH,
+  Ops.STRING_ENDS_WITH,
+])
+
 class WhereBuilder implements IWhereBuilder {
   build(where: Record<string, unknown>, ctx: BuildContext): QueryResult {
     if (!isPlainObject(where)) {
@@ -45,9 +54,6 @@ class WhereBuilder implements IWhereBuilder {
     return buildWhereInternal(where, ctx, this)
   }
 }
-
-const MAX_QUERY_DEPTH = 50
-const EMPTY_JOINS: readonly string[] = Object.freeze([])
 
 export const whereBuilderInstance = new WhereBuilder()
 
@@ -320,17 +326,8 @@ function buildOperator(
     return buildArrayOperator(expr, op, val, ctx.params, fieldType, ctx.dialect)
   }
 
-  if (fieldType && isJsonType(fieldType)) {
-    const JSON_OPS = new Set([
-      Ops.PATH,
-      Ops.STRING_CONTAINS,
-      Ops.STRING_STARTS_WITH,
-      Ops.STRING_ENDS_WITH,
-    ])
-
-    if (JSON_OPS.has(op as any)) {
-      return buildJsonOperator(expr, op, val, ctx.params, ctx.dialect)
-    }
+  if (fieldType && isJsonType(fieldType) && JSON_OPS.has(op as any)) {
+    return buildJsonOperator(expr, op, val, ctx.params, ctx.dialect)
   }
 
   return buildScalarOperator(

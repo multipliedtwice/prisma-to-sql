@@ -35,6 +35,10 @@ type RelationFilterArgs = {
 
 const NO_JOINS: readonly string[] = Object.freeze([] as string[])
 
+function freezeJoins(items: readonly string[]): readonly string[] {
+  return Object.freeze([...items])
+}
+
 function isListRelation(fieldType: unknown): boolean {
   return typeof fieldType === 'string' && fieldType.endsWith('[]')
 }
@@ -105,7 +109,6 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
     join,
   } = args
 
-  // OPTIMIZATION: Check for LEFT JOIN opportunity for "none" filters
   const noneValue = value[RelationFilters.NONE]
   if (noneValue !== undefined && noneValue !== null) {
     const sub = whereBuilder.build(noneValue as Record<string, unknown>, {
@@ -117,8 +120,6 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
       depth: ctx.depth + 1,
     })
 
-    // Use LEFT JOIN + IS NULL for simple "none" filters (10x+ faster)
-    // Only safe for top-level queries where we can add joins
     const isEmptyFilter =
       isPlainObject(noneValue) &&
       Object.keys(noneValue as Record<string, unknown>).length === 0
@@ -129,7 +130,6 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
       sub.joins.length === 0
 
     if (canOptimize) {
-      // Find a reliable field to check for NULL (prefer required fields, fallback to id)
       const checkField =
         relModel.fields.find(
           (f) => !f.isRelation && f.isRequired && f.name !== 'id',
@@ -141,13 +141,12 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
 
         return Object.freeze({
           clause: whereClause,
-          joins: [leftJoinSql] as readonly string[],
+          joins: freezeJoins([leftJoinSql]),
         })
       }
     }
   }
 
-  // Standard NOT EXISTS approach (fallback for complex filters or subqueries)
   const filters: Array<{
     key:
       | typeof RelationFilters.SOME
@@ -168,7 +167,6 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
     {
       key: RelationFilters.NONE,
       wrap: (c, j) => {
-        // OPTIMIZATION: Skip redundant "AND 1=1" when no filter conditions
         const condition =
           c === DEFAULT_WHERE_CLAUSE ? '' : ` ${SQL_TEMPLATES.AND} ${c}`
         return `${SQL_TEMPLATES.NOT} EXISTS (${SQL_TEMPLATES.SELECT} 1 ${SQL_TEMPLATES.FROM} ${relTable} ${relAlias}${j} ${SQL_TEMPLATES.WHERE} ${join}${condition})`

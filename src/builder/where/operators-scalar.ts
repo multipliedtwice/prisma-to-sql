@@ -97,6 +97,16 @@ export function buildScalarOperator(
     return handleInOperator(expr, op, val, params, dialect)
   }
 
+  if (
+    op === Ops.EQUALS &&
+    mode === Modes.INSENSITIVE &&
+    !isNotNullish(dialect)
+  ) {
+    throw createError(`Insensitive equals requires a SQL dialect`, {
+      operator: op,
+    })
+  }
+
   return handleComparisonOperator(expr, op, val, params)
 }
 
@@ -123,11 +133,36 @@ function handleNotOperator(
   const innerMode = normalizeMode(val.mode)
   const effectiveMode = innerMode ?? outerMode
 
+  const entries = Object.entries(val).filter(
+    ([k, v]) => k !== 'mode' && v !== undefined,
+  )
+  if (entries.length === 0) return ''
+
+  if (!isNotNullish(dialect)) {
+    const clauses: string[] = []
+    for (const [subOp, subVal] of entries) {
+      const sub = buildScalarOperator(
+        expr,
+        subOp,
+        subVal,
+        params,
+        effectiveMode,
+        fieldType,
+        undefined,
+      )
+      if (sub && sub.trim().length > 0) clauses.push(`(${sub})`)
+    }
+
+    if (clauses.length === 0) return ''
+    if (clauses.length === 1) return `${SQL_TEMPLATES.NOT} ${clauses[0]}`
+    return `${SQL_TEMPLATES.NOT} (${clauses.join(` ${SQL_TEMPLATES.AND} `)})`
+  }
+
   return buildNotComposite(
     expr,
     val,
     params,
-    dialect!,
+    dialect,
     (e, subOp, subVal, p, d) =>
       buildScalarOperator(e, subOp, subVal, p, effectiveMode, fieldType, d),
     ` ${SQL_TEMPLATES.AND} `,

@@ -3,6 +3,7 @@ import { needsQuoting } from './validators/sql-validators'
 import { isEmptyString, isNotNullish } from './validators/type-guards'
 import type { Model } from '../../types'
 import { getColumnMap } from './model-field-cache'
+import { SQL_KEYWORDS } from './constants'
 
 const NUL = String.fromCharCode(0)
 
@@ -290,16 +291,52 @@ export function buildTableReference(
 }
 
 export function assertSafeAlias(alias: string): void {
-  const a = String(alias)
-  if (a.trim().length === 0) {
-    throw new Error('alias is required and cannot be empty')
+  if (typeof alias !== 'string') {
+    throw new Error(`Invalid alias: expected string, got ${typeof alias}`)
   }
-  if (containsControlChars(a) || a.includes(';')) {
-    throw new Error(`alias contains unsafe characters: ${JSON.stringify(a)}`)
+
+  const a = alias.trim()
+
+  if (a.length === 0) {
+    throw new Error('Invalid alias: required and cannot be empty')
   }
-  if (!/^[A-Za-z_]\w*$/.test(a)) {
+
+  if (a !== alias) {
+    throw new Error('Invalid alias: leading/trailing whitespace')
+  }
+
+  // Check for dangerous SQL injection characters BEFORE whitespace
+  if (/[\u0000-\u001F\u007F]/.test(a)) {
     throw new Error(
-      `alias must be a simple identifier, got: ${JSON.stringify(a)}`,
+      'Invalid alias: contains unsafe characters (control characters)',
+    )
+  }
+
+  if (a.includes('"') || a.includes("'") || a.includes('`')) {
+    throw new Error('Invalid alias: contains unsafe characters (quotes)')
+  }
+
+  if (a.includes(';')) {
+    throw new Error('Invalid alias: contains unsafe characters (semicolon)')
+  }
+
+  if (a.includes('--') || a.includes('/*') || a.includes('*/')) {
+    throw new Error(
+      'Invalid alias: contains unsafe characters (SQL comment tokens)',
+    )
+  }
+
+  // Now check for whitespace (after dangerous chars)
+  if (/\s/.test(a)) {
+    throw new Error(
+      'Invalid alias: must be a simple identifier without whitespace',
+    )
+  }
+
+  // Final validation: must be alphanumeric with underscores
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(a)) {
+    throw new Error(
+      `Invalid alias: must be a simple identifier (alphanumeric with underscores): "${alias}"`,
     )
   }
 }
