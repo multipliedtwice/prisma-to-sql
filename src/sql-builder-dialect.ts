@@ -1,3 +1,5 @@
+import { normalizeValue } from './utils/normalize-value'
+
 export type SqlDialect = 'postgres' | 'sqlite'
 
 let globalDialect: SqlDialect = 'postgres'
@@ -273,7 +275,7 @@ export function prepareArrayParam(
   }
 
   if (dialect === 'postgres') {
-    return value
+    return value.map(normalizeValue)
   }
   return JSON.stringify(value)
 }
