@@ -2,6 +2,7 @@ import { SqlDialect } from '../../sql-builder-dialect'
 import { needsQuoting } from './validators/sql-validators'
 import { isEmptyString, isNotNullish } from './validators/type-guards'
 import type { Model } from '../../types'
+import { getColumnMap } from './model-field-cache'
 
 const NUL = String.fromCharCode(0)
 
@@ -190,30 +191,13 @@ export function quote(id: string): string {
   return id
 }
 
-function pickDbFieldName(field: any): string | undefined {
-  const candidates = [
-    field?.dbName,
-    field?.columnName,
-    field?.databaseName,
-    field?.mappedName,
-  ]
-  for (const c of candidates) {
-    if (typeof c === 'string') {
-      const s = c.trim()
-      if (s.length > 0) return s
-    }
-  }
-  return undefined
-}
-
 export function resolveColumnName(
   model: Model | undefined,
   fieldName: string,
 ): string {
   if (!model) return fieldName
-  const f = (model.fields as any[]).find((x) => x?.name === fieldName)
-  if (!f) return fieldName
-  return pickDbFieldName(f) ?? fieldName
+  const columnMap = getColumnMap(model)
+  return columnMap.get(fieldName) || fieldName
 }
 
 export function quoteColumn(

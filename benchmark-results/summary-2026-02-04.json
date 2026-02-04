@@ -1,0 +1,2126 @@
+[
+  {
+    "version": 6,
+    "dialect": "postgres",
+    "tests": [
+      {
+        "name": "findMany basic",
+        "prismaMs": 0.46,
+        "generatedMs": 0.184,
+        "sqlGenMs": 0.105,
+        "drizzleMs": 0.328,
+        "speedupVsPrisma": 2.51,
+        "speedupVsDrizzle": 1.79
+      },
+      {
+        "name": "findMany where =",
+        "prismaMs": 0.422,
+        "generatedMs": 0.208,
+        "sqlGenMs": 0.055,
+        "drizzleMs": 0.314,
+        "speedupVsPrisma": 2.03,
+        "speedupVsDrizzle": 1.51
+      },
+      {
+        "name": "findMany where >=",
+        "prismaMs": 16.276,
+        "generatedMs": 3.231,
+        "sqlGenMs": 0.065,
+        "drizzleMs": 6.896,
+        "speedupVsPrisma": 5.04,
+        "speedupVsDrizzle": 2.13
+      },
+      {
+        "name": "findMany where IN",
+        "prismaMs": 0.576,
+        "generatedMs": 0.377,
+        "sqlGenMs": 0.053,
+        "drizzleMs": 0.465,
+        "speedupVsPrisma": 1.53,
+        "speedupVsDrizzle": 1.24
+      },
+      {
+        "name": "findMany where null",
+        "prismaMs": 0.265,
+        "generatedMs": 0.115,
+        "sqlGenMs": 0.026,
+        "drizzleMs": 0.156,
+        "speedupVsPrisma": 2.3,
+        "speedupVsDrizzle": 1.36
+      },
+      {
+        "name": "findMany ILIKE",
+        "prismaMs": 0.282,
+        "generatedMs": 0.206,
+        "sqlGenMs": 0.032,
+        "drizzleMs": 0.286,
+        "speedupVsPrisma": 1.37,
+        "speedupVsDrizzle": 1.39
+      },
+      {
+        "name": "findMany AND",
+        "prismaMs": 2.208,
+        "generatedMs": 0.6,
+        "sqlGenMs": 0.073,
+        "drizzleMs": 1.189,
+        "speedupVsPrisma": 3.68,
+        "speedupVsDrizzle": 1.98
+      },
+      {
+        "name": "findMany OR",
+        "prismaMs": 14.258,
+        "generatedMs": 2.711,
+        "sqlGenMs": 0.042,
+        "drizzleMs": 5.616,
+        "speedupVsPrisma": 5.26,
+        "speedupVsDrizzle": 2.07
+      },
+      {
+        "name": "findMany NOT",
+        "prismaMs": 0.605,
+        "generatedMs": 0.319,
+        "sqlGenMs": 0.045,
+        "drizzleMs": 0.42,
+        "speedupVsPrisma": 1.9,
+        "speedupVsDrizzle": 1.32
+      },
+      {
+        "name": "findMany orderBy",
+        "prismaMs": 2.271,
+        "generatedMs": 0.791,
+        "sqlGenMs": 0.035,
+        "drizzleMs": 0.933,
+        "speedupVsPrisma": 2.87,
+        "speedupVsDrizzle": 1.18
+      },
+      {
+        "name": "findMany pagination",
+        "prismaMs": 0.223,
+        "generatedMs": 0.207,
+        "sqlGenMs": 0.04,
+        "drizzleMs": 0.181,
+        "speedupVsPrisma": 1.08,
+        "speedupVsDrizzle": 0.87
+      },
+      {
+        "name": "findMany select",
+        "prismaMs": 0.244,
+        "generatedMs": 0.09,
+        "sqlGenMs": 0.024,
+        "drizzleMs": 0.126,
+        "speedupVsPrisma": 2.7,
+        "speedupVsDrizzle": 1.4
+      },
+      {
+        "name": "findMany relation some",
+        "prismaMs": 0.883,
+        "generatedMs": 0.448,
+        "sqlGenMs": 0.049,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.97,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany relation every",
+        "prismaMs": 0.72,
+        "generatedMs": 0.471,
+        "sqlGenMs": 0.035,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.53,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany relation none",
+        "prismaMs": 30.057,
+        "generatedMs": 5.231,
+        "sqlGenMs": 0.031,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 5.75,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany nested relation",
+        "prismaMs": 0.713,
+        "generatedMs": 1.318,
+        "sqlGenMs": 0.057,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 0.54,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany complex",
+        "prismaMs": 1.154,
+        "generatedMs": 0.534,
+        "sqlGenMs": 0.047,
+        "drizzleMs": 0.672,
+        "speedupVsPrisma": 2.16,
+        "speedupVsDrizzle": 1.26
+      },
+      {
+        "name": "findFirst",
+        "prismaMs": 0.258,
+        "generatedMs": 0.18,
+        "sqlGenMs": 0.035,
+        "drizzleMs": 0.214,
+        "speedupVsPrisma": 1.43,
+        "speedupVsDrizzle": 1.19
+      },
+      {
+        "name": "findFirst skip",
+        "prismaMs": 0.278,
+        "generatedMs": 0.159,
+        "sqlGenMs": 0.031,
+        "drizzleMs": 0.24,
+        "speedupVsPrisma": 1.75,
+        "speedupVsDrizzle": 1.51
+      },
+      {
+        "name": "findUnique id",
+        "prismaMs": 0.172,
+        "generatedMs": 0.12,
+        "sqlGenMs": 0.026,
+        "drizzleMs": 0.135,
+        "speedupVsPrisma": 1.43,
+        "speedupVsDrizzle": 1.12
+      },
+      {
+        "name": "findUnique email",
+        "prismaMs": 0.176,
+        "generatedMs": 0.066,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0.13,
+        "speedupVsPrisma": 2.67,
+        "speedupVsDrizzle": 1.98
+      },
+      {
+        "name": "count",
+        "prismaMs": 0.104,
+        "generatedMs": 0.035,
+        "sqlGenMs": 0.018,
+        "drizzleMs": 0.056,
+        "speedupVsPrisma": 3,
+        "speedupVsDrizzle": 1.6
+      },
+      {
+        "name": "count where",
+        "prismaMs": 0.518,
+        "generatedMs": 0.281,
+        "sqlGenMs": 0.022,
+        "drizzleMs": 0.29,
+        "speedupVsPrisma": 1.85,
+        "speedupVsDrizzle": 1.03
+      },
+      {
+        "name": "aggregate count",
+        "prismaMs": 0.225,
+        "generatedMs": 0.154,
+        "sqlGenMs": 0.023,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.46,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate sum/avg",
+        "prismaMs": 0.326,
+        "generatedMs": 0.244,
+        "sqlGenMs": 0.02,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.33,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate where",
+        "prismaMs": 0.448,
+        "generatedMs": 0.267,
+        "sqlGenMs": 0.022,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.68,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate min/max",
+        "prismaMs": 0.282,
+        "generatedMs": 0.216,
+        "sqlGenMs": 0.017,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.31,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate complete",
+        "prismaMs": 0.354,
+        "generatedMs": 0.259,
+        "sqlGenMs": 0.019,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.36,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy",
+        "prismaMs": 0.418,
+        "generatedMs": 0.292,
+        "sqlGenMs": 0.023,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.43,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy count",
+        "prismaMs": 0.459,
+        "generatedMs": 0.356,
+        "sqlGenMs": 0.017,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.29,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy multi",
+        "prismaMs": 0.549,
+        "generatedMs": 0.405,
+        "sqlGenMs": 0.016,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.36,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy having",
+        "prismaMs": 0.515,
+        "generatedMs": 0.409,
+        "sqlGenMs": 0.03,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.26,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy + where",
+        "prismaMs": 0.524,
+        "generatedMs": 0.318,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.65,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy aggregates",
+        "prismaMs": 0.513,
+        "generatedMs": 0.397,
+        "sqlGenMs": 0.02,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.29,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy min/max",
+        "prismaMs": 0.498,
+        "generatedMs": 0.385,
+        "sqlGenMs": 0.021,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.29,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "include posts",
+        "prismaMs": 2.414,
+        "generatedMs": 1.871,
+        "sqlGenMs": 0.09,
+        "drizzleMs": 2.282,
+        "speedupVsPrisma": 1.29,
+        "speedupVsDrizzle": 1.22
+      },
+      {
+        "name": "include profile",
+        "prismaMs": 0.499,
+        "generatedMs": 0.23,
+        "sqlGenMs": 0.052,
+        "drizzleMs": 0.489,
+        "speedupVsPrisma": 2.17,
+        "speedupVsDrizzle": 2.12
+      },
+      {
+        "name": "include 3 levels",
+        "prismaMs": 1.647,
+        "generatedMs": 1.144,
+        "sqlGenMs": 0.083,
+        "drizzleMs": 1.513,
+        "speedupVsPrisma": 1.44,
+        "speedupVsDrizzle": 1.32
+      },
+      {
+        "name": "include 4 levels",
+        "prismaMs": 1.854,
+        "generatedMs": 0.997,
+        "sqlGenMs": 0.097,
+        "drizzleMs": 1.382,
+        "speedupVsPrisma": 1.86,
+        "speedupVsDrizzle": 1.39
+      },
+      {
+        "name": "include + where",
+        "prismaMs": 1.179,
+        "generatedMs": 0.333,
+        "sqlGenMs": 0.083,
+        "drizzleMs": 0.635,
+        "speedupVsPrisma": 3.54,
+        "speedupVsDrizzle": 1.91
+      },
+      {
+        "name": "include + select nested",
+        "prismaMs": 1.191,
+        "generatedMs": 1.465,
+        "sqlGenMs": 0.045,
+        "drizzleMs": 1.642,
+        "speedupVsPrisma": 0.81,
+        "speedupVsDrizzle": 1.12
+      },
+      {
+        "name": "findMany startsWith",
+        "prismaMs": 0.199,
+        "generatedMs": 0.136,
+        "sqlGenMs": 0.036,
+        "drizzleMs": 0.175,
+        "speedupVsPrisma": 1.47,
+        "speedupVsDrizzle": 1.29
+      },
+      {
+        "name": "findMany endsWith",
+        "prismaMs": 0.584,
+        "generatedMs": 0.207,
+        "sqlGenMs": 0.032,
+        "drizzleMs": 0.325,
+        "speedupVsPrisma": 2.83,
+        "speedupVsDrizzle": 1.57
+      },
+      {
+        "name": "findMany NOT contains",
+        "prismaMs": 0.559,
+        "generatedMs": 0.231,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.314,
+        "speedupVsPrisma": 2.42,
+        "speedupVsDrizzle": 1.36
+      },
+      {
+        "name": "findMany LIKE",
+        "prismaMs": 0.2,
+        "generatedMs": 0.142,
+        "sqlGenMs": 0.026,
+        "drizzleMs": 0.172,
+        "speedupVsPrisma": 1.41,
+        "speedupVsDrizzle": 1.22
+      },
+      {
+        "name": "findMany <",
+        "prismaMs": 27.171,
+        "generatedMs": 4.922,
+        "sqlGenMs": 0.029,
+        "drizzleMs": 9.854,
+        "speedupVsPrisma": 5.52,
+        "speedupVsDrizzle": 2
+      },
+      {
+        "name": "findMany <=",
+        "prismaMs": 28.172,
+        "generatedMs": 4.99,
+        "sqlGenMs": 0.053,
+        "drizzleMs": 9.359,
+        "speedupVsPrisma": 5.65,
+        "speedupVsDrizzle": 1.88
+      },
+      {
+        "name": "findMany >",
+        "prismaMs": 14.971,
+        "generatedMs": 3.008,
+        "sqlGenMs": 0.049,
+        "drizzleMs": 6.848,
+        "speedupVsPrisma": 4.98,
+        "speedupVsDrizzle": 2.28
+      },
+      {
+        "name": "findMany NOT IN",
+        "prismaMs": 0.608,
+        "generatedMs": 0.335,
+        "sqlGenMs": 0.045,
+        "drizzleMs": 0.425,
+        "speedupVsPrisma": 1.82,
+        "speedupVsDrizzle": 1.27
+      },
+      {
+        "name": "findMany isNot null",
+        "prismaMs": 0.551,
+        "generatedMs": 0.19,
+        "sqlGenMs": 0.022,
+        "drizzleMs": 0.251,
+        "speedupVsPrisma": 2.9,
+        "speedupVsDrizzle": 1.32
+      },
+      {
+        "name": "orderBy multi-field",
+        "prismaMs": 2.581,
+        "generatedMs": 0.846,
+        "sqlGenMs": 0.033,
+        "drizzleMs": 1.03,
+        "speedupVsPrisma": 3.05,
+        "speedupVsDrizzle": 1.22
+      },
+      {
+        "name": "distinct status",
+        "prismaMs": 8.618,
+        "generatedMs": 1.88,
+        "sqlGenMs": 0.082,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 4.58,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "distinct multi",
+        "prismaMs": 12.666,
+        "generatedMs": 2.125,
+        "sqlGenMs": 0.038,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 5.96,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "cursor pagination",
+        "prismaMs": 0.318,
+        "generatedMs": 0.227,
+        "sqlGenMs": 0.046,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.4,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "select + include",
+        "prismaMs": 0.923,
+        "generatedMs": 0.215,
+        "sqlGenMs": 0.037,
+        "drizzleMs": 0.329,
+        "speedupVsPrisma": 4.3,
+        "speedupVsDrizzle": 1.53
+      },
+      {
+        "name": "_count relation",
+        "prismaMs": 0.767,
+        "generatedMs": 0.829,
+        "sqlGenMs": 0.036,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 0.93,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "_count multi-relation",
+        "prismaMs": 0.218,
+        "generatedMs": 0.139,
+        "sqlGenMs": 0.024,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.58,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "ILIKE special chars",
+        "prismaMs": 0.25,
+        "generatedMs": 0.16,
+        "sqlGenMs": 0.026,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.57,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "LIKE case sensitive",
+        "prismaMs": 0.198,
+        "generatedMs": 0.128,
+        "sqlGenMs": 0.024,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.55,
+        "speedupVsDrizzle": 0
+      }
+    ],
+    "avgSpeedupVsPrisma": 2.34,
+    "avgSpeedupVsDrizzle": 1.5,
+    "timestamp": "2026-02-04T00:16:16.643Z"
+  },
+  {
+    "version": 6,
+    "dialect": "sqlite",
+    "tests": [
+      {
+        "name": "findMany basic",
+        "prismaMs": 0.65,
+        "generatedMs": 0.068,
+        "sqlGenMs": 0.136,
+        "drizzleMs": 0.16,
+        "speedupVsPrisma": 9.54,
+        "speedupVsDrizzle": 2.35
+      },
+      {
+        "name": "findMany where =",
+        "prismaMs": 0.417,
+        "generatedMs": 0.035,
+        "sqlGenMs": 0.075,
+        "drizzleMs": 0.145,
+        "speedupVsPrisma": 11.87,
+        "speedupVsDrizzle": 4.13
+      },
+      {
+        "name": "findMany where >=",
+        "prismaMs": 14.48,
+        "generatedMs": 1.04,
+        "sqlGenMs": 0.052,
+        "drizzleMs": 2.36,
+        "speedupVsPrisma": 13.93,
+        "speedupVsDrizzle": 2.27
+      },
+      {
+        "name": "findMany where IN",
+        "prismaMs": 0.459,
+        "generatedMs": 0.046,
+        "sqlGenMs": 0.06,
+        "drizzleMs": 0.133,
+        "speedupVsPrisma": 10.03,
+        "speedupVsDrizzle": 2.91
+      },
+      {
+        "name": "findMany where null",
+        "prismaMs": 0.17,
+        "generatedMs": 0.016,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0.067,
+        "speedupVsPrisma": 10.89,
+        "speedupVsDrizzle": 4.29
+      },
+      {
+        "name": "findMany LIKE",
+        "prismaMs": 0.154,
+        "generatedMs": 0.018,
+        "sqlGenMs": 0.035,
+        "drizzleMs": 0.065,
+        "speedupVsPrisma": 8.69,
+        "speedupVsDrizzle": 3.65
+      },
+      {
+        "name": "findMany AND",
+        "prismaMs": 1.578,
+        "generatedMs": 0.286,
+        "sqlGenMs": 0.051,
+        "drizzleMs": 0.465,
+        "speedupVsPrisma": 5.51,
+        "speedupVsDrizzle": 1.63
+      },
+      {
+        "name": "findMany OR",
+        "prismaMs": 10.462,
+        "generatedMs": 0.957,
+        "sqlGenMs": 0.041,
+        "drizzleMs": 2.022,
+        "speedupVsPrisma": 10.94,
+        "speedupVsDrizzle": 2.11
+      },
+      {
+        "name": "findMany NOT",
+        "prismaMs": 0.443,
+        "generatedMs": 0.037,
+        "sqlGenMs": 0.031,
+        "drizzleMs": 0.098,
+        "speedupVsPrisma": 11.84,
+        "speedupVsDrizzle": 2.63
+      },
+      {
+        "name": "findMany orderBy",
+        "prismaMs": 2.371,
+        "generatedMs": 1.904,
+        "sqlGenMs": 0.038,
+        "drizzleMs": 1.843,
+        "speedupVsPrisma": 1.25,
+        "speedupVsDrizzle": 0.97
+      },
+      {
+        "name": "findMany pagination",
+        "prismaMs": 0.136,
+        "generatedMs": 0.026,
+        "sqlGenMs": 0.035,
+        "drizzleMs": 0.061,
+        "speedupVsPrisma": 5.15,
+        "speedupVsDrizzle": 2.32
+      },
+      {
+        "name": "findMany select",
+        "prismaMs": 0.167,
+        "generatedMs": 0.017,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.039,
+        "speedupVsPrisma": 10.02,
+        "speedupVsDrizzle": 2.35
+      },
+      {
+        "name": "findMany relation some",
+        "prismaMs": 4.642,
+        "generatedMs": 0.41,
+        "sqlGenMs": 0.062,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 11.33,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany relation every",
+        "prismaMs": 10.325,
+        "generatedMs": 6.346,
+        "sqlGenMs": 0.038,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.63,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany relation none",
+        "prismaMs": 171.623,
+        "generatedMs": 2.647,
+        "sqlGenMs": 0.049,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 64.84,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany nested relation",
+        "prismaMs": 1.038,
+        "generatedMs": 0.3,
+        "sqlGenMs": 0.044,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 3.46,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany complex",
+        "prismaMs": 0.784,
+        "generatedMs": 0.446,
+        "sqlGenMs": 0.052,
+        "drizzleMs": 0.485,
+        "speedupVsPrisma": 1.76,
+        "speedupVsDrizzle": 1.09
+      },
+      {
+        "name": "findFirst",
+        "prismaMs": 0.309,
+        "generatedMs": 0.039,
+        "sqlGenMs": 0.058,
+        "drizzleMs": 0.068,
+        "speedupVsPrisma": 7.89,
+        "speedupVsDrizzle": 1.73
+      },
+      {
+        "name": "findFirst skip",
+        "prismaMs": 0.218,
+        "generatedMs": 0.018,
+        "sqlGenMs": 0.052,
+        "drizzleMs": 0.082,
+        "speedupVsPrisma": 12.23,
+        "speedupVsDrizzle": 4.56
+      },
+      {
+        "name": "findUnique id",
+        "prismaMs": 0.37,
+        "generatedMs": 0.014,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0.129,
+        "speedupVsPrisma": 26.32,
+        "speedupVsDrizzle": 9.18
+      },
+      {
+        "name": "findUnique email",
+        "prismaMs": 0.118,
+        "generatedMs": 0.014,
+        "sqlGenMs": 0.037,
+        "drizzleMs": 0.057,
+        "speedupVsPrisma": 8.61,
+        "speedupVsDrizzle": 4.15
+      },
+      {
+        "name": "count",
+        "prismaMs": 0.069,
+        "generatedMs": 0.007,
+        "sqlGenMs": 0.018,
+        "drizzleMs": 0.017,
+        "speedupVsPrisma": 10.51,
+        "speedupVsDrizzle": 2.63
+      },
+      {
+        "name": "count where",
+        "prismaMs": 0.258,
+        "generatedMs": 0.155,
+        "sqlGenMs": 0.021,
+        "drizzleMs": 0.727,
+        "speedupVsPrisma": 1.66,
+        "speedupVsDrizzle": 4.68
+      },
+      {
+        "name": "aggregate count",
+        "prismaMs": 0.193,
+        "generatedMs": 0.011,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 16.93,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate sum/avg",
+        "prismaMs": 0.289,
+        "generatedMs": 0.16,
+        "sqlGenMs": 0.022,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.81,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate where",
+        "prismaMs": 0.256,
+        "generatedMs": 0.151,
+        "sqlGenMs": 0.022,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.7,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate min/max",
+        "prismaMs": 0.28,
+        "generatedMs": 0.16,
+        "sqlGenMs": 0.018,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.75,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate complete",
+        "prismaMs": 0.392,
+        "generatedMs": 0.215,
+        "sqlGenMs": 0.019,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.83,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy",
+        "prismaMs": 0.579,
+        "generatedMs": 0.441,
+        "sqlGenMs": 0.023,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.31,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy count",
+        "prismaMs": 0.647,
+        "generatedMs": 0.471,
+        "sqlGenMs": 0.018,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.38,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy multi",
+        "prismaMs": 1.218,
+        "generatedMs": 0.969,
+        "sqlGenMs": 0.017,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.26,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy having",
+        "prismaMs": 0.669,
+        "generatedMs": 0.49,
+        "sqlGenMs": 0.029,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.37,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy + where",
+        "prismaMs": 0.321,
+        "generatedMs": 0.194,
+        "sqlGenMs": 0.024,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.65,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy aggregates",
+        "prismaMs": 0.709,
+        "generatedMs": 0.56,
+        "sqlGenMs": 0.017,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.27,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy min/max",
+        "prismaMs": 0.719,
+        "generatedMs": 0.567,
+        "sqlGenMs": 0.019,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.27,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "include posts",
+        "prismaMs": 2.035,
+        "generatedMs": 0.952,
+        "sqlGenMs": 0.063,
+        "drizzleMs": 1.377,
+        "speedupVsPrisma": 2.14,
+        "speedupVsDrizzle": 1.45
+      },
+      {
+        "name": "include profile",
+        "prismaMs": 0.315,
+        "generatedMs": 0.059,
+        "sqlGenMs": 0.065,
+        "drizzleMs": 0.238,
+        "speedupVsPrisma": 5.35,
+        "speedupVsDrizzle": 4.05
+      },
+      {
+        "name": "include 3 levels",
+        "prismaMs": 1.057,
+        "generatedMs": 0.631,
+        "sqlGenMs": 0.084,
+        "drizzleMs": 0.887,
+        "speedupVsPrisma": 1.68,
+        "speedupVsDrizzle": 1.41
+      },
+      {
+        "name": "include 4 levels",
+        "prismaMs": 1.137,
+        "generatedMs": 0.44,
+        "sqlGenMs": 0.085,
+        "drizzleMs": 0.673,
+        "speedupVsPrisma": 2.58,
+        "speedupVsDrizzle": 1.53
+      },
+      {
+        "name": "include + where",
+        "prismaMs": 0.749,
+        "generatedMs": 0.103,
+        "sqlGenMs": 0.059,
+        "drizzleMs": 0.314,
+        "speedupVsPrisma": 7.25,
+        "speedupVsDrizzle": 3.04
+      },
+      {
+        "name": "include + select nested",
+        "prismaMs": 0.788,
+        "generatedMs": 0.86,
+        "sqlGenMs": 0.044,
+        "drizzleMs": 1.026,
+        "speedupVsPrisma": 0.92,
+        "speedupVsDrizzle": 1.19
+      },
+      {
+        "name": "findMany startsWith",
+        "prismaMs": 0.163,
+        "generatedMs": 0.029,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.064,
+        "speedupVsPrisma": 5.53,
+        "speedupVsDrizzle": 2.17
+      },
+      {
+        "name": "findMany endsWith",
+        "prismaMs": 0.482,
+        "generatedMs": 0.058,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0.166,
+        "speedupVsPrisma": 8.35,
+        "speedupVsDrizzle": 2.88
+      },
+      {
+        "name": "findMany NOT contains",
+        "prismaMs": 0.466,
+        "generatedMs": 0.04,
+        "sqlGenMs": 0.029,
+        "drizzleMs": 0.134,
+        "speedupVsPrisma": 11.55,
+        "speedupVsDrizzle": 3.33
+      },
+      {
+        "name": "findMany LIKE",
+        "prismaMs": 0.158,
+        "generatedMs": 0.026,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0.058,
+        "speedupVsPrisma": 6.15,
+        "speedupVsDrizzle": 2.28
+      },
+      {
+        "name": "findMany <",
+        "prismaMs": 22.561,
+        "generatedMs": 1.921,
+        "sqlGenMs": 0.055,
+        "drizzleMs": 4.241,
+        "speedupVsPrisma": 11.74,
+        "speedupVsDrizzle": 2.21
+      },
+      {
+        "name": "findMany <=",
+        "prismaMs": 23.23,
+        "generatedMs": 2,
+        "sqlGenMs": 0.057,
+        "drizzleMs": 4.68,
+        "speedupVsPrisma": 11.62,
+        "speedupVsDrizzle": 2.34
+      },
+      {
+        "name": "findMany >",
+        "prismaMs": 12.184,
+        "generatedMs": 0.965,
+        "sqlGenMs": 0.047,
+        "drizzleMs": 2.264,
+        "speedupVsPrisma": 12.62,
+        "speedupVsDrizzle": 2.35
+      },
+      {
+        "name": "findMany NOT IN",
+        "prismaMs": 0.427,
+        "generatedMs": 0.044,
+        "sqlGenMs": 0.029,
+        "drizzleMs": 0.12,
+        "speedupVsPrisma": 9.81,
+        "speedupVsDrizzle": 2.76
+      },
+      {
+        "name": "findMany isNot null",
+        "prismaMs": 0.675,
+        "generatedMs": 0.036,
+        "sqlGenMs": 0.023,
+        "drizzleMs": 0.178,
+        "speedupVsPrisma": 18.82,
+        "speedupVsDrizzle": 4.97
+      },
+      {
+        "name": "orderBy multi-field",
+        "prismaMs": 0.801,
+        "generatedMs": 0.789,
+        "sqlGenMs": 0.036,
+        "drizzleMs": 0.384,
+        "speedupVsPrisma": 1.02,
+        "speedupVsDrizzle": 0.49
+      },
+      {
+        "name": "distinct status",
+        "prismaMs": 12.067,
+        "generatedMs": 4.174,
+        "sqlGenMs": 0.044,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 2.89,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "distinct multi",
+        "prismaMs": 13.021,
+        "generatedMs": 5.283,
+        "sqlGenMs": 0.064,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 2.46,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "cursor pagination",
+        "prismaMs": 0.254,
+        "generatedMs": 0.051,
+        "sqlGenMs": 0.054,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 4.97,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "select + include",
+        "prismaMs": 0.547,
+        "generatedMs": 0.039,
+        "sqlGenMs": 0.043,
+        "drizzleMs": 0.132,
+        "speedupVsPrisma": 13.91,
+        "speedupVsDrizzle": 3.35
+      },
+      {
+        "name": "_count relation",
+        "prismaMs": 0.642,
+        "generatedMs": 0.342,
+        "sqlGenMs": 0.038,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.88,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "_count multi-relation",
+        "prismaMs": 0.143,
+        "generatedMs": 0.039,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 3.65,
+        "speedupVsDrizzle": 0
+      }
+    ],
+    "avgSpeedupVsPrisma": 7.72,
+    "avgSpeedupVsDrizzle": 2.82,
+    "timestamp": "2026-02-04T00:16:38.445Z"
+  },
+  {
+    "version": 7,
+    "dialect": "postgres",
+    "tests": [
+      {
+        "name": "findMany basic",
+        "prismaMs": 0.384,
+        "generatedMs": 0.192,
+        "sqlGenMs": 0.123,
+        "drizzleMs": 0.331,
+        "speedupVsPrisma": 2,
+        "speedupVsDrizzle": 1.72
+      },
+      {
+        "name": "findMany where =",
+        "prismaMs": 0.374,
+        "generatedMs": 0.262,
+        "sqlGenMs": 0.069,
+        "drizzleMs": 0.341,
+        "speedupVsPrisma": 1.43,
+        "speedupVsDrizzle": 1.3
+      },
+      {
+        "name": "findMany where >=",
+        "prismaMs": 8.636,
+        "generatedMs": 2.911,
+        "sqlGenMs": 0.042,
+        "drizzleMs": 7.079,
+        "speedupVsPrisma": 2.97,
+        "speedupVsDrizzle": 2.43
+      },
+      {
+        "name": "findMany where IN",
+        "prismaMs": 0.583,
+        "generatedMs": 0.326,
+        "sqlGenMs": 0.054,
+        "drizzleMs": 0.42,
+        "speedupVsPrisma": 1.79,
+        "speedupVsDrizzle": 1.29
+      },
+      {
+        "name": "findMany where null",
+        "prismaMs": 0.336,
+        "generatedMs": 0.114,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.21,
+        "speedupVsPrisma": 2.94,
+        "speedupVsDrizzle": 1.84
+      },
+      {
+        "name": "findMany ILIKE",
+        "prismaMs": 0.25,
+        "generatedMs": 0.157,
+        "sqlGenMs": 0.034,
+        "drizzleMs": 0.164,
+        "speedupVsPrisma": 1.6,
+        "speedupVsDrizzle": 1.05
+      },
+      {
+        "name": "findMany AND",
+        "prismaMs": 1.755,
+        "generatedMs": 0.599,
+        "sqlGenMs": 0.05,
+        "drizzleMs": 1.409,
+        "speedupVsPrisma": 2.93,
+        "speedupVsDrizzle": 2.35
+      },
+      {
+        "name": "findMany OR",
+        "prismaMs": 8.048,
+        "generatedMs": 2.437,
+        "sqlGenMs": 0.074,
+        "drizzleMs": 5.991,
+        "speedupVsPrisma": 3.3,
+        "speedupVsDrizzle": 2.46
+      },
+      {
+        "name": "findMany NOT",
+        "prismaMs": 0.555,
+        "generatedMs": 0.35,
+        "sqlGenMs": 0.03,
+        "drizzleMs": 0.413,
+        "speedupVsPrisma": 1.58,
+        "speedupVsDrizzle": 1.18
+      },
+      {
+        "name": "findMany orderBy",
+        "prismaMs": 2.032,
+        "generatedMs": 0.661,
+        "sqlGenMs": 0.037,
+        "drizzleMs": 0.872,
+        "speedupVsPrisma": 3.08,
+        "speedupVsDrizzle": 1.32
+      },
+      {
+        "name": "findMany pagination",
+        "prismaMs": 0.259,
+        "generatedMs": 0.167,
+        "sqlGenMs": 0.041,
+        "drizzleMs": 0.161,
+        "speedupVsPrisma": 1.55,
+        "speedupVsDrizzle": 0.97
+      },
+      {
+        "name": "findMany select",
+        "prismaMs": 0.225,
+        "generatedMs": 0.082,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.133,
+        "speedupVsPrisma": 2.73,
+        "speedupVsDrizzle": 1.62
+      },
+      {
+        "name": "findMany relation some",
+        "prismaMs": 0.861,
+        "generatedMs": 0.506,
+        "sqlGenMs": 0.055,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.7,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany relation every",
+        "prismaMs": 0.794,
+        "generatedMs": 0.504,
+        "sqlGenMs": 0.037,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.57,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany relation none",
+        "prismaMs": 13.048,
+        "generatedMs": 4.527,
+        "sqlGenMs": 0.03,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 2.88,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany nested relation",
+        "prismaMs": 0.77,
+        "generatedMs": 0.873,
+        "sqlGenMs": 0.057,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 0.88,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany complex",
+        "prismaMs": 1.129,
+        "generatedMs": 0.461,
+        "sqlGenMs": 0.051,
+        "drizzleMs": 0.629,
+        "speedupVsPrisma": 2.45,
+        "speedupVsDrizzle": 1.36
+      },
+      {
+        "name": "findFirst",
+        "prismaMs": 0.275,
+        "generatedMs": 0.149,
+        "sqlGenMs": 0.033,
+        "drizzleMs": 0.209,
+        "speedupVsPrisma": 1.84,
+        "speedupVsDrizzle": 1.4
+      },
+      {
+        "name": "findFirst skip",
+        "prismaMs": 0.326,
+        "generatedMs": 0.15,
+        "sqlGenMs": 0.037,
+        "drizzleMs": 0.233,
+        "speedupVsPrisma": 2.18,
+        "speedupVsDrizzle": 1.56
+      },
+      {
+        "name": "findUnique id",
+        "prismaMs": 0.224,
+        "generatedMs": 0.133,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.175,
+        "speedupVsPrisma": 1.68,
+        "speedupVsDrizzle": 1.32
+      },
+      {
+        "name": "findUnique email",
+        "prismaMs": 0.204,
+        "generatedMs": 0.099,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0.127,
+        "speedupVsPrisma": 2.07,
+        "speedupVsDrizzle": 1.29
+      },
+      {
+        "name": "count",
+        "prismaMs": 0.12,
+        "generatedMs": 0.052,
+        "sqlGenMs": 0.019,
+        "drizzleMs": 0.075,
+        "speedupVsPrisma": 2.3,
+        "speedupVsDrizzle": 1.43
+      },
+      {
+        "name": "count where",
+        "prismaMs": 0.422,
+        "generatedMs": 0.228,
+        "sqlGenMs": 0.022,
+        "drizzleMs": 0.25,
+        "speedupVsPrisma": 1.85,
+        "speedupVsDrizzle": 1.1
+      },
+      {
+        "name": "aggregate count",
+        "prismaMs": 0.23,
+        "generatedMs": 0.171,
+        "sqlGenMs": 0.022,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.35,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate sum/avg",
+        "prismaMs": 0.357,
+        "generatedMs": 0.227,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.57,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate where",
+        "prismaMs": 0.423,
+        "generatedMs": 0.22,
+        "sqlGenMs": 0.023,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.92,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate min/max",
+        "prismaMs": 0.312,
+        "generatedMs": 0.223,
+        "sqlGenMs": 0.017,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.4,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate complete",
+        "prismaMs": 0.388,
+        "generatedMs": 0.259,
+        "sqlGenMs": 0.021,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.5,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy",
+        "prismaMs": 0.427,
+        "generatedMs": 0.322,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.33,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy count",
+        "prismaMs": 0.465,
+        "generatedMs": 0.319,
+        "sqlGenMs": 0.018,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.46,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy multi",
+        "prismaMs": 0.554,
+        "generatedMs": 0.375,
+        "sqlGenMs": 0.018,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.48,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy having",
+        "prismaMs": 0.567,
+        "generatedMs": 0.439,
+        "sqlGenMs": 0.032,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.29,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy + where",
+        "prismaMs": 0.525,
+        "generatedMs": 0.293,
+        "sqlGenMs": 0.024,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.79,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy aggregates",
+        "prismaMs": 0.532,
+        "generatedMs": 0.398,
+        "sqlGenMs": 0.018,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.34,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy min/max",
+        "prismaMs": 0.525,
+        "generatedMs": 0.39,
+        "sqlGenMs": 0.022,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.35,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "include posts",
+        "prismaMs": 1.522,
+        "generatedMs": 1.95,
+        "sqlGenMs": 0.077,
+        "drizzleMs": 2.194,
+        "speedupVsPrisma": 0.78,
+        "speedupVsDrizzle": 1.12
+      },
+      {
+        "name": "include profile",
+        "prismaMs": 0.61,
+        "generatedMs": 0.21,
+        "sqlGenMs": 0.048,
+        "drizzleMs": 0.486,
+        "speedupVsPrisma": 2.91,
+        "speedupVsDrizzle": 2.32
+      },
+      {
+        "name": "include 3 levels",
+        "prismaMs": 1.583,
+        "generatedMs": 1.115,
+        "sqlGenMs": 0.08,
+        "drizzleMs": 1.524,
+        "speedupVsPrisma": 1.42,
+        "speedupVsDrizzle": 1.37
+      },
+      {
+        "name": "include 4 levels",
+        "prismaMs": 1.808,
+        "generatedMs": 0.986,
+        "sqlGenMs": 0.137,
+        "drizzleMs": 1.384,
+        "speedupVsPrisma": 1.83,
+        "speedupVsDrizzle": 1.4
+      },
+      {
+        "name": "include + where",
+        "prismaMs": 1.091,
+        "generatedMs": 0.334,
+        "sqlGenMs": 0.104,
+        "drizzleMs": 0.578,
+        "speedupVsPrisma": 3.27,
+        "speedupVsDrizzle": 1.73
+      },
+      {
+        "name": "include + select nested",
+        "prismaMs": 0.831,
+        "generatedMs": 1.513,
+        "sqlGenMs": 0.043,
+        "drizzleMs": 1.688,
+        "speedupVsPrisma": 0.55,
+        "speedupVsDrizzle": 1.12
+      },
+      {
+        "name": "findMany startsWith",
+        "prismaMs": 0.253,
+        "generatedMs": 0.137,
+        "sqlGenMs": 0.033,
+        "drizzleMs": 0.171,
+        "speedupVsPrisma": 1.85,
+        "speedupVsDrizzle": 1.25
+      },
+      {
+        "name": "findMany endsWith",
+        "prismaMs": 0.413,
+        "generatedMs": 0.216,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.313,
+        "speedupVsPrisma": 1.91,
+        "speedupVsDrizzle": 1.45
+      },
+      {
+        "name": "findMany NOT contains",
+        "prismaMs": 0.423,
+        "generatedMs": 0.225,
+        "sqlGenMs": 0.029,
+        "drizzleMs": 0.291,
+        "speedupVsPrisma": 1.88,
+        "speedupVsDrizzle": 1.3
+      },
+      {
+        "name": "findMany LIKE",
+        "prismaMs": 0.208,
+        "generatedMs": 0.097,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0.129,
+        "speedupVsPrisma": 2.14,
+        "speedupVsDrizzle": 1.33
+      },
+      {
+        "name": "findMany <",
+        "prismaMs": 12.548,
+        "generatedMs": 4.641,
+        "sqlGenMs": 0.042,
+        "drizzleMs": 9.148,
+        "speedupVsPrisma": 2.7,
+        "speedupVsDrizzle": 1.97
+      },
+      {
+        "name": "findMany <=",
+        "prismaMs": 13.607,
+        "generatedMs": 5.025,
+        "sqlGenMs": 0.053,
+        "drizzleMs": 9.307,
+        "speedupVsPrisma": 2.71,
+        "speedupVsDrizzle": 1.85
+      },
+      {
+        "name": "findMany >",
+        "prismaMs": 7.894,
+        "generatedMs": 2.867,
+        "sqlGenMs": 0.05,
+        "drizzleMs": 6.327,
+        "speedupVsPrisma": 2.75,
+        "speedupVsDrizzle": 2.21
+      },
+      {
+        "name": "findMany NOT IN",
+        "prismaMs": 1.004,
+        "generatedMs": 0.471,
+        "sqlGenMs": 0.043,
+        "drizzleMs": 0.387,
+        "speedupVsPrisma": 2.13,
+        "speedupVsDrizzle": 0.82
+      },
+      {
+        "name": "findMany isNot null",
+        "prismaMs": 0.474,
+        "generatedMs": 0.197,
+        "sqlGenMs": 0.024,
+        "drizzleMs": 0.267,
+        "speedupVsPrisma": 2.41,
+        "speedupVsDrizzle": 1.36
+      },
+      {
+        "name": "orderBy multi-field",
+        "prismaMs": 2.482,
+        "generatedMs": 0.808,
+        "sqlGenMs": 0.045,
+        "drizzleMs": 0.91,
+        "speedupVsPrisma": 3.07,
+        "speedupVsDrizzle": 1.13
+      },
+      {
+        "name": "distinct status",
+        "prismaMs": 7.847,
+        "generatedMs": 1.889,
+        "sqlGenMs": 0.132,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 4.16,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "distinct multi",
+        "prismaMs": 11.643,
+        "generatedMs": 2.051,
+        "sqlGenMs": 0.039,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 5.68,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "cursor pagination",
+        "prismaMs": 0.356,
+        "generatedMs": 0.23,
+        "sqlGenMs": 0.043,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.55,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "select + include",
+        "prismaMs": 0.713,
+        "generatedMs": 0.213,
+        "sqlGenMs": 0.038,
+        "drizzleMs": 0.355,
+        "speedupVsPrisma": 3.34,
+        "speedupVsDrizzle": 1.67
+      },
+      {
+        "name": "_count relation",
+        "prismaMs": 0.672,
+        "generatedMs": 0.551,
+        "sqlGenMs": 0.035,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.22,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "_count multi-relation",
+        "prismaMs": 0.284,
+        "generatedMs": 0.152,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.87,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "ILIKE special chars",
+        "prismaMs": 0.254,
+        "generatedMs": 0.158,
+        "sqlGenMs": 0.026,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.61,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "LIKE case sensitive",
+        "prismaMs": 0.237,
+        "generatedMs": 0.124,
+        "sqlGenMs": 0.024,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.92,
+        "speedupVsDrizzle": 0
+      }
+    ],
+    "avgSpeedupVsPrisma": 2.08,
+    "avgSpeedupVsDrizzle": 1.51,
+    "timestamp": "2026-02-04T00:17:26.143Z"
+  },
+  {
+    "version": 7,
+    "dialect": "sqlite",
+    "tests": [
+      {
+        "name": "findMany basic",
+        "prismaMs": 0.258,
+        "generatedMs": 0.045,
+        "sqlGenMs": 0.094,
+        "drizzleMs": 0.184,
+        "speedupVsPrisma": 5.75,
+        "speedupVsDrizzle": 4.12
+      },
+      {
+        "name": "findMany where =",
+        "prismaMs": 0.288,
+        "generatedMs": 0.038,
+        "sqlGenMs": 0.056,
+        "drizzleMs": 0.319,
+        "speedupVsPrisma": 7.52,
+        "speedupVsDrizzle": 8.32
+      },
+      {
+        "name": "findMany where >=",
+        "prismaMs": 4.91,
+        "generatedMs": 1.194,
+        "sqlGenMs": 0.077,
+        "drizzleMs": 2.491,
+        "speedupVsPrisma": 4.11,
+        "speedupVsDrizzle": 2.09
+      },
+      {
+        "name": "findMany where IN",
+        "prismaMs": 0.294,
+        "generatedMs": 0.051,
+        "sqlGenMs": 0.067,
+        "drizzleMs": 0.113,
+        "speedupVsPrisma": 5.72,
+        "speedupVsDrizzle": 2.2
+      },
+      {
+        "name": "findMany where null",
+        "prismaMs": 0.189,
+        "generatedMs": 0.016,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0.084,
+        "speedupVsPrisma": 12.02,
+        "speedupVsDrizzle": 5.37
+      },
+      {
+        "name": "findMany LIKE",
+        "prismaMs": 0.176,
+        "generatedMs": 0.018,
+        "sqlGenMs": 0.034,
+        "drizzleMs": 0.062,
+        "speedupVsPrisma": 9.71,
+        "speedupVsDrizzle": 3.45
+      },
+      {
+        "name": "findMany AND",
+        "prismaMs": 0.894,
+        "generatedMs": 0.282,
+        "sqlGenMs": 0.041,
+        "drizzleMs": 0.511,
+        "speedupVsPrisma": 3.18,
+        "speedupVsDrizzle": 1.82
+      },
+      {
+        "name": "findMany OR",
+        "prismaMs": 4.589,
+        "generatedMs": 1.059,
+        "sqlGenMs": 0.059,
+        "drizzleMs": 2.15,
+        "speedupVsPrisma": 4.33,
+        "speedupVsDrizzle": 2.03
+      },
+      {
+        "name": "findMany NOT",
+        "prismaMs": 0.296,
+        "generatedMs": 0.04,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.102,
+        "speedupVsPrisma": 7.43,
+        "speedupVsDrizzle": 2.55
+      },
+      {
+        "name": "findMany orderBy",
+        "prismaMs": 1.926,
+        "generatedMs": 1.703,
+        "sqlGenMs": 0.053,
+        "drizzleMs": 1.763,
+        "speedupVsPrisma": 1.13,
+        "speedupVsDrizzle": 1.04
+      },
+      {
+        "name": "findMany pagination",
+        "prismaMs": 0.156,
+        "generatedMs": 0.027,
+        "sqlGenMs": 0.027,
+        "drizzleMs": 0.064,
+        "speedupVsPrisma": 5.74,
+        "speedupVsDrizzle": 2.34
+      },
+      {
+        "name": "findMany select",
+        "prismaMs": 0.114,
+        "generatedMs": 0.017,
+        "sqlGenMs": 0.047,
+        "drizzleMs": 0.04,
+        "speedupVsPrisma": 6.59,
+        "speedupVsDrizzle": 2.31
+      },
+      {
+        "name": "findMany relation some",
+        "prismaMs": 0.552,
+        "generatedMs": 0.441,
+        "sqlGenMs": 0.048,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.25,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany relation every",
+        "prismaMs": 10.183,
+        "generatedMs": 6.496,
+        "sqlGenMs": 0.06,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.57,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany relation none",
+        "prismaMs": 129.763,
+        "generatedMs": 2.705,
+        "sqlGenMs": 0.046,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 47.98,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany nested relation",
+        "prismaMs": 0.567,
+        "generatedMs": 0.307,
+        "sqlGenMs": 0.037,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.84,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "findMany complex",
+        "prismaMs": 0.803,
+        "generatedMs": 0.509,
+        "sqlGenMs": 0.053,
+        "drizzleMs": 0.521,
+        "speedupVsPrisma": 1.58,
+        "speedupVsDrizzle": 1.02
+      },
+      {
+        "name": "findFirst",
+        "prismaMs": 0.177,
+        "generatedMs": 0.015,
+        "sqlGenMs": 0.029,
+        "drizzleMs": 0.066,
+        "speedupVsPrisma": 11.6,
+        "speedupVsDrizzle": 4.35
+      },
+      {
+        "name": "findFirst skip",
+        "prismaMs": 0.233,
+        "generatedMs": 0.018,
+        "sqlGenMs": 0.06,
+        "drizzleMs": 0.075,
+        "speedupVsPrisma": 13.09,
+        "speedupVsDrizzle": 4.21
+      },
+      {
+        "name": "findUnique id",
+        "prismaMs": 0.178,
+        "generatedMs": 0.013,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0.06,
+        "speedupVsPrisma": 13.4,
+        "speedupVsDrizzle": 4.48
+      },
+      {
+        "name": "findUnique email",
+        "prismaMs": 0.149,
+        "generatedMs": 0.013,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0.05,
+        "speedupVsPrisma": 11.23,
+        "speedupVsDrizzle": 3.78
+      },
+      {
+        "name": "count",
+        "prismaMs": 0.093,
+        "generatedMs": 0.006,
+        "sqlGenMs": 0.02,
+        "drizzleMs": 0.018,
+        "speedupVsPrisma": 14.59,
+        "speedupVsDrizzle": 2.81
+      },
+      {
+        "name": "count where",
+        "prismaMs": 0.272,
+        "generatedMs": 0.15,
+        "sqlGenMs": 0.019,
+        "drizzleMs": 0.167,
+        "speedupVsPrisma": 1.81,
+        "speedupVsDrizzle": 1.11
+      },
+      {
+        "name": "aggregate count",
+        "prismaMs": 0.109,
+        "generatedMs": 0.011,
+        "sqlGenMs": 0.021,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 9.76,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate sum/avg",
+        "prismaMs": 0.249,
+        "generatedMs": 0.147,
+        "sqlGenMs": 0.017,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.7,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate where",
+        "prismaMs": 0.264,
+        "generatedMs": 0.152,
+        "sqlGenMs": 0.042,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.74,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate min/max",
+        "prismaMs": 0.249,
+        "generatedMs": 0.153,
+        "sqlGenMs": 0.016,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.63,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "aggregate complete",
+        "prismaMs": 0.342,
+        "generatedMs": 0.22,
+        "sqlGenMs": 0.018,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.55,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy",
+        "prismaMs": 0.547,
+        "generatedMs": 0.444,
+        "sqlGenMs": 0.043,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.23,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy count",
+        "prismaMs": 0.572,
+        "generatedMs": 0.447,
+        "sqlGenMs": 0.017,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.28,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy multi",
+        "prismaMs": 1.086,
+        "generatedMs": 1.117,
+        "sqlGenMs": 0.016,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 0.97,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy having",
+        "prismaMs": 0.635,
+        "generatedMs": 0.486,
+        "sqlGenMs": 0.052,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.31,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy + where",
+        "prismaMs": 0.332,
+        "generatedMs": 0.183,
+        "sqlGenMs": 0.023,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.81,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy aggregates",
+        "prismaMs": 0.69,
+        "generatedMs": 0.553,
+        "sqlGenMs": 0.017,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.25,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "groupBy min/max",
+        "prismaMs": 0.719,
+        "generatedMs": 0.576,
+        "sqlGenMs": 0.044,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.25,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "include posts",
+        "prismaMs": 1.105,
+        "generatedMs": 0.939,
+        "sqlGenMs": 0.064,
+        "drizzleMs": 1.506,
+        "speedupVsPrisma": 1.18,
+        "speedupVsDrizzle": 1.6
+      },
+      {
+        "name": "include profile",
+        "prismaMs": 0.441,
+        "generatedMs": 0.065,
+        "sqlGenMs": 0.056,
+        "drizzleMs": 0.25,
+        "speedupVsPrisma": 6.74,
+        "speedupVsDrizzle": 3.82
+      },
+      {
+        "name": "include 3 levels",
+        "prismaMs": 1.075,
+        "generatedMs": 0.592,
+        "sqlGenMs": 0.079,
+        "drizzleMs": 0.827,
+        "speedupVsPrisma": 1.82,
+        "speedupVsDrizzle": 1.4
+      },
+      {
+        "name": "include 4 levels",
+        "prismaMs": 1.126,
+        "generatedMs": 0.418,
+        "sqlGenMs": 0.111,
+        "drizzleMs": 0.658,
+        "speedupVsPrisma": 2.69,
+        "speedupVsDrizzle": 1.57
+      },
+      {
+        "name": "include + where",
+        "prismaMs": 0.716,
+        "generatedMs": 0.131,
+        "sqlGenMs": 0.059,
+        "drizzleMs": 0.31,
+        "speedupVsPrisma": 5.46,
+        "speedupVsDrizzle": 2.36
+      },
+      {
+        "name": "include + select nested",
+        "prismaMs": 0.543,
+        "generatedMs": 0.81,
+        "sqlGenMs": 0.044,
+        "drizzleMs": 1.018,
+        "speedupVsPrisma": 0.67,
+        "speedupVsDrizzle": 1.26
+      },
+      {
+        "name": "findMany startsWith",
+        "prismaMs": 0.174,
+        "generatedMs": 0.025,
+        "sqlGenMs": 0.035,
+        "drizzleMs": 0.061,
+        "speedupVsPrisma": 6.92,
+        "speedupVsDrizzle": 2.43
+      },
+      {
+        "name": "findMany endsWith",
+        "prismaMs": 0.284,
+        "generatedMs": 0.06,
+        "sqlGenMs": 0.026,
+        "drizzleMs": 0.153,
+        "speedupVsPrisma": 4.73,
+        "speedupVsDrizzle": 2.55
+      },
+      {
+        "name": "findMany NOT contains",
+        "prismaMs": 0.286,
+        "generatedMs": 0.046,
+        "sqlGenMs": 0.05,
+        "drizzleMs": 0.146,
+        "speedupVsPrisma": 6.25,
+        "speedupVsDrizzle": 3.18
+      },
+      {
+        "name": "findMany LIKE",
+        "prismaMs": 0.171,
+        "generatedMs": 0.025,
+        "sqlGenMs": 0.026,
+        "drizzleMs": 0.091,
+        "speedupVsPrisma": 6.84,
+        "speedupVsDrizzle": 3.63
+      },
+      {
+        "name": "findMany <",
+        "prismaMs": 8.613,
+        "generatedMs": 2.338,
+        "sqlGenMs": 0.031,
+        "drizzleMs": 4.585,
+        "speedupVsPrisma": 3.68,
+        "speedupVsDrizzle": 1.96
+      },
+      {
+        "name": "findMany <=",
+        "prismaMs": 9.243,
+        "generatedMs": 2.297,
+        "sqlGenMs": 0.111,
+        "drizzleMs": 4.968,
+        "speedupVsPrisma": 4.02,
+        "speedupVsDrizzle": 2.16
+      },
+      {
+        "name": "findMany >",
+        "prismaMs": 4.48,
+        "generatedMs": 1.088,
+        "sqlGenMs": 0.059,
+        "drizzleMs": 2.639,
+        "speedupVsPrisma": 4.12,
+        "speedupVsDrizzle": 2.42
+      },
+      {
+        "name": "findMany NOT IN",
+        "prismaMs": 0.293,
+        "generatedMs": 0.051,
+        "sqlGenMs": 0.028,
+        "drizzleMs": 0.128,
+        "speedupVsPrisma": 5.75,
+        "speedupVsDrizzle": 2.52
+      },
+      {
+        "name": "findMany isNot null",
+        "prismaMs": 0.295,
+        "generatedMs": 0.044,
+        "sqlGenMs": 0.023,
+        "drizzleMs": 0.119,
+        "speedupVsPrisma": 6.74,
+        "speedupVsDrizzle": 2.73
+      },
+      {
+        "name": "orderBy multi-field",
+        "prismaMs": 0.632,
+        "generatedMs": 0.363,
+        "sqlGenMs": 0.038,
+        "drizzleMs": 0.402,
+        "speedupVsPrisma": 1.74,
+        "speedupVsDrizzle": 1.11
+      },
+      {
+        "name": "distinct status",
+        "prismaMs": 6.905,
+        "generatedMs": 4.648,
+        "sqlGenMs": 0.068,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.49,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "distinct multi",
+        "prismaMs": 7.611,
+        "generatedMs": 5.537,
+        "sqlGenMs": 0.034,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.37,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "cursor pagination",
+        "prismaMs": 0.251,
+        "generatedMs": 0.048,
+        "sqlGenMs": 0.044,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 5.26,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "select + include",
+        "prismaMs": 0.439,
+        "generatedMs": 0.037,
+        "sqlGenMs": 0.059,
+        "drizzleMs": 0.138,
+        "speedupVsPrisma": 11.91,
+        "speedupVsDrizzle": 3.73
+      },
+      {
+        "name": "_count relation",
+        "prismaMs": 0.484,
+        "generatedMs": 0.324,
+        "sqlGenMs": 0.029,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 1.49,
+        "speedupVsDrizzle": 0
+      },
+      {
+        "name": "_count multi-relation",
+        "prismaMs": 0.155,
+        "generatedMs": 0.039,
+        "sqlGenMs": 0.025,
+        "drizzleMs": 0,
+        "speedupVsPrisma": 3.94,
+        "speedupVsDrizzle": 0
+      }
+    ],
+    "avgSpeedupVsPrisma": 5.5,
+    "avgSpeedupVsDrizzle": 2.77,
+    "timestamp": "2026-02-04T00:17:44.698Z"
+  }
+]

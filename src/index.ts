@@ -19,6 +19,7 @@ import {
   SQLDirective,
 } from './sql-generator'
 import { transformQueryResults, type PrismaMethod } from './result-transformers'
+import { buildSQLWithCache } from './query-cache'
 
 interface SqlResult {
   sql: string
@@ -87,72 +88,7 @@ export function buildSQL(
   args: Record<string, unknown>,
   dialect: SqlDialect,
 ): SqlResult {
-  const tableName = buildTableReference(
-    SQL_TEMPLATES.PUBLIC_SCHEMA,
-    model.tableName,
-    dialect,
-  )
-  const alias = makeAlias(model.tableName)
-
-  const whereResult = buildWhereClause(
-    (args.where || {}) as Record<string, unknown>,
-    {
-      alias,
-      schemaModels: models,
-      model,
-      path: ['where'],
-      isSubquery: false,
-      dialect,
-    },
-  )
-
-  const withMethod = { ...args, method }
-  let result: { sql: string; params: readonly unknown[] }
-
-  switch (method) {
-    case 'aggregate':
-      result = buildAggregateSql(
-        withMethod,
-        whereResult,
-        tableName,
-        alias,
-        model,
-      )
-      break
-    case 'groupBy':
-      result = buildGroupBySql(
-        withMethod,
-        whereResult,
-        tableName,
-        alias,
-        model,
-        dialect,
-      )
-      break
-    case 'count':
-      result = buildCountSql(
-        whereResult,
-        tableName,
-        alias,
-        args.skip as number,
-        dialect,
-      )
-      break
-    default:
-      result = buildSelectSql({
-        method,
-        args: withMethod,
-        model,
-        schemas: models,
-        from: { tableName, alias },
-        whereResult,
-        dialect,
-      })
-  }
-
-  return dialect === 'sqlite'
-    ? toSqliteParams(result.sql, result.params)
-    : { sql: result.sql, params: [...result.params] }
+  return buildSQLWithCache(model, models, method, args, dialect)
 }
 
 async function executePostgres(

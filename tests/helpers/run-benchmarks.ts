@@ -59,7 +59,7 @@ async function switchPrismaVersion(version: 6 | 7) {
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n')
 
   console.log('Installing dependencies...')
-  execSync('yarn install', { stdio: 'inherit' })
+  execSync('npm install', { stdio: 'inherit' })
   console.log(`✓ Switched to Prisma v${version}\n`)
 }
 

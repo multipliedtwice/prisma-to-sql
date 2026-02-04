@@ -22,3 +22,20 @@ export function getRelationFieldSet(model: Model): Set<string> {
   RELATION_SET_CACHE.set(model, s)
   return s
 }
+
+const COLUMN_MAP_CACHE = new WeakMap<Model, Map<string, string>>()
+
+export function getColumnMap(model: Model): Map<string, string> {
+  const cached = COLUMN_MAP_CACHE.get(model)
+  if (cached) return cached
+
+  const map = new Map<string, string>()
+  for (const f of model.fields) {
+    if (!f.isRelation) {
+      map.set(f.name, f.dbName || f.name)
+    }
+  }
+
+  COLUMN_MAP_CACHE.set(model, map)
+  return map
+}

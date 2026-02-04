@@ -41,17 +41,6 @@
     "sonar-cli": "sonar-scanner   -Dsonar.projectKey=prisma-sql   -Dsonar.sources=./src   -Dsonar.host.url=http://localhost:9000   -Dsonar.login=sqp_9fe07460d0aa83f711d0edf4f317f05019d0613b",
     "sonar": "yarn sonar-cli && npx tsx scripts/sonar.ts"
   },
-  "workspaces": {
-    "packages": [
-      "demo"
-    ],
-    "nohoist": [
-      "**/prisma",
-      "**/prisma/**",
-      "**/@prisma/**",
-      "**/prisma-*"
-    ]
-  },
   "keywords": [
     "prisma",
     "sql",
@@ -84,7 +73,6 @@
     "@faker-js/faker": "^10.2.0",
     "@prisma/adapter-better-sqlite3": "^7.2.0",
     "@prisma/adapter-pg": "^7.2.0",
-    "@prisma/client": "7.2.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.10",
     "@vitest/coverage-v8": "4.0.18",
@@ -92,11 +80,12 @@
     "drizzle-kit": "^0.31.8",
     "drizzle-orm": "^0.45.1",
     "postgres": "^3.4.8",
-    "prisma": "7.2.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "@prisma/client": "7.2.0",
+    "prisma": "7.2.0"
   },
   "engines": {
     "node": ">=16.0.0"

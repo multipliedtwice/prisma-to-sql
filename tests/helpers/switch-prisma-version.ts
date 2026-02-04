@@ -1,5 +1,3 @@
-// scripts/switch-prisma-version.ts
-
 import { execSync } from 'child_process'
 import { readFileSync, writeFileSync } from 'fs'
 import path from 'path'
@@ -34,6 +32,6 @@ writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2))
 console.log(`Switched to Prisma ${version}`)
 console.log('Installing dependencies...')
 
-execSync('yarn install', { stdio: 'inherit' })
+execSync('npm install', { stdio: 'inherit' })
 
-console.log(`\nPrisma ${version} installed. Run tests with: yarn test`)
+console.log(`\nPrisma ${version} installed. Run tests with: npm test`)
