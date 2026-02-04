@@ -15,8 +15,13 @@ import {
 import { addAutoScoped } from '../shared/dynamic-params'
 import { jsonBuildObject } from '../../sql-builder-dialect'
 import { buildRelationCountSql } from './includes'
+import { normalizeValue } from '../../utils/normalize-value'
 
 const SIMPLE_SELECT_RE_CACHE = new Map<string, RegExp>()
+
+function normalizeFinalParams(params: readonly unknown[]): unknown[] {
+  return params.map(normalizeValue)
+}
 
 function joinNonEmpty(parts: string[], sep: string): string {
   return parts.filter((s) => s.trim().length > 0).join(sep)
@@ -54,8 +59,8 @@ function finalizeSql(
 
   return Object.freeze({
     sql,
-    params: snapshot.params,
-    paramMappings: snapshot.mappings,
+    params: normalizeFinalParams(snapshot.params),
+    paramMappings: Object.freeze(snapshot.mappings),
   })
 }
 

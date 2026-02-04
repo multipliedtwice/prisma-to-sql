@@ -34,6 +34,7 @@ import { isDynamicParameter } from '@dee-wan/schema-parser'
 import { normalizeSkipLike } from './pagination'
 import { addAutoScoped } from './shared/dynamic-params'
 import { buildNotComposite } from './where/operators-scalar'
+import { normalizeValue } from '../utils/normalize-value'
 
 type AggregateKey = '_count' | '_sum' | '_avg' | '_min' | '_max'
 type LogicalKey = 'AND' | 'OR' | 'NOT'
@@ -54,6 +55,10 @@ const COMPARISON_OPS: Record<string, string> = {
   [Ops.GTE]: '>=',
   [Ops.LT]: '<',
   [Ops.LTE]: '<=',
+}
+
+function normalizeFinalParams(params: readonly unknown[]): unknown[] {
+  return params.map(normalizeValue)
 }
 
 function getModelFieldMap(model: Model): Map<string, ScalarFieldInfo> {
@@ -645,7 +650,7 @@ export function buildAggregateSql(
 
   return Object.freeze({
     sql,
-    params: Object.freeze([...whereResult.params]),
+    params: Object.freeze(normalizeFinalParams([...whereResult.params])),
     paramMappings: Object.freeze([...whereResult.paramMappings]),
   })
 }
@@ -761,9 +766,11 @@ export function buildGroupBySql(
   validateSelectQuery(sql)
   validateParamConsistency(sql, [...whereResult.params, ...snapshot.params])
 
+  const mergedParams = [...whereResult.params, ...snapshot.params]
+
   return Object.freeze({
     sql,
-    params: Object.freeze([...whereResult.params, ...snapshot.params]),
+    params: Object.freeze(normalizeFinalParams(mergedParams)),
     paramMappings: Object.freeze([
       ...whereResult.paramMappings,
       ...snapshot.mappings,
@@ -827,7 +834,7 @@ export function buildCountSql(
 
   return Object.freeze({
     sql,
-    params: Object.freeze(mergedParams),
+    params: Object.freeze(normalizeFinalParams(mergedParams)),
     paramMappings: Object.freeze([
       ...whereResult.paramMappings,
       ...snapshot.mappings,
