@@ -1735,4 +1735,148 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           }),
       ))
   })
+  describe('Date handling', () => {
+    it('Date objects in where clause with gte/lte', () => {
+      const startOfToday = new Date()
+      startOfToday.setHours(0, 0, 0, 0)
+
+      const endOfToday = new Date()
+      endOfToday.setHours(23, 59, 59, 999)
+
+      return runParityTest(
+        db,
+        benchmarkResults,
+        'findMany Date range',
+        'Task',
+        {
+          method: 'findMany',
+          where: {
+            createdAt: {
+              gte: startOfToday,
+              lte: endOfToday,
+            },
+          },
+          orderBy: { id: 'asc' },
+          take: 10,
+        },
+        () =>
+          db.prisma.task.findMany({
+            where: {
+              createdAt: {
+                gte: startOfToday,
+                lte: endOfToday,
+              },
+            },
+            orderBy: { id: 'asc' },
+            take: 10,
+          }),
+        {
+          drizzleQuery: () =>
+            drizzle.db
+              .select()
+              .from(schema.pgTasks)
+              .where(
+                and(
+                  gte(schema.pgTasks.createdAt, startOfToday),
+                  lte(schema.pgTasks.createdAt, endOfToday),
+                ),
+              )
+              .orderBy(asc(schema.pgTasks.id))
+              .limit(10),
+        },
+      )
+    })
+
+    it('count with Date objects', () => {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      yesterday.setHours(0, 0, 0, 0)
+
+      const now = new Date()
+
+      return runParityTest(
+        db,
+        benchmarkResults,
+        'count Date range',
+        'Task',
+        {
+          method: 'count',
+          where: {
+            createdAt: {
+              gte: yesterday,
+              lte: now,
+            },
+          },
+        },
+        () =>
+          db.prisma.task.count({
+            where: {
+              createdAt: {
+                gte: yesterday,
+                lte: now,
+              },
+            },
+          }),
+        {
+          transformPrisma: (c) => [{ '_count._all': BigInt(c as number) }],
+          transformDrizzle: (r: any[]) => [
+            { '_count._all': BigInt(r[0].count) },
+          ],
+          drizzleQuery: async () => {
+            const result = await drizzle.db
+              .select({ count: sql<number>`count(*)` })
+              .from(schema.pgTasks)
+              .where(
+                and(
+                  gte(schema.pgTasks.createdAt, yesterday),
+                  lte(schema.pgTasks.createdAt, now),
+                ),
+              )
+            return result
+          },
+        },
+      )
+    })
+
+    it('Date with single comparison operator', () => {
+      const weekAgo = new Date()
+      weekAgo.setDate(weekAgo.getDate() - 7)
+
+      return runParityTest(
+        db,
+        benchmarkResults,
+        'findMany Date gte',
+        'Task',
+        {
+          method: 'findMany',
+          where: {
+            createdAt: {
+              gte: weekAgo,
+            },
+          },
+          orderBy: { id: 'asc' },
+          take: 10,
+        },
+        () =>
+          db.prisma.task.findMany({
+            where: {
+              createdAt: {
+                gte: weekAgo,
+              },
+            },
+            orderBy: { id: 'asc' },
+            take: 10,
+          }),
+        {
+          drizzleQuery: () =>
+            drizzle.db
+              .select()
+              .from(schema.pgTasks)
+              .where(gte(schema.pgTasks.createdAt, weekAgo))
+              .orderBy(asc(schema.pgTasks.id))
+              .limit(10),
+        },
+      )
+    })
+  })
 })
