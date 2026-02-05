@@ -2,7 +2,7 @@ import { SqlDialect } from '../../sql-builder-dialect'
 import { needsQuoting } from './validators/sql-validators'
 import { isEmptyString, isNotNullish } from './validators/type-guards'
 import type { Model } from '../../types'
-import { getColumnMap } from './model-field-cache'
+import { getColumnMap, getQuotedColumn } from './model-field-cache'
 import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
 function containsControlChars(s: string): boolean {
@@ -203,20 +203,17 @@ export function quoteColumn(
   model: Model | undefined,
   fieldName: string,
 ): string {
-  return quote(resolveColumnName(model, fieldName))
+  if (!model) return quote(fieldName)
+  const cached = getQuotedColumn(model, fieldName)
+  return cached || quote(fieldName)
 }
 
 export function col(alias: string, field: string, model?: Model): string {
-  if (isEmptyString(alias)) {
-    throw new Error('col: alias is required and cannot be empty')
-  }
-
-  if (isEmptyString(field)) {
-    throw new Error('col: field is required and cannot be empty')
-  }
-
-  const columnName = resolveColumnName(model, field)
-  return `${alias}.${quote(columnName)}`
+  const columnName = model ? getColumnMap(model).get(field) || field : field
+  const quoted = model
+    ? getQuotedColumn(model, field) || quote(columnName)
+    : quote(columnName)
+  return alias + '.' + quoted
 }
 
 export function colWithAlias(
@@ -233,10 +230,15 @@ export function colWithAlias(
   }
 
   const columnName = resolveColumnName(model, field)
-  const columnRef = `${alias}.${quote(columnName)}`
+  const columnRef =
+    alias +
+    '.' +
+    (model
+      ? getQuotedColumn(model, field) || quote(columnName)
+      : quote(columnName))
 
   if (columnName !== field) {
-    return `${columnRef} AS ${quote(field)}`
+    return columnRef + ' AS ' + quote(field)
   }
 
   return columnRef

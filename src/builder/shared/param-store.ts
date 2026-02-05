@@ -203,11 +203,11 @@ function createStoreInternal(
   function snapshot(): ParamSnapshot {
     if (!dirty && cachedSnapshot) return cachedSnapshot
 
-    const snap: ParamSnapshot = Object.freeze({
+    const snap: ParamSnapshot = {
       index,
-      params: Object.freeze(params.slice()),
-      mappings: Object.freeze(mappings.slice()),
-    })
+      params: params,
+      mappings: mappings,
+    }
 
     cachedSnapshot = snap
     dirty = false
