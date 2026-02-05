@@ -207,6 +207,27 @@ function normalizeValue(value: unknown, seen = new WeakSet<object>(), depth = 0)
   return value
 }
 
+/**
+ * Get nested value from object using dot notation path
+ */
+function getByPath(obj: any, path: string): unknown {
+  if (!obj || !path) return undefined
+  const keys = path.split('.')
+  let result = obj
+  for (const key of keys) {
+    if (result == null) return undefined
+    result = result[key]
+  }
+  return result
+}
+
+/**
+ * Normalize all params in array
+ */
+function normalizeParams(params: unknown[]): unknown[] {
+  return params.map(p => normalizeValue(p))
+}
+
 
 export const MODELS: Model[] = ${JSON.stringify(cleanModels, null, 2)}
 
