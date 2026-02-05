@@ -1,3 +1,10 @@
+## [1.50.2](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.50.1...v1.50.2) (2026-02-05)
+
+
+### Bug Fixes
+
+* **release.yml:** update artifact path from ./docs/dist to ./docs-site/dist to reflect the correct directory structure ([ee7ca61](https://github.com/multipliedtwice/prisma-to-sql/commit/ee7ca61c5a1f767e433ebfc96a3939c0a13303b7))
+
 ## [1.50.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.50.0...v1.50.1) (2026-02-05)
 
 
