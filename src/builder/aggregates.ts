@@ -70,6 +70,14 @@ const HAVING_ALLOWED_OPS = new Set<string>([
   Ops.NOT_IN,
 ])
 
+const HAVING_FIELD_FIRST_AGG_KEYS: readonly AggregateKey[] = Object.freeze([
+  '_count',
+  '_sum',
+  '_avg',
+  '_min',
+  '_max',
+] as const)
+
 function isTruthySelection(v: unknown): boolean {
   return v === true
 }
@@ -246,8 +254,9 @@ function buildHavingNode(
 ): string {
   const clauses: string[] = []
 
-  const entries = Object.entries(node)
-  for (const [key, value] of entries) {
+  for (const key in node) {
+    if (!Object.prototype.hasOwnProperty.call(node, key)) continue
+    const value = (node as Record<string, unknown>)[key]
     const built = buildHavingEntry(key, value, alias, params, dialect, model)
     for (const c of built) {
       if (c && c.trim().length > 0) clauses.push(c)
@@ -317,12 +326,32 @@ function buildHavingForAggregateFirstShape(
   }
 
   const out: string[] = []
-  for (const [field, filter] of Object.entries(target)) {
+  for (const field in target as Record<string, unknown>) {
+    if (!Object.prototype.hasOwnProperty.call(target, field)) continue
+
     assertHavingAggTarget(aggKey, field, model)
-    if (!isPlainObject(filter) || Object.keys(filter).length === 0) continue
+
+    const filter = (target as Record<string, unknown>)[field]
+    if (!isPlainObject(filter)) continue
+
+    let hasAny = false
+    for (const k in filter as Record<string, unknown>) {
+      if (Object.prototype.hasOwnProperty.call(filter, k)) {
+        hasAny = true
+        break
+      }
+    }
+    if (!hasAny) continue
 
     const expr = aggExprForField(aggKey, field, alias, model)
-    out.push(...buildHavingOpsForExpr(expr, filter, params, dialect))
+    out.push(
+      ...buildHavingOpsForExpr(
+        expr,
+        filter as Record<string, unknown>,
+        params,
+        dialect,
+      ),
+    )
   }
 
   return out
@@ -345,11 +374,18 @@ function buildHavingForFieldFirstShape(
   const out: string[] = []
   const obj = target as Record<string, unknown>
 
-  const keys: AggregateKey[] = ['_count', '_sum', '_avg', '_min', '_max']
-  for (const aggKey of keys) {
+  for (const aggKey of HAVING_FIELD_FIRST_AGG_KEYS) {
     const aggFilter = obj[aggKey]
     if (!isPlainObject(aggFilter)) continue
-    if (Object.keys(aggFilter).length === 0) continue
+
+    let hasAny = false
+    for (const k in aggFilter as Record<string, unknown>) {
+      if (Object.prototype.hasOwnProperty.call(aggFilter, k)) {
+        hasAny = true
+        break
+      }
+    }
+    if (!hasAny) continue
 
     if (aggKey === '_sum' || aggKey === '_avg') {
       assertNumericField(model, fieldName, 'HAVING')

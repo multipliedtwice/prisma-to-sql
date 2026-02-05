@@ -3,11 +3,30 @@ import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
 function toSafeSqlIdentifier(input: string): string {
   const raw = String(input)
-  const cleaned = raw.replace(/\W/g, '_')
-  const startsOk = /^[a-zA-Z_]/.test(cleaned)
-  const base = startsOk ? cleaned : `_${cleaned}`
-  const fallback = base.length > 0 ? base : '_t'
-  const lowered = fallback.toLowerCase()
+  const n = raw.length
+
+  let out = ''
+  for (let i = 0; i < n; i++) {
+    const c = raw.charCodeAt(i)
+    const isAZ = (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
+    const is09 = c >= 48 && c <= 57
+    const isUnderscore = c === 95
+
+    if (isAZ || is09 || isUnderscore) {
+      out += raw[i]
+    } else {
+      out += '_'
+    }
+  }
+
+  if (out.length === 0) out = '_t'
+
+  const c0 = out.charCodeAt(0)
+  const startsOk =
+    (c0 >= 65 && c0 <= 90) || (c0 >= 97 && c0 <= 122) || c0 === 95
+  if (!startsOk) out = `_${out}`
+
+  const lowered = out.toLowerCase()
   return ALIAS_FORBIDDEN_KEYWORDS.has(lowered) ? `_${lowered}` : lowered
 }
 

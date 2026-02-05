@@ -127,15 +127,19 @@ function createStoreInternal(
   initialMappings: ParamMap[] = [],
 ): ParamStore {
   let index = startIndex
-  const params: unknown[] = [...initialParams]
-  const mappings: ParamMap[] = [...initialMappings]
-  const dynamicNameToIndex = new Map<string, number>()
+  const params: unknown[] = initialParams.length > 0 ? [...initialParams] : []
+  const mappings: ParamMap[] =
+    initialMappings.length > 0 ? [...initialMappings] : []
 
-  for (const m of initialMappings) {
+  const dynamicNameToIndex = new Map<string, number>()
+  for (const m of mappings) {
     if (typeof m.dynamicName === 'string') {
       dynamicNameToIndex.set(m.dynamicName.trim(), m.index)
     }
   }
+
+  let dirty = true
+  let cachedSnapshot: ParamSnapshot | null = null
 
   function assertCanAdd(): void {
     if (index > MAX_PARAM_INDEX) {
@@ -143,6 +147,10 @@ function createStoreInternal(
         `CRITICAL: Cannot add param - would overflow MAX_SAFE_INTEGER. Current index: ${index}`,
       )
     }
+  }
+
+  function format(position: number): string {
+    return `$${position}`
   }
 
   function normalizeDynamicName(dynamicName: string): string {
@@ -153,22 +161,17 @@ function createStoreInternal(
     return dn
   }
 
-  function format(position: number): string {
-    return `$${position}`
-  }
-
   function addDynamic(dynamicName: string): string {
     const dn = normalizeDynamicName(dynamicName)
     const existing = dynamicNameToIndex.get(dn)
-    if (existing !== undefined) {
-      return format(existing)
-    }
+    if (existing !== undefined) return format(existing)
 
     const position = index
     dynamicNameToIndex.set(dn, position)
     params.push(undefined)
     mappings.push({ index: position, dynamicName: dn })
     index++
+    dirty = true
     return format(position)
   }
 
@@ -178,6 +181,7 @@ function createStoreInternal(
     params.push(normalizedValue)
     mappings.push({ index: position, value: normalizedValue })
     index++
+    dirty = true
     return format(position)
   }
 
@@ -197,11 +201,17 @@ function createStoreInternal(
   }
 
   function snapshot(): ParamSnapshot {
-    return Object.freeze({
+    if (!dirty && cachedSnapshot) return cachedSnapshot
+
+    const snap: ParamSnapshot = Object.freeze({
       index,
-      params: Object.freeze([...params]),
-      mappings: Object.freeze([...mappings]),
+      params: Object.freeze(params.slice()),
+      mappings: Object.freeze(mappings.slice()),
     })
+
+    cachedSnapshot = snap
+    dirty = false
+    return snap
   }
 
   return {

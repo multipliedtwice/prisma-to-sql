@@ -9,23 +9,27 @@ export type ComparisonBuilder = (
   dialect: SqlDialect,
 ) => string
 
+const DEFAULT_EXCLUDE_KEYS: ReadonlySet<string> = new Set(['mode'])
+
 export function buildComparisons(
   expr: string,
   filter: Record<string, unknown>,
   params: ParamStore,
   dialect: SqlDialect,
   builder: ComparisonBuilder,
-  excludeKeys: Set<string> = new Set(['mode']),
+  excludeKeys: ReadonlySet<string> = DEFAULT_EXCLUDE_KEYS,
 ): string[] {
   const out: string[] = []
 
-  for (const [op, val] of Object.entries(filter)) {
-    if (excludeKeys.has(op) || val === undefined) continue
+  for (const op in filter) {
+    if (!Object.prototype.hasOwnProperty.call(filter, op)) continue
+    if (excludeKeys.has(op)) continue
+
+    const val = filter[op]
+    if (val === undefined) continue
 
     const built = builder(expr, op, val, params, dialect)
-    if (built && built.trim().length > 0) {
-      out.push(built)
-    }
+    if (built && built.trim().length > 0) out.push(built)
   }
 
   return out

@@ -23,16 +23,17 @@ const SIMPLE_COLUMN_PATTERN = `^${ALIAS_CAPTURE}\\.${COLUMN_PART}${AS_PART}$`
 const SIMPLE_COLUMN_RE = new RegExp(SIMPLE_COLUMN_PATTERN, 'i')
 
 function joinNonEmpty(parts: string[], sep: string): string {
-  return parts.filter((s) => s.trim().length > 0).join(sep)
+  const out: string[] = []
+  for (const p of parts) {
+    const s = p.trim()
+    if (s.length > 0) out.push(s)
+  }
+  return out.join(sep)
 }
 
 function buildWhereSql(conditions: readonly string[]): string {
   if (!isNonEmptyArray(conditions)) return ''
-  const parts = [
-    SQL_TEMPLATES.WHERE,
-    conditions.join(SQL_SEPARATORS.CONDITION_AND),
-  ]
-  return ` ${parts.join(' ')}`
+  return ` ${SQL_TEMPLATES.WHERE} ${conditions.join(SQL_SEPARATORS.CONDITION_AND)}`
 }
 
 function buildJoinsSql(
@@ -40,7 +41,9 @@ function buildJoinsSql(
 ): string {
   const all: string[] = []
   for (const g of joinGroups) {
-    if (isNonEmptyArray(g)) all.push(...g)
+    if (isNonEmptyArray(g)) {
+      for (const j of g) all.push(j)
+    }
   }
   return all.length > 0 ? ` ${all.join(' ')}` : ''
 }
@@ -75,34 +78,136 @@ function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
   const raw = select.trim()
   if (raw.length === 0) return []
 
+  const fromLower = fromAlias.toLowerCase()
   const parts = raw.split(SQL_SEPARATORS.FIELD_LIST)
   const names: string[] = []
 
-  for (const part of parts) {
-    const p = part.trim()
-    const m = p.match(SIMPLE_COLUMN_RE)
+  const isIdent = (s: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*$/.test(s)
 
-    if (!m) {
+  const readIdentOrQuoted = (
+    s: string,
+    start: number,
+  ): { text: string; next: number; quoted: boolean } => {
+    const n = s.length
+    if (start >= n) return { text: '', next: start, quoted: false }
+
+    if (s.charCodeAt(start) === 34) {
+      let i = start + 1
+      let out = ''
+      let saw = false
+      while (i < n) {
+        const c = s.charCodeAt(i)
+        if (c === 34) {
+          const next = i + 1
+          if (next < n && s.charCodeAt(next) === 34) {
+            out += '"'
+            saw = true
+            i += 2
+            continue
+          }
+          if (!saw)
+            throw new Error(
+              `sqlite distinct emulation: empty quoted identifier in: ${s}`,
+            )
+          return { text: out, next: i + 1, quoted: true }
+        }
+        out += s[i]
+        saw = true
+        i++
+      }
       throw new Error(
-        `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
+        `sqlite distinct emulation: unterminated quoted identifier in: ${s}`,
       )
     }
 
-    const actualAlias = m[1]
-    if (actualAlias.toLowerCase() !== fromAlias.toLowerCase()) {
+    let i = start
+    while (i < n) {
+      const c = s.charCodeAt(i)
+      if (c === 32 || c === 9) break
+      if (c === 46) break
+      i++
+    }
+    return { text: s.slice(start, i), next: i, quoted: false }
+  }
+
+  const skipSpaces = (s: string, i: number): number => {
+    while (i < s.length) {
+      const c = s.charCodeAt(i)
+      if (c !== 32 && c !== 9) break
+      i++
+    }
+    return i
+  }
+
+  for (let idx = 0; idx < parts.length; idx++) {
+    const p = parts[idx].trim()
+    if (p.length === 0) continue
+
+    let i = 0
+    i = skipSpaces(p, i)
+
+    const a = readIdentOrQuoted(p, i)
+    const actualAlias = a.text.toLowerCase()
+    if (!isIdent(a.text)) {
       throw new Error(
-        `Expected alias '${fromAlias}', got '${actualAlias}' in: ${p}`,
+        `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
       )
     }
+    if (actualAlias !== fromLower) {
+      throw new Error(`Expected alias '${fromAlias}', got '${a.text}' in: ${p}`)
+    }
+    i = a.next
 
-    const columnName = (m[2] ?? m[3] ?? '').trim()
-    const outAlias = (m[4] ?? m[5] ?? '').trim()
-    const name = outAlias.length > 0 ? outAlias : columnName
+    if (i >= p.length || p.charCodeAt(i) !== 46) {
+      throw new Error(
+        `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
+      )
+    }
+    i++ // skip '.'
+    i = skipSpaces(p, i)
 
-    if (name.length === 0) {
+    const colPart = readIdentOrQuoted(p, i)
+    const columnName = colPart.text.trim()
+    if (columnName.length === 0) {
       throw new Error(`Failed to parse selected column name from: ${p}`)
     }
+    i = colPart.next
 
+    i = skipSpaces(p, i)
+
+    let outAlias = ''
+    if (i < p.length) {
+      const rest = p.slice(i).trim()
+      if (rest.length > 0) {
+        const m = rest.match(/^AS\s+/i)
+        if (!m) {
+          throw new Error(
+            `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
+          )
+        }
+        let j = i
+        j = skipSpaces(p, j)
+        // consume "AS"
+        if (!/^AS\b/i.test(p.slice(j))) {
+          throw new Error(`Failed to parse AS in: ${p}`)
+        }
+        j += 2
+        j = skipSpaces(p, j)
+        const out = readIdentOrQuoted(p, j)
+        outAlias = out.text.trim()
+        if (outAlias.length === 0) {
+          throw new Error(`Failed to parse output alias from: ${p}`)
+        }
+        j = skipSpaces(p, out.next)
+        if (j !== p.length) {
+          throw new Error(
+            `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
+          )
+        }
+      }
+    }
+
+    const name = outAlias.length > 0 ? outAlias : columnName
     names.push(name)
   }
 
@@ -116,7 +221,6 @@ function replaceOrderByAlias(
 ): string {
   const src = String(fromAlias)
   if (src.length === 0) return orderBy
-
   const escaped = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const re = new RegExp(`\\b${escaped}\\.`, 'gi')
   return orderBy.replace(re, `${outerAlias}.`)
@@ -137,8 +241,10 @@ function buildOutputColumns(
   includeNames: string[],
   hasCount: boolean,
 ): string {
-  const outputCols = [...scalarNames, ...includeNames]
-  if (hasCount) outputCols.push('_count')
+  const outputCols = hasCount
+    ? [...scalarNames, ...includeNames, '_count']
+    : [...scalarNames, ...includeNames]
+
   const formatted = outputCols
     .map((n) => quote(n))
     .join(SQL_SEPARATORS.FIELD_LIST)
@@ -182,39 +288,48 @@ function buildSqliteDistinctQuery(
   if (!isNotNullish(distinct) || !isNonEmptyArray(distinct)) {
     throw new Error('buildSqliteDistinctQuery requires distinct fields')
   }
+
   const scalarNames = parseSimpleScalarSelect(spec.select, from.alias)
   const includeNames = includes.map((i) => i.name)
   const hasCount = Boolean(spec.args?.select?._count)
+
   const outerSelectCols = buildOutputColumns(
     scalarNames,
     includeNames,
     hasCount,
   )
   const distinctCols = buildDistinctColumns([...distinct], from.alias, model)
+
   const fallbackOrder = [...distinct]
     .map((f) => `${col(from.alias, f, model)} ASC`)
     .join(SQL_SEPARATORS.FIELD_LIST)
+
   const idField = model.fields.find(
     (f: any) => f.name === 'id' && !f.isRelation,
   )
   const baseOrder = isNonEmptyString(orderBy) ? orderBy : fallbackOrder
+
   const windowOrder = buildWindowOrder({
     baseOrder,
     idField,
     fromAlias: from.alias,
     model,
   })
+
   const outerOrder = isNonEmptyString(orderBy)
     ? replaceOrderByAlias(orderBy, from.alias, `"__tp_distinct"`)
     : replaceOrderByAlias(fallbackOrder, from.alias, `"__tp_distinct"`)
+
   const joins = buildJoinsSql(whereJoins, countJoins)
+
   const conditions: string[] = []
   if (whereClause && whereClause !== '1=1') conditions.push(whereClause)
   const whereSql = buildWhereSql(conditions)
+
   const innerSelectList = selectWithIncludes.trim()
   const innerComma = innerSelectList.length > 0 ? SQL_SEPARATORS.FIELD_LIST : ''
 
-  const innerParts = [
+  const innerParts: string[] = [
     SQL_TEMPLATES.SELECT,
     innerSelectList + innerComma,
     `ROW_NUMBER() OVER (PARTITION BY ${distinctCols} ORDER BY ${windowOrder})`,
@@ -226,9 +341,9 @@ function buildSqliteDistinctQuery(
   ]
   if (joins) innerParts.push(joins)
   if (whereSql) innerParts.push(whereSql)
-  const inner = innerParts.filter(Boolean).join(' ')
+  const inner = innerParts.join(' ')
 
-  const outerParts = [
+  const outerParts: string[] = [
     SQL_TEMPLATES.SELECT,
     outerSelectCols,
     SQL_TEMPLATES.FROM,
@@ -241,7 +356,7 @@ function buildSqliteDistinctQuery(
   if (isNonEmptyString(outerOrder)) {
     outerParts.push(SQL_TEMPLATES.ORDER_BY, outerOrder)
   }
-  return outerParts.filter(Boolean).join(' ')
+  return outerParts.join(' ')
 }
 
 function buildIncludeColumns(spec: SelectQuerySpec): {
@@ -251,8 +366,10 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
 } {
   const { select, includes, dialect, model, schemas, from, params } = spec
   const baseSelect = (select ?? '').trim()
+
   let countCols = ''
   let countJoins: string[] = []
+
   const countSelect = spec.args?.select?._count
   if (countSelect) {
     if (isPlainObject(countSelect) && 'select' in countSelect) {
@@ -270,12 +387,16 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
       countJoins = countBuild.joins
     }
   }
+
   const hasIncludes = isNonEmptyArray(includes)
   const hasCountCols = isNonEmptyString(countCols)
+
   if (!hasIncludes && !hasCountCols) {
     return { includeCols: '', selectWithIncludes: baseSelect, countJoins: [] }
   }
+
   const emptyJson = dialect === 'postgres' ? `'[]'::json` : `json('[]')`
+
   const includeCols = hasIncludes
     ? includes
         .map((inc) => {
@@ -286,6 +407,7 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
         })
         .join(SQL_SEPARATORS.FIELD_LIST)
     : ''
+
   const allCols = joinNonEmpty(
     [includeCols, countCols],
     SQL_SEPARATORS.FIELD_LIST,
@@ -297,6 +419,7 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
 function appendPagination(sql: string, spec: SelectQuerySpec): string {
   const { method, pagination, params } = spec
   const isFindUniqueOrFirst = method === 'findUnique' || method === 'findFirst'
+
   if (isFindUniqueOrFirst) {
     const parts: string[] = [sql, SQL_TEMPLATES.LIMIT, '1']
     const hasSkip =
@@ -304,6 +427,7 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
       (isDynamicParameter(pagination.skip) ||
         (typeof pagination.skip === 'number' && pagination.skip > 0)) &&
       method === 'findFirst'
+
     if (hasSkip) {
       const placeholder = addAutoScoped(
         params,
@@ -314,7 +438,9 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
     }
     return parts.join(' ')
   }
+
   const parts: string[] = [sql]
+
   if (isNotNullish(pagination.take)) {
     const placeholder = addAutoScoped(
       params,
@@ -323,6 +449,7 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
     )
     parts.push(SQL_TEMPLATES.LIMIT, placeholder)
   }
+
   if (isNotNullish(pagination.skip)) {
     const placeholder = addAutoScoped(
       params,
@@ -331,6 +458,7 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
     )
     parts.push(SQL_TEMPLATES.OFFSET, placeholder)
   }
+
   return parts.join(' ')
 }
 
@@ -417,39 +545,50 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
     dialect,
     model,
   } = spec
+
   const useWindowDistinct = hasWindowDistinct(spec)
   assertDistinctAllowed(method, useWindowDistinct)
+
   const { includeCols, selectWithIncludes, countJoins } =
     buildIncludeColumns(spec)
+
   if (useWindowDistinct) {
     const baseSelect = (select ?? '').trim()
     assertHasSelectFields(baseSelect, includeCols)
+
     const spec2 = withCountJoins(spec, countJoins, whereJoins)
     let sql = buildSqliteDistinctQuery(spec2, selectWithIncludes).trim()
     sql = appendPagination(sql, spec)
     return finalizeSql(sql, params, dialect)
   }
+
   const parts: string[] = []
-  if (cursorCte) {
-    parts.push(`WITH ${cursorCte}`)
-  }
+  if (cursorCte) parts.push(`WITH ${cursorCte}`)
+
   parts.push(SQL_TEMPLATES.SELECT)
+
   const distinctOn =
     dialect === 'postgres'
       ? buildPostgresDistinctOnClause(from.alias, distinct, model)
       : null
   if (distinctOn) parts.push(distinctOn)
+
   const baseSelect = (select ?? '').trim()
   const fullSelectList = buildSelectList(baseSelect, includeCols)
   if (!isNonEmptyString(fullSelectList)) {
     throw new Error('SELECT requires at least one selected field or include')
   }
+
   parts.push(fullSelectList)
   parts.push(SQL_TEMPLATES.FROM, from.table, from.alias)
+
   pushJoinGroups(parts, whereJoins, countJoins)
+
   const conditions = buildConditions(whereClause, cursorClause)
   pushWhere(parts, conditions)
+
   if (isNonEmptyString(orderBy)) parts.push(SQL_TEMPLATES.ORDER_BY, orderBy)
+
   let sql = parts.join(' ').trim()
   sql = appendPagination(sql, spec)
   return finalizeSql(sql, params, dialect)

@@ -42,6 +42,7 @@ type SkipTakeReadResult = {
 }
 
 const MAX_LIMIT_OFFSET = 2147483647
+const ORDER_BY_ALLOWED_KEYS = new Set(['sort', 'nulls'])
 
 function parseDirectionRaw(raw: unknown, errorLabel: string): OrderByDirection {
   const s = String(raw).toLowerCase()
@@ -73,9 +74,8 @@ function assertAllowedOrderByKeys(
   obj: Record<string, unknown>,
   fieldName?: string,
 ): void {
-  const allowed = new Set(['sort', 'nulls'])
   for (const k of Object.keys(obj)) {
-    if (!allowed.has(k)) {
+    if (!ORDER_BY_ALLOWED_KEYS.has(k)) {
       throw new Error(
         fieldName
           ? `Unsupported orderBy key '${k}' for field '${fieldName}'`
@@ -208,17 +208,24 @@ function ensureCursorFieldsInOrder(
   orderEntries: OrderByEntry[],
   cursorEntries: Array<[string, unknown]>,
 ): OrderByEntry[] {
-  const existing = new Map<string, OrderByEntry>()
-  for (const e of orderEntries) existing.set(e.field, e)
+  if (cursorEntries.length === 0) return orderEntries
 
-  const out: OrderByEntry[] = [...orderEntries]
-  for (const [field] of cursorEntries) {
+  const existing = new Set<string>()
+  for (let i = 0; i < orderEntries.length; i++)
+    existing.add(orderEntries[i].field)
+
+  let out: OrderByEntry[] | null = null
+
+  for (let i = 0; i < cursorEntries.length; i++) {
+    const field = cursorEntries[i][0]
     if (!existing.has(field)) {
+      if (!out) out = orderEntries.slice()
       out.push({ field, direction: 'asc' })
-      existing.set(field, out[out.length - 1])
+      existing.add(field)
     }
   }
-  return out
+
+  return out ?? orderEntries
 }
 
 function buildCursorFilterParts(
@@ -352,8 +359,7 @@ function buildCursorCteSelectList(
 
 function truncateIdent(name: string, maxLen: number): string {
   const s = String(name)
-  if (s.length <= maxLen) return s
-  return s.slice(0, maxLen)
+  return s.length <= maxLen ? s : s.slice(0, maxLen)
 }
 
 function buildCursorNames(outerAlias: string): {
@@ -415,10 +421,7 @@ export function buildCursorCondition(
 
   let orderEntries = buildOrderEntries(deterministicOrderBy)
   if (orderEntries.length === 0) {
-    orderEntries = cursorEntries.map(([field]) => ({
-      field,
-      direction: 'asc' as OrderByDirection,
-    }))
+    orderEntries = cursorEntries.map(([field]) => ({ field, direction: 'asc' }))
   } else {
     orderEntries = ensureCursorFieldsInOrder(orderEntries, cursorEntries)
   }
@@ -483,7 +486,6 @@ export function buildCursorCondition(
   }
 
   const exclusive = orClauses.join(SQL_SEPARATORS.CONDITION_OR)
-
   const condition = `(${existsExpr} ${SQL_SEPARATORS.CONDITION_AND} ((${exclusive})${SQL_SEPARATORS.CONDITION_OR}(${outerCursorMatch})))`
 
   return { cte, condition }

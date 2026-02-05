@@ -52,6 +52,7 @@ type IncludeSelectArgs = Pick<PrismaQueryArgs, 'include' | 'select'>
 interface IncludeBuildContext {
   model: Model
   schemas: Model[]
+  schemaByName: Map<string, Model>
   parentAlias: string
   aliasGen: AliasGenerator
   dialect: SqlDialect
@@ -75,6 +76,7 @@ function getRelationTableReference(
 function resolveRelationOrThrow(
   model: Model,
   schemas: readonly Model[],
+  schemaByName: Map<string, Model>,
   relName: string,
 ): { field: Field; relModel: Model } {
   const field = model.fields.find((f) => f.name === relName)
@@ -96,10 +98,20 @@ function resolveRelationOrThrow(
     )
   }
 
-  const relModel = schemas.find((m) => m.name === field.relatedModel)
+  const relatedModelName = field.relatedModel
+  if (
+    !isNotNullish(relatedModelName) ||
+    String(relatedModelName).trim().length === 0
+  ) {
+    throw new Error(
+      `Relation '${relName}' on model ${model.name} is missing relatedModel metadata.`,
+    )
+  }
+
+  const relModel = schemaByName.get(relatedModelName)
   if (!isNotNullish(relModel)) {
     throw new Error(
-      `Relation '${relName}' on model ${model.name} references missing model '${field.relatedModel}'.`,
+      `Relation '${relName}' on model ${model.name} references missing model '${relatedModelName}'.`,
     )
   }
 
@@ -277,6 +289,7 @@ function buildSelectWithNestedIncludes(
         relArgs as PrismaQueryArgs,
         relModel,
         ctx.schemas,
+        ctx.schemaByName,
         relAlias,
         ctx.aliasGen,
         ctx.params,
@@ -581,6 +594,7 @@ function buildIncludeSqlInternal(
   args: IncludeSelectArgs,
   model: Model,
   schemas: Model[],
+  schemaByName: Map<string, Model>,
   parentAlias: string,
   aliasGen: AliasGenerator,
   params: ParamStore,
@@ -629,7 +643,12 @@ function buildIncludeSqlInternal(
       )
     }
 
-    const resolved = resolveRelationOrThrow(model, schemas, relName)
+    const resolved = resolveRelationOrThrow(
+      model,
+      schemas,
+      schemaByName,
+      relName,
+    )
 
     const relationPath = `${model.name}.${relName}`
     const currentPath = [...visitPath, relationPath]
@@ -654,6 +673,7 @@ function buildIncludeSqlInternal(
       buildSingleInclude(relName, relArgs, resolved.field, resolved.relModel, {
         model,
         schemas,
+        schemaByName,
         parentAlias,
         aliasGen,
         dialect,
@@ -683,10 +703,14 @@ export function buildIncludeSql(
     maxDepth: 0,
   }
 
+  const schemaByName = new Map<string, Model>()
+  for (const m of schemas) schemaByName.set(m.name, m)
+
   return buildIncludeSqlInternal(
     args,
     model,
     schemas,
+    schemaByName,
     parentAlias,
     aliasGen,
     params,
@@ -706,6 +730,7 @@ function resolveCountRelationOrThrow(
   relName: string,
   model: Model,
   schemas: readonly Model[],
+  schemaByName: Map<string, Model>,
 ): { field: Field; relModel: Model } {
   const relationSet = getRelationFieldSet(model)
   if (!relationSet.has(relName)) {
@@ -726,10 +751,20 @@ function resolveCountRelationOrThrow(
     )
   }
 
-  const relModel = schemas.find((m) => m.name === field.relatedModel)
+  const relatedModelName = field.relatedModel
+  if (
+    !isNotNullish(relatedModelName) ||
+    String(relatedModelName).trim().length === 0
+  ) {
+    throw new Error(
+      `_count.${relName} is missing relatedModel metadata on model ${model.name}`,
+    )
+  }
+
+  const relModel = schemaByName.get(relatedModelName)
   if (!relModel) {
     throw new Error(
-      `Related model '${field.relatedModel}' not found for _count.${relName}`,
+      `Related model '${relatedModelName}' not found for _count.${relName}`,
     )
   }
 
@@ -883,10 +918,18 @@ export function buildRelationCountSql(
   const pairs: string[] = []
   const aliasGen = createAliasGenerator()
 
+  const schemaByName = new Map<string, Model>()
+  for (const m of schemas) schemaByName.set(m.name, m)
+
   for (const [relName, shouldCount] of Object.entries(countSelect)) {
     if (!shouldCount) continue
 
-    const resolved = resolveCountRelationOrThrow(relName, model, schemas)
+    const resolved = resolveCountRelationOrThrow(
+      relName,
+      model,
+      schemas,
+      schemaByName,
+    )
     const built = buildCountJoinAndPair({
       relName,
       field: resolved.field,
