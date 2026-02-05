@@ -1,3 +1,11 @@
+# [1.49.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.48.1...v1.49.0) (2026-02-05)
+
+
+### Features
+
+* **assembly.ts:** refactor SQL building functions for improved readability and maintainability by simplifying string concatenation and removing unnecessary code ([88d2efe](https://github.com/multipliedtwice/prisma-to-sql/commit/88d2efeee739b708e58975f34073e7c18e98b6c0))
+* **string-builder:** add StringBuilder class for efficient string manipulation ([54b2737](https://github.com/multipliedtwice/prisma-to-sql/commit/54b2737202684b3abda1388d1e3221304183d5c6))
+
 ## [1.48.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.48.0...v1.48.1) (2026-02-05)
 
 
