@@ -9,6 +9,7 @@ import {
   validateParamConsistency,
   validateParamConsistencyFragment,
 } from './shared/validators/sql-validators'
+import { assertSafeAlias } from './shared/sql-utils'
 
 interface BuildWhereOptions {
   alias: string
@@ -25,6 +26,9 @@ export function buildWhereClause(
   where: Record<string, unknown>,
   options: BuildWhereOptions,
 ): WhereClauseResult {
+  // ✅ CRITICAL FIX: Validate alias parameter
+  assertSafeAlias(options.alias)
+
   const dialect = options.dialect || getGlobalDialect()
   const params = options.params ?? createParamStore()
 

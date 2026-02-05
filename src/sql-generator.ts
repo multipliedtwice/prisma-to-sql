@@ -9,7 +9,7 @@ import { getGlobalDialect, SqlDialect } from './sql-builder-dialect'
 import { buildWhereClause } from './builder/where'
 import { buildTableReference } from './builder/shared/sql-utils'
 import { SQL_TEMPLATES, SQL_RESERVED_WORDS } from './builder/shared/constants'
-import { validateSqlPositions } from './builder/shared/validators/sql-validators'
+import { validateParamConsistencyByDialect } from './builder/shared/validators/sql-validators'
 import {
   ParamMap,
   DirectiveProps,
@@ -264,10 +264,12 @@ function finalizeDirective(args: {
   directive: DirectiveProps
   normalizedSql: string
   normalizedMappings: readonly ParamMap[]
+  dialect: SqlDialect
 }): SQLDirective {
-  const { directive, normalizedSql, normalizedMappings } = args
+  const { directive, normalizedSql, normalizedMappings, dialect } = args
 
-  validateSqlPositions(normalizedSql, normalizedMappings, getGlobalDialect())
+  const params = normalizedMappings.map((m) => m.value ?? undefined)
+  validateParamConsistencyByDialect(normalizedSql, params, dialect)
 
   const { staticParams, dynamicKeys } =
     buildParamsFromMappings(normalizedMappings)
@@ -316,5 +318,6 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
     directive,
     normalizedSql: normalized.sql,
     normalizedMappings: normalized.paramMappings,
+    dialect,
   })
 }

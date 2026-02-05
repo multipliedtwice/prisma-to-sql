@@ -4,7 +4,7 @@ import { col, quote } from '../shared/sql-utils'
 import { SelectQuerySpec, SqlResult } from '../shared/types'
 import {
   validateSelectQuery,
-  validateParamConsistency,
+  validateParamConsistencyByDialect,
 } from '../shared/validators/sql-validators'
 import {
   isNotNullish,
@@ -16,7 +16,12 @@ import { addAutoScoped } from '../shared/dynamic-params'
 import { jsonBuildObject } from '../../sql-builder-dialect'
 import { buildRelationCountSql } from './includes'
 
-const SIMPLE_SELECT_RE_CACHE = new Map<string, RegExp>()
+// ✅ MEDIUM-PRIORITY FIX: Remove per-alias cache, use single compiled pattern
+const ALIAS_CAPTURE = '([A-Za-z_][A-Za-z0-9_]*)'
+const COLUMN_PART = '(?:"([^"]+)"|([a-z_][a-z0-9_]*))'
+const AS_PART = `(?:\\s+AS\\s+${COLUMN_PART})?`
+const SIMPLE_COLUMN_PATTERN = `^${ALIAS_CAPTURE}\\.${COLUMN_PART}${AS_PART}$`
+const SIMPLE_COLUMN_RE = new RegExp(SIMPLE_COLUMN_PATTERN, 'i')
 
 function joinNonEmpty(parts: string[], sep: string): string {
   return parts.filter((s) => s.trim().length > 0).join(sep)
@@ -24,7 +29,11 @@ function joinNonEmpty(parts: string[], sep: string): string {
 
 function buildWhereSql(conditions: readonly string[]): string {
   if (!isNonEmptyArray(conditions)) return ''
-  return ` ${SQL_TEMPLATES.WHERE} ${conditions.join(SQL_SEPARATORS.CONDITION_AND)}`
+  const parts = [
+    SQL_TEMPLATES.WHERE,
+    conditions.join(SQL_SEPARATORS.CONDITION_AND),
+  ]
+  return ` ${parts.join(' ')}`
 }
 
 function buildJoinsSql(
@@ -47,11 +56,11 @@ function buildSelectList(baseSelect: string, extraCols: string): string {
 function finalizeSql(
   sql: string,
   params: SelectQuerySpec['params'],
+  dialect: SelectQuerySpec['dialect'],
 ): SqlResult {
   const snapshot = params.snapshot()
   validateSelectQuery(sql)
-  validateParamConsistency(sql, snapshot.params)
-
+  validateParamConsistencyByDialect(sql, snapshot.params, dialect)
   return Object.freeze({
     sql,
     params: snapshot.params,
@@ -59,45 +68,33 @@ function finalizeSql(
   })
 }
 
-/**
- * SQLite DISTINCT emulation requires scalar select fields to be simple column refs.
- * This parser accepts:
- *   - alias.col
- *   - alias."col"
- *   - alias.col AS out
- *   - alias."db_col" AS "field"
- *
- * It returns the *output* column names (AS alias if present, otherwise column name).
- */
 function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
   const raw = select.trim()
   if (raw.length === 0) return []
-
-  let re = SIMPLE_SELECT_RE_CACHE.get(fromAlias)
-  if (!re) {
-    const safeAlias = fromAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    re = new RegExp(
-      `^${safeAlias}\\.(?:"([^"]+)"|([a-z_][a-z0-9_]*))` +
-        `(?:\\s+AS\\s+(?:"([^"]+)"|([a-z_][a-z0-9_]*)))?$`,
-      'i',
-    )
-    SIMPLE_SELECT_RE_CACHE.set(fromAlias, re)
-  }
 
   const parts = raw.split(SQL_SEPARATORS.FIELD_LIST)
   const names: string[] = []
 
   for (const part of parts) {
     const p = part.trim()
-    const m = p.match(re)
+    const m = p.match(SIMPLE_COLUMN_RE)
+
     if (!m) {
       throw new Error(
         `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
       )
     }
 
-    const columnName = (m[1] ?? m[2] ?? '').trim()
-    const outAlias = (m[3] ?? m[4] ?? '').trim()
+    // ✅ Validate alias matches expected
+    const actualAlias = m[1]
+    if (actualAlias !== fromAlias) {
+      throw new Error(
+        `Expected alias '${fromAlias}', got '${actualAlias}' in: ${p}`,
+      )
+    }
+
+    const columnName = (m[2] ?? m[3] ?? '').trim()
+    const outAlias = (m[4] ?? m[5] ?? '').trim()
     const name = outAlias.length > 0 ? outAlias : columnName
 
     if (name.length === 0) {
@@ -137,15 +134,12 @@ function buildOutputColumns(
 ): string {
   const outputCols = [...scalarNames, ...includeNames]
   if (hasCount) outputCols.push('_count')
-
   const formatted = outputCols
     .map((n) => quote(n))
     .join(SQL_SEPARATORS.FIELD_LIST)
-
   if (!isNonEmptyString(formatted)) {
     throw new Error('distinct emulation requires at least one output column')
   }
-
   return formatted
 }
 
@@ -156,17 +150,14 @@ function buildWindowOrder(args: {
   model?: any
 }): string {
   const { baseOrder, idField, fromAlias, model } = args
-
   const orderFields = baseOrder
     .split(SQL_SEPARATORS.ORDER_BY)
     .map((s) => s.trim().toLowerCase())
-
   const hasIdInOrder = orderFields.some(
     (f) =>
       f.startsWith(`${fromAlias}.id `) || f.startsWith(`${fromAlias}."id" `),
   )
   if (hasIdInOrder) return baseOrder
-
   const idTiebreaker = idField ? `, ${col(fromAlias, 'id', model)} ASC` : ''
   return `${baseOrder}${idTiebreaker}`
 }
@@ -178,65 +169,69 @@ function buildSqliteDistinctQuery(
 ): string {
   const { includes, from, whereClause, whereJoins, orderBy, distinct, model } =
     spec
-
   if (!isNotNullish(distinct) || !isNonEmptyArray(distinct)) {
     throw new Error('buildSqliteDistinctQuery requires distinct fields')
   }
-
   const scalarNames = parseSimpleScalarSelect(spec.select, from.alias)
   const includeNames = includes.map((i) => i.name)
   const hasCount = Boolean(spec.args?.select?._count)
-
   const outerSelectCols = buildOutputColumns(
     scalarNames,
     includeNames,
     hasCount,
   )
   const distinctCols = buildDistinctColumns([...distinct], from.alias, model)
-
   const fallbackOrder = [...distinct]
     .map((f) => `${col(from.alias, f, model)} ASC`)
     .join(SQL_SEPARATORS.FIELD_LIST)
-
   const idField = model.fields.find(
     (f: any) => f.name === 'id' && !f.isRelation,
   )
   const baseOrder = isNonEmptyString(orderBy) ? orderBy : fallbackOrder
-
   const windowOrder = buildWindowOrder({
     baseOrder,
     idField,
     fromAlias: from.alias,
     model,
   })
-
   const outerOrder = isNonEmptyString(orderBy)
     ? replaceOrderByAlias(orderBy, from.alias, `"__tp_distinct"`)
     : replaceOrderByAlias(fallbackOrder, from.alias, `"__tp_distinct"`)
-
   const joins = buildJoinsSql(whereJoins, countJoins)
-
   const conditions: string[] = []
   if (whereClause && whereClause !== '1=1') conditions.push(whereClause)
   const whereSql = buildWhereSql(conditions)
-
   const innerSelectList = selectWithIncludes.trim()
   const innerComma = innerSelectList.length > 0 ? SQL_SEPARATORS.FIELD_LIST : ''
 
-  const inner =
-    `${SQL_TEMPLATES.SELECT} ${innerSelectList}${innerComma}` +
-    `ROW_NUMBER() OVER (PARTITION BY ${distinctCols} ORDER BY ${windowOrder}) ${SQL_TEMPLATES.AS} "__tp_rn" ` +
-    `${SQL_TEMPLATES.FROM} ${from.table} ${from.alias}${joins}${whereSql}`
+  const innerParts = [
+    SQL_TEMPLATES.SELECT,
+    innerSelectList + innerComma,
+    `ROW_NUMBER() OVER (PARTITION BY ${distinctCols} ORDER BY ${windowOrder})`,
+    SQL_TEMPLATES.AS,
+    '"__tp_rn"',
+    SQL_TEMPLATES.FROM,
+    from.table,
+    from.alias,
+  ]
+  if (joins) innerParts.push(joins)
+  if (whereSql) innerParts.push(whereSql)
+  const inner = innerParts.filter(Boolean).join(' ')
 
-  const outer =
-    `${SQL_TEMPLATES.SELECT} ${outerSelectCols} ` +
-    `${SQL_TEMPLATES.FROM} (${inner}) ${SQL_TEMPLATES.AS} "__tp_distinct" ` +
-    `${SQL_TEMPLATES.WHERE} "__tp_rn" = 1` +
-    (isNonEmptyString(outerOrder)
-      ? ` ${SQL_TEMPLATES.ORDER_BY} ${outerOrder}`
-      : '')
-
-  return outer
+  const outerParts = [
+    SQL_TEMPLATES.SELECT,
+    outerSelectCols,
+    SQL_TEMPLATES.FROM,
+    `(${inner})`,
+    SQL_TEMPLATES.AS,
+    '"__tp_distinct"',
+    SQL_TEMPLATES.WHERE,
+    '"__tp_rn" = 1',
+  ]
+  if (isNonEmptyString(outerOrder)) {
+    outerParts.push(SQL_TEMPLATES.ORDER_BY, outerOrder)
+  }
+  return outerParts.filter(Boolean).join(' ')
 }
 
 function buildIncludeColumns(spec: SelectQuerySpec): {
@@ -246,10 +241,8 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
 } {
   const { select, includes, dialect, model, schemas, from, params } = spec
   const baseSelect = (select ?? '').trim()
-
   let countCols = ''
   let countJoins: string[] = []
-
   const countSelect = spec.args?.select?._count
   if (countSelect) {
     if (isPlainObject(countSelect) && 'select' in countSelect) {
@@ -267,16 +260,12 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
       countJoins = countBuild.joins
     }
   }
-
   const hasIncludes = isNonEmptyArray(includes)
   const hasCountCols = isNonEmptyString(countCols)
-
   if (!hasIncludes && !hasCountCols) {
     return { includeCols: '', selectWithIncludes: baseSelect, countJoins: [] }
   }
-
   const emptyJson = dialect === 'postgres' ? `'[]'::json` : `json('[]')`
-
   const includeCols = hasIncludes
     ? includes
         .map((inc) => {
@@ -287,19 +276,16 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
         })
         .join(SQL_SEPARATORS.FIELD_LIST)
     : ''
-
   const allCols = joinNonEmpty(
     [includeCols, countCols],
     SQL_SEPARATORS.FIELD_LIST,
   )
   const selectWithIncludes = buildSelectList(baseSelect, allCols)
-
   return { includeCols: allCols, selectWithIncludes, countJoins }
 }
 
 function appendPagination(sql: string, spec: SelectQuerySpec): string {
   const { method, pagination, params } = spec
-
   const isFindUniqueOrFirst = method === 'findUnique' || method === 'findFirst'
   if (isFindUniqueOrFirst) {
     const parts: string[] = [sql, SQL_TEMPLATES.LIMIT, '1']
@@ -308,7 +294,6 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
       (isDynamicParameter(pagination.skip) ||
         (typeof pagination.skip === 'number' && pagination.skip > 0)) &&
       method === 'findFirst'
-
     if (hasSkip) {
       const placeholder = addAutoScoped(
         params,
@@ -319,9 +304,7 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
     }
     return parts.join(' ')
   }
-
   const parts: string[] = [sql]
-
   if (isNotNullish(pagination.take)) {
     const placeholder = addAutoScoped(
       params,
@@ -330,7 +313,6 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
     )
     parts.push(SQL_TEMPLATES.LIMIT, placeholder)
   }
-
   if (isNotNullish(pagination.skip)) {
     const placeholder = addAutoScoped(
       params,
@@ -339,7 +321,6 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
     )
     parts.push(SQL_TEMPLATES.OFFSET, placeholder)
   }
-
   return parts.join(' ')
 }
 
@@ -420,55 +401,46 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
     orderBy,
     distinct,
     method,
+    cursorCte,
     cursorClause,
     params,
     dialect,
     model,
   } = spec
-
   const useWindowDistinct = hasWindowDistinct(spec)
   assertDistinctAllowed(method, useWindowDistinct)
-
   const { includeCols, selectWithIncludes, countJoins } =
     buildIncludeColumns(spec)
-
   if (useWindowDistinct) {
     const baseSelect = (select ?? '').trim()
     assertHasSelectFields(baseSelect, includeCols)
-
     const spec2 = withCountJoins(spec, countJoins, whereJoins)
     let sql = buildSqliteDistinctQuery(spec2, selectWithIncludes).trim()
     sql = appendPagination(sql, spec)
-
-    return finalizeSql(sql, params)
+    return finalizeSql(sql, params, dialect)
   }
-
-  const parts: string[] = [SQL_TEMPLATES.SELECT]
-
+  const parts: string[] = []
+  if (cursorCte) {
+    parts.push(`WITH ${cursorCte}`)
+  }
+  parts.push(SQL_TEMPLATES.SELECT)
   const distinctOn =
     dialect === 'postgres'
       ? buildPostgresDistinctOnClause(from.alias, distinct, model)
       : null
   if (distinctOn) parts.push(distinctOn)
-
   const baseSelect = (select ?? '').trim()
   const fullSelectList = buildSelectList(baseSelect, includeCols)
   if (!isNonEmptyString(fullSelectList)) {
     throw new Error('SELECT requires at least one selected field or include')
   }
-
   parts.push(fullSelectList)
   parts.push(SQL_TEMPLATES.FROM, from.table, from.alias)
-
   pushJoinGroups(parts, whereJoins, countJoins)
-
   const conditions = buildConditions(whereClause, cursorClause)
   pushWhere(parts, conditions)
-
   if (isNonEmptyString(orderBy)) parts.push(SQL_TEMPLATES.ORDER_BY, orderBy)
-
   let sql = parts.join(' ').trim()
   sql = appendPagination(sql, spec)
-
-  return finalizeSql(sql, params)
+  return finalizeSql(sql, params, dialect)
 }

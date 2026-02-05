@@ -210,9 +210,10 @@ function buildCursorClauseIfAny(input: {
   alias: string
   params: ReturnType<typeof createParamStoreFrom>
   dialect: SqlDialect
-}): string | undefined {
-  const { cursor, orderBy, tableName, alias, params, dialect } = input
-  if (!isNotNullish(cursor)) return undefined
+  model: Model
+}): { cte?: string; condition?: string } {
+  const { cursor, orderBy, tableName, alias, params, dialect, model } = input
+  if (!isNotNullish(cursor)) return {}
   return buildCursorCondition(
     cursor,
     orderBy,
@@ -220,6 +221,7 @@ function buildCursorClauseIfAny(input: {
     alias,
     params,
     dialect,
+    model,
   )
 }
 
@@ -273,14 +275,27 @@ function buildSelectSpec(input: {
     dialect,
   )
 
-  const cursorClause = buildCursorClauseIfAny({
+  const cursorResult = buildCursorClauseIfAny({
     cursor,
     orderBy: normalizedArgs.orderBy,
     tableName,
     alias,
     params,
     dialect,
+    model,
   })
+
+  // ✅ HIGH-PRIORITY FIX: Block distinct + cursor in SQLite
+  if (
+    dialect === 'sqlite' &&
+    isNonEmptyArray(normalizedArgs.distinct) &&
+    cursorResult.condition
+  ) {
+    throw new Error(
+      'Cursor pagination with distinct is not supported in SQLite due to window function limitations. ' +
+        'Use findMany with skip/take instead, or remove distinct.',
+    )
+  }
 
   return {
     select: selectFields,
@@ -292,7 +307,8 @@ function buildSelectSpec(input: {
     pagination: { take, skip },
     distinct: normalizedArgs.distinct,
     method,
-    cursorClause,
+    cursorCte: cursorResult.cte,
+    cursorClause: cursorResult.condition,
     params,
     dialect,
     model,

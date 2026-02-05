@@ -10,6 +10,7 @@ import {
   assertSafeTableRef,
   col,
   quote,
+  colWithAlias,
 } from './shared/sql-utils'
 import { createParamStore, ParamStore } from './shared/param-store'
 import { WhereClauseResult, SqlResult } from './shared/types'
@@ -31,22 +32,25 @@ import {
   prepareArrayParam,
 } from '../sql-builder-dialect'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
-import { normalizeSkipLike } from './pagination'
 import { addAutoScoped } from './shared/dynamic-params'
 import { buildNotComposite } from './where/operators-scalar'
+import { getFieldInfo } from './shared/model-field-cache'
+import {
+  assertScalarField,
+  assertNumericField,
+} from './shared/validators/field-assertions'
+import { buildComparisons, joinComparisons } from './shared/comparison-builder'
 
 type AggregateKey = '_count' | '_sum' | '_avg' | '_min' | '_max'
 type LogicalKey = 'AND' | 'OR' | 'NOT'
-type ScalarFieldInfo = { name: string; type: string; isRelation: boolean }
 
-const MODEL_FIELD_CACHE = new WeakMap<Model, Map<string, ScalarFieldInfo>>()
-const NUMERIC_TYPES = new Set(['Int', 'Float', 'Decimal', 'BigInt'])
 const AGGREGATES: ReadonlyArray<[AggregateKey, string]> = [
   ['_sum', 'SUM'],
   ['_avg', 'AVG'],
   ['_min', 'MIN'],
   ['_max', 'MAX'],
 ]
+
 const COMPARISON_OPS: Record<string, string> = {
   [Ops.EQUALS]: '=',
   [Ops.NOT]: '<>',
@@ -56,17 +60,16 @@ const COMPARISON_OPS: Record<string, string> = {
   [Ops.LTE]: '<=',
 }
 
-function getModelFieldMap(model: Model): Map<string, ScalarFieldInfo> {
-  const cached = MODEL_FIELD_CACHE.get(model)
-  if (cached) return cached
-
-  const m = new Map<string, ScalarFieldInfo>()
-  for (const f of model.fields) {
-    m.set(f.name, { name: f.name, type: f.type, isRelation: !!f.isRelation })
-  }
-  MODEL_FIELD_CACHE.set(model, m)
-  return m
-}
+const HAVING_ALLOWED_OPS = new Set<string>([
+  Ops.EQUALS,
+  Ops.NOT,
+  Ops.GT,
+  Ops.GTE,
+  Ops.LT,
+  Ops.LTE,
+  Ops.IN,
+  Ops.NOT_IN,
+])
 
 function isTruthySelection(v: unknown): boolean {
   return v === true
@@ -128,39 +131,10 @@ function normalizeLogicalValue(
   throw new Error(`${operator} must be an object or array of objects in HAVING`)
 }
 
-function assertScalarField(
-  model: Model,
-  fieldName: string,
-  ctx: string,
-): { name: string; type: string } {
-  const m = getModelFieldMap(model)
-  const field = m.get(fieldName)
-  if (!field) {
+function assertHavingOp(op: string): void {
+  if (!HAVING_ALLOWED_OPS.has(op)) {
     throw new Error(
-      `${ctx} references unknown field '${fieldName}' on model ${model.name}. ` +
-        `Available fields: ${model.fields.map((f) => f.name).join(', ')}`,
-    )
-  }
-  if (field.isRelation) {
-    throw new Error(`${ctx} does not support relation field '${fieldName}'`)
-  }
-  return { name: field.name, type: field.type }
-}
-
-function assertAggregateFieldType(
-  aggKey: AggregateKey,
-  fieldType: string,
-  fieldName: string,
-  modelName: string,
-): void {
-  const baseType = fieldType.replace(/\[\]|\?/g, '')
-
-  if (
-    (aggKey === '_sum' || aggKey === '_avg') &&
-    !NUMERIC_TYPES.has(baseType)
-  ) {
-    throw new Error(
-      `Cannot use ${aggKey} on non-numeric field '${fieldName}' (type: ${fieldType}) on model ${modelName}`,
+      `Unsupported HAVING operator '${op}'. Allowed: ${[...HAVING_ALLOWED_OPS].join(', ')}`,
     )
   }
 }
@@ -218,6 +192,8 @@ function buildSimpleComparison(
   params: ParamStore,
   dialect: SqlDialect,
 ): string {
+  assertHavingOp(op)
+
   if (val === null) return buildNullComparison(expr, op)
 
   if (op === Ops.NOT && isPlainObject(val)) {
@@ -356,23 +332,22 @@ function assertHavingAggTarget(
     return
   }
 
-  const f = assertScalarField(model, field, 'HAVING')
-  assertAggregateFieldType(aggKey, f.type, f.name, model.name)
+  // ✅ Use shared validators
+  if (aggKey === '_sum' || aggKey === '_avg') {
+    assertNumericField(model, field, 'HAVING')
+  } else {
+    assertScalarField(model, field, 'HAVING')
+  }
 }
 
+// ✅ DEDUPLICATION FIX: Use shared buildComparisons utility
 function buildHavingOpsForExpr(
   expr: string,
   filter: Record<string, unknown>,
   params: ParamStore,
   dialect: SqlDialect,
 ): string[] {
-  const out: string[] = []
-  for (const [op, val] of Object.entries(filter)) {
-    if (op === 'mode') continue
-    const built = buildSimpleComparison(expr, op, val, params, dialect)
-    if (built && built.trim().length > 0) out.push(built)
-  }
-  return out
+  return buildComparisons(expr, filter, params, dialect, buildSimpleComparison)
 }
 
 function buildHavingForAggregateFirstShape(
@@ -383,7 +358,9 @@ function buildHavingForAggregateFirstShape(
   dialect: SqlDialect,
   model: Model,
 ): string[] {
-  if (!isPlainObject(target)) return []
+  if (!isPlainObject(target)) {
+    throw new Error(`HAVING '${aggKey}' must be an object`)
+  }
 
   const out: string[] = []
 
@@ -406,8 +383,11 @@ function buildHavingForFieldFirstShape(
   dialect: SqlDialect,
   model: Model,
 ): string[] {
-  if (!isPlainObject(target)) return []
+  if (!isPlainObject(target)) {
+    throw new Error(`HAVING '${fieldName}' must be an object`)
+  }
 
+  // ✅ Use shared validator
   const field = assertScalarField(model, fieldName, 'HAVING')
   const out: string[] = []
   const obj = target as Record<string, unknown>
@@ -417,17 +397,25 @@ function buildHavingForFieldFirstShape(
     const aggFilter = obj[aggKey]
     if (!isPlainObject(aggFilter)) continue
 
-    assertAggregateFieldType(aggKey, field.type, field.name, model.name)
+    // ✅ Use shared validator for numeric check
+    if (aggKey === '_sum' || aggKey === '_avg') {
+      assertNumericField(model, fieldName, 'HAVING')
+    }
 
     const entries = Object.entries(aggFilter)
     if (entries.length === 0) continue
 
     const expr = aggExprForField(aggKey, fieldName, alias, model)
-    for (const [op, val] of entries) {
-      if (op === 'mode') continue
-      const built = buildSimpleComparison(expr, op, val, params, dialect)
-      if (built && built.trim().length > 0) out.push(built)
-    }
+
+    // ✅ Use shared buildComparisons utility
+    const clauses = buildComparisons(
+      expr,
+      aggFilter,
+      params,
+      dialect,
+      buildSimpleComparison,
+    )
+    out.push(...clauses)
   }
 
   return out
@@ -443,7 +431,9 @@ function buildHavingClause(
   if (!isNotNullish(having)) return ''
 
   const d = dialect ?? getGlobalDialect()
-  if (!isPlainObject(having)) return ''
+  if (!isPlainObject(having)) {
+    throw new Error('having must be an object')
+  }
 
   return buildHavingNode(having, alias, params, d, model)
 }
@@ -463,22 +453,9 @@ function pushCountAllField(fields: string[]): void {
   )
 }
 
-function assertCountableScalarField(
-  fieldMap: Map<string, ScalarFieldInfo>,
-  model: Model,
-  fieldName: string,
-): void {
-  const field = fieldMap.get(fieldName)
-  if (!field) {
-    throw new Error(
-      `Field '${fieldName}' does not exist on model ${model.name}`,
-    )
-  }
-  if (field.isRelation) {
-    throw new Error(
-      `Cannot use _count on relation field '${fieldName}' on model ${model.name}`,
-    )
-  }
+function assertCountableScalarField(model: Model, fieldName: string): void {
+  // ✅ Use shared validator
+  assertScalarField(model, fieldName, '_count')
 }
 
 function pushCountField(
@@ -498,7 +475,6 @@ function addCountFields(
   countArg: Record<string, unknown> | true | undefined,
   alias: string,
   model: Model,
-  fieldMap: Map<string, ScalarFieldInfo>,
 ): void {
   if (!isNotNullish(countArg)) return
 
@@ -518,7 +494,7 @@ function addCountFields(
   )
 
   for (const [f] of selected) {
-    assertCountableScalarField(fieldMap, model, f)
+    assertCountableScalarField(model, f)
     pushCountField(fields, alias, f, model)
   }
 }
@@ -532,23 +508,16 @@ function getAggregateSelectionObject(
 }
 
 function assertAggregatableScalarField(
-  fieldMap: Map<string, ScalarFieldInfo>,
   model: Model,
   agg: AggregateKey,
   fieldName: string,
-): ScalarFieldInfo {
-  const field = fieldMap.get(fieldName)
-  if (!field) {
-    throw new Error(
-      `Field '${fieldName}' does not exist on model ${model.name}`,
-    )
+): void {
+  // ✅ Use shared validator
+  if (agg === '_sum' || agg === '_avg') {
+    assertNumericField(model, fieldName, agg)
+  } else {
+    assertScalarField(model, fieldName, agg)
   }
-  if (field.isRelation) {
-    throw new Error(
-      `Cannot use ${agg} on relation field '${fieldName}' on model ${model.name}`,
-    )
-  }
-  return field
 }
 
 function pushAggregateFieldSql(
@@ -570,7 +539,6 @@ function addAggregateFields(
   args: PrismaQueryArgs,
   alias: string,
   model: Model,
-  fieldMap: Map<string, ScalarFieldInfo>,
 ): void {
   for (const [agg, aggFn] of AGGREGATES) {
     const obj = getAggregateSelectionObject(args, agg)
@@ -581,13 +549,7 @@ function addAggregateFields(
         throw new Error(`'${agg}' does not support '_all'`)
       if (!isTruthySelection(selection)) continue
 
-      const field = assertAggregatableScalarField(
-        fieldMap,
-        model,
-        agg,
-        fieldName,
-      )
-      assertAggregateFieldType(agg, field.type, fieldName, model.name)
+      assertAggregatableScalarField(model, agg, fieldName)
       pushAggregateFieldSql(fields, aggFn, alias, agg, fieldName, model)
     }
   }
@@ -599,11 +561,10 @@ function buildAggregateFields(
   model: Model,
 ): string[] {
   const fields: string[] = []
-  const fieldMap = getModelFieldMap(model)
 
   const countArg = normalizeCountArg(args._count)
-  addCountFields(fields, countArg, alias, model, fieldMap)
-  addAggregateFields(fields, args, alias, model, fieldMap)
+  addCountFields(fields, countArg, alias, model)
+  addAggregateFields(fields, args, alias, model)
 
   return fields
 }
@@ -661,20 +622,9 @@ function assertGroupByBy(args: PrismaQueryArgs, model: Model): string[] {
     throw new Error('buildGroupBySql: by must not contain duplicates')
   }
 
-  const modelFieldMap = getModelFieldMap(model)
-
   for (const f of byFields) {
-    const field = modelFieldMap.get(f)
-    if (!field) {
-      throw new Error(
-        `groupBy.by references unknown field '${f}' on model ${model.name}`,
-      )
-    }
-    if (field.isRelation) {
-      throw new Error(
-        `groupBy.by does not support relation field '${f}' on model ${model.name}`,
-      )
-    }
+    // ✅ Use shared validator
+    assertScalarField(model, f, 'groupBy.by')
   }
 
   return byFields
@@ -687,12 +637,13 @@ function buildGroupBySelectParts(
   byFields: string[],
 ): { groupCols: string[]; groupFields: string; selectFields: string } {
   const groupCols = byFields.map((f) => col(alias, f, model))
+  const selectCols = byFields.map((f) => colWithAlias(alias, f, model))
   const groupFields = groupCols.join(SQL_SEPARATORS.FIELD_LIST)
 
   const aggFields = buildAggregateFields(args, alias, model)
   const selectFields = isNonEmptyArray(aggFields)
-    ? groupCols.concat(aggFields).join(SQL_SEPARATORS.FIELD_LIST)
-    : groupCols.join(SQL_SEPARATORS.FIELD_LIST)
+    ? selectCols.concat(aggFields).join(SQL_SEPARATORS.FIELD_LIST)
+    : selectCols.join(SQL_SEPARATORS.FIELD_LIST)
 
   return { groupCols, groupFields, selectFields }
 }
@@ -705,7 +656,9 @@ function buildGroupByHaving(
   dialect: SqlDialect,
 ): string {
   if (!isNotNullish(args.having)) return ''
-  if (!isPlainObject(args.having)) return ''
+  if (!isPlainObject(args.having)) {
+    throw new Error('having must be an object')
+  }
 
   const h = buildHavingClause(args.having, alias, params, model, dialect)
   if (!h || h.trim().length === 0) return ''
@@ -778,22 +731,30 @@ export function buildCountSql(
   tableName: string,
   alias: string,
   skip?: number | string,
-  dialect?: SqlDialect,
+  _dialect?: SqlDialect,
 ): SqlResult {
   assertSafeAlias(alias)
   assertSafeTableRef(tableName)
 
-  const d = dialect ?? getGlobalDialect()
+  if (skip !== undefined && skip !== null) {
+    const skipValue = typeof skip === 'number' ? skip : undefined
+    if (skipValue !== undefined && skipValue > 0) {
+      throw new Error(
+        'count() with skip is not supported because it produces nondeterministic results. ' +
+          'Use findMany().length or add explicit orderBy to ensure deterministic behavior.',
+      )
+    }
+  }
 
   const whereClause = isValidWhereClause(whereResult.clause)
     ? `${SQL_TEMPLATES.WHERE} ${whereResult.clause}`
     : ''
 
-  const params = createParamStore(whereResult.nextParamIndex)
-
-  const baseSubSelect = [
+  const sql = [
     SQL_TEMPLATES.SELECT,
-    '1',
+    SQL_TEMPLATES.COUNT_ALL,
+    SQL_TEMPLATES.AS,
+    quote('_count._all'),
     SQL_TEMPLATES.FROM,
     tableName,
     alias,
@@ -803,57 +764,12 @@ export function buildCountSql(
     .join(' ')
     .trim()
 
-  const normalizedSkip = normalizeSkipLike(skip)
-  const subSelect = applyCountSkip(baseSubSelect, normalizedSkip, params, d)
-
-  const sql = [
-    SQL_TEMPLATES.SELECT,
-    SQL_TEMPLATES.COUNT_ALL,
-    SQL_TEMPLATES.AS,
-    quote('_count._all'),
-    SQL_TEMPLATES.FROM,
-    `(${subSelect})`,
-    SQL_TEMPLATES.AS,
-    `"sub"`,
-  ]
-    .filter((x) => x && String(x).trim().length > 0)
-    .join(' ')
-    .trim()
-
   validateSelectQuery(sql)
-
-  const snapshot = params.snapshot()
-  const mergedParams = [...whereResult.params, ...snapshot.params]
-
-  validateParamConsistency(sql, mergedParams)
+  validateParamConsistency(sql, whereResult.params)
 
   return Object.freeze({
     sql,
-    params: Object.freeze(mergedParams),
-    paramMappings: Object.freeze([
-      ...whereResult.paramMappings,
-      ...snapshot.mappings,
-    ]),
+    params: Object.freeze([...whereResult.params]),
+    paramMappings: Object.freeze([...whereResult.paramMappings]),
   })
-}
-
-function applyCountSkip(
-  subSelect: string,
-  normalizedSkip: unknown,
-  params: ParamStore,
-  dialect: SqlDialect,
-): string {
-  const shouldApply =
-    isDynamicParameter(normalizedSkip) ||
-    (typeof normalizedSkip === 'number' && normalizedSkip > 0)
-
-  if (!shouldApply) return subSelect
-
-  const placeholder = addAutoScoped(params, normalizedSkip, 'count.skip')
-
-  if (dialect === 'sqlite') {
-    return `${subSelect} ${SQL_TEMPLATES.LIMIT} -1 ${SQL_TEMPLATES.OFFSET} ${placeholder}`
-  }
-
-  return `${subSelect} ${SQL_TEMPLATES.OFFSET} ${placeholder}`
 }
