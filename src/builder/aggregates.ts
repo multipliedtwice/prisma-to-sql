@@ -113,15 +113,17 @@ function aggExprForField(
   model?: Model,
 ): string {
   if (aggKey === '_count') {
-    return field === '_all' ? `COUNT(*)` : `COUNT(${col(alias, field, model)})`
+    return field === '_all'
+      ? 'COUNT(*)'
+      : 'COUNT(' + col(alias, field, model) + ')'
   }
   if (field === '_all') {
     throw new Error(`'${aggKey}' does not support '_all'`)
   }
-  if (aggKey === '_sum') return `SUM(${col(alias, field, model)})`
-  if (aggKey === '_avg') return `AVG(${col(alias, field, model)})`
-  if (aggKey === '_min') return `MIN(${col(alias, field, model)})`
-  return `MAX(${col(alias, field, model)})`
+  if (aggKey === '_sum') return 'SUM(' + col(alias, field, model) + ')'
+  if (aggKey === '_avg') return 'AVG(' + col(alias, field, model) + ')'
+  if (aggKey === '_min') return 'MIN(' + col(alias, field, model) + ')'
+  return 'MAX(' + col(alias, field, model) + ')'
 }
 
 function buildComparisonOp(op: string): string {
@@ -161,8 +163,8 @@ function normalizeLogicalValue(
 }
 
 function buildNullComparison(expr: string, op: string): string {
-  if (op === Ops.EQUALS) return `${expr} ${SQL_TEMPLATES.IS_NULL}`
-  if (op === Ops.NOT) return `${expr} ${SQL_TEMPLATES.IS_NOT_NULL}`
+  if (op === Ops.EQUALS) return expr + ' ' + SQL_TEMPLATES.IS_NULL
+  if (op === Ops.NOT) return expr + ' ' + SQL_TEMPLATES.IS_NOT_NULL
   throw new Error(`Operator '${op}' doesn't support null in HAVING`)
 }
 
@@ -203,7 +205,7 @@ function buildBinaryComparison(
 ): string {
   const sqlOp = buildComparisonOp(op)
   const placeholder = addHavingParam(params, op, val)
-  return `${expr} ${sqlOp} ${placeholder}`
+  return expr + ' ' + sqlOp + ' ' + placeholder
 }
 
 function buildSimpleComparison(
@@ -236,13 +238,18 @@ function buildSimpleComparison(
 }
 
 function negateClauses(subClauses: string[]): string {
-  if (subClauses.length === 1) return `${SQL_TEMPLATES.NOT} ${subClauses[0]}`
-  return `${SQL_TEMPLATES.NOT} (${subClauses.join(SQL_SEPARATORS.CONDITION_AND)})`
+  if (subClauses.length === 1) return SQL_TEMPLATES.NOT + ' ' + subClauses[0]
+  return (
+    SQL_TEMPLATES.NOT +
+    ' (' +
+    subClauses.join(SQL_SEPARATORS.CONDITION_AND) +
+    ')'
+  )
 }
 
 function combineLogical(key: LogicalKey, subClauses: string[]): string {
   if (key === LogicalOps.NOT) return negateClauses(subClauses)
-  return subClauses.join(` ${key} `)
+  return subClauses.join(' ' + key + ' ')
 }
 
 function buildHavingNode(
@@ -256,10 +263,10 @@ function buildHavingNode(
 
   for (const key in node) {
     if (!Object.prototype.hasOwnProperty.call(node, key)) continue
-    const value = (node as Record<string, unknown>)[key]
+    const value = node[key]
     const built = buildHavingEntry(key, value, alias, params, dialect, model)
     for (const c of built) {
-      if (c && c.trim().length > 0) clauses.push(c)
+      if (c && c.length > 0) clauses.push(c)
     }
   }
 
@@ -279,7 +286,7 @@ function buildLogicalClause(
 
   for (const it of items) {
     const c = buildHavingNode(it, alias, params, dialect, model)
-    if (c && c.trim().length > 0) subClauses.push(`(${c})`)
+    if (c && c.length > 0) subClauses.push('(' + c + ')')
   }
 
   if (subClauses.length === 0) return ''
@@ -326,17 +333,20 @@ function buildHavingForAggregateFirstShape(
   }
 
   const out: string[] = []
-  for (const field in target as Record<string, unknown>) {
-    if (!Object.prototype.hasOwnProperty.call(target, field)) continue
+  const targetObj = target as Record<string, unknown>
+
+  for (const field in targetObj) {
+    if (!Object.prototype.hasOwnProperty.call(targetObj, field)) continue
 
     assertHavingAggTarget(aggKey, field, model)
 
-    const filter = (target as Record<string, unknown>)[field]
+    const filter = targetObj[field]
     if (!isPlainObject(filter)) continue
 
+    const filterObj = filter as Record<string, unknown>
     let hasAny = false
-    for (const k in filter as Record<string, unknown>) {
-      if (Object.prototype.hasOwnProperty.call(filter, k)) {
+    for (const k in filterObj) {
+      if (Object.prototype.hasOwnProperty.call(filterObj, k)) {
         hasAny = true
         break
       }
@@ -344,14 +354,7 @@ function buildHavingForAggregateFirstShape(
     if (!hasAny) continue
 
     const expr = aggExprForField(aggKey, field, alias, model)
-    out.push(
-      ...buildHavingOpsForExpr(
-        expr,
-        filter as Record<string, unknown>,
-        params,
-        dialect,
-      ),
-    )
+    out.push(...buildHavingOpsForExpr(expr, filterObj, params, dialect))
   }
 
   return out
@@ -378,9 +381,10 @@ function buildHavingForFieldFirstShape(
     const aggFilter = obj[aggKey]
     if (!isPlainObject(aggFilter)) continue
 
+    const aggFilterObj = aggFilter as Record<string, unknown>
     let hasAny = false
-    for (const k in aggFilter as Record<string, unknown>) {
-      if (Object.prototype.hasOwnProperty.call(aggFilter, k)) {
+    for (const k in aggFilterObj) {
+      if (Object.prototype.hasOwnProperty.call(aggFilterObj, k)) {
         hasAny = true
         break
       }
@@ -392,7 +396,7 @@ function buildHavingForFieldFirstShape(
     }
 
     const expr = aggExprForField(aggKey, fieldName, alias, model)
-    out.push(...buildHavingOpsForExpr(expr, aggFilter, params, dialect))
+    out.push(...buildHavingOpsForExpr(expr, aggFilterObj, params, dialect))
   }
 
   return out
@@ -465,7 +469,11 @@ function normalizeCountArg(
 
 function pushCountAllField(fields: string[]): void {
   fields.push(
-    `${SQL_TEMPLATES.COUNT_ALL} ${SQL_TEMPLATES.AS} ${quote('_count._all')}`,
+    SQL_TEMPLATES.COUNT_ALL +
+      ' ' +
+      SQL_TEMPLATES.AS +
+      ' ' +
+      quote('_count._all'),
   )
 }
 
@@ -475,9 +483,14 @@ function pushCountField(
   fieldName: string,
   model?: Model,
 ): void {
-  const outAlias = `_count.${fieldName}`
+  const outAlias = '_count.' + fieldName
   fields.push(
-    `COUNT(${col(alias, fieldName, model)}) ${SQL_TEMPLATES.AS} ${quote(outAlias)}`,
+    'COUNT(' +
+      col(alias, fieldName, model) +
+      ') ' +
+      SQL_TEMPLATES.AS +
+      ' ' +
+      quote(outAlias),
   )
 }
 
@@ -500,12 +513,14 @@ function addCountFields(
     pushCountAllField(fields)
   }
 
-  const selected = Object.entries(countArg).filter(
-    ([f, v]) => f !== '_all' && isTruthySelection(v),
-  )
-  for (const [f] of selected) {
-    assertScalarField(model, f, '_count')
-    pushCountField(fields, alias, f, model)
+  for (const f in countArg) {
+    if (!Object.prototype.hasOwnProperty.call(countArg, f)) continue
+    if (f === '_all') continue
+    const v = countArg[f]
+    if (isTruthySelection(v)) {
+      assertScalarField(model, f, '_count')
+      pushCountField(fields, alias, f, model)
+    }
   }
 }
 
@@ -537,9 +552,15 @@ function pushAggregateFieldSql(
   fieldName: string,
   model?: Model,
 ): void {
-  const outAlias = `${agg}.${fieldName}`
+  const outAlias = agg + '.' + fieldName
   fields.push(
-    `${aggFn}(${col(alias, fieldName, model)}) ${SQL_TEMPLATES.AS} ${quote(outAlias)}`,
+    aggFn +
+      '(' +
+      col(alias, fieldName, model) +
+      ') ' +
+      SQL_TEMPLATES.AS +
+      ' ' +
+      quote(outAlias),
   )
 }
 
@@ -553,7 +574,10 @@ function addAggregateFields(
     const obj = getAggregateSelectionObject(args, agg)
     if (!obj) continue
 
-    for (const [fieldName, selection] of Object.entries(obj)) {
+    for (const fieldName in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, fieldName)) continue
+
+      const selection = obj[fieldName]
       if (fieldName === '_all')
         throw new Error(`'${agg}' does not support '_all'`)
       if (!isTruthySelection(selection)) continue
@@ -595,29 +619,28 @@ export function buildAggregateSql(
 
   const selectClause = aggFields.join(SQL_SEPARATORS.FIELD_LIST)
   const whereClause = isValidWhereClause(whereResult.clause)
-    ? `${SQL_TEMPLATES.WHERE} ${whereResult.clause}`
+    ? SQL_TEMPLATES.WHERE + ' ' + whereResult.clause
     : ''
 
-  const sql = [
+  const parts: string[] = [
     SQL_TEMPLATES.SELECT,
     selectClause,
     SQL_TEMPLATES.FROM,
     tableName,
     alias,
-    whereClause,
   ]
-    .filter((x) => x && String(x).trim().length > 0)
-    .join(' ')
-    .trim()
+  if (whereClause) parts.push(whereClause)
+
+  const sql = parts.join(' ').trim()
 
   validateSelectQuery(sql)
   validateParamConsistency(sql, whereResult.params)
 
-  return Object.freeze({
+  return {
     sql,
-    params: Object.freeze([...whereResult.params]),
-    paramMappings: Object.freeze([...whereResult.paramMappings]),
-  })
+    params: whereResult.params,
+    paramMappings: whereResult.paramMappings,
+  }
 }
 
 function assertGroupByBy(args: PrismaQueryArgs, model: Model): string[] {
@@ -667,8 +690,8 @@ function buildGroupByHaving(
   if (!isPlainObject(args.having)) throw new Error('having must be an object')
 
   const h = buildHavingClause(args.having, alias, params, model, dialect)
-  if (!h || h.trim().length === 0) return ''
-  return `${SQL_TEMPLATES.HAVING} ${h}`
+  if (!h || h.length === 0) return ''
+  return SQL_TEMPLATES.HAVING + ' ' + h
 }
 
 export function buildGroupBySql(
@@ -696,37 +719,35 @@ export function buildGroupBySql(
   const havingClause = buildGroupByHaving(args, alias, params, model, d)
 
   const whereClause = isValidWhereClause(whereResult.clause)
-    ? `${SQL_TEMPLATES.WHERE} ${whereResult.clause}`
+    ? SQL_TEMPLATES.WHERE + ' ' + whereResult.clause
     : ''
 
-  const sql = [
+  const parts: string[] = [
     SQL_TEMPLATES.SELECT,
     selectFields,
     SQL_TEMPLATES.FROM,
     tableName,
     alias,
-    whereClause,
-    SQL_TEMPLATES.GROUP_BY,
-    groupFields,
-    havingClause,
   ]
-    .filter((x) => x && String(x).trim().length > 0)
-    .join(' ')
-    .trim()
+  if (whereClause) parts.push(whereClause)
+  parts.push(SQL_TEMPLATES.GROUP_BY, groupFields)
+  if (havingClause) parts.push(havingClause)
+
+  const sql = parts.join(' ').trim()
 
   const snapshot = params.snapshot()
 
-  validateSelectQuery(sql)
-  validateParamConsistency(sql, [...whereResult.params, ...snapshot.params])
+  const allParams = [...whereResult.params, ...snapshot.params]
+  const allMappings = [...whereResult.paramMappings, ...snapshot.mappings]
 
-  return Object.freeze({
+  validateSelectQuery(sql)
+  validateParamConsistency(sql, allParams)
+
+  return {
     sql,
-    params: Object.freeze([...whereResult.params, ...snapshot.params]),
-    paramMappings: Object.freeze([
-      ...whereResult.paramMappings,
-      ...snapshot.mappings,
-    ]),
-  })
+    params: allParams,
+    paramMappings: allMappings,
+  }
 }
 
 export function buildCountSql(
@@ -775,10 +796,10 @@ export function buildCountSql(
   }
 
   const whereClause = isValidWhereClause(whereResult.clause)
-    ? `${SQL_TEMPLATES.WHERE} ${whereResult.clause}`
+    ? SQL_TEMPLATES.WHERE + ' ' + whereResult.clause
     : ''
 
-  const sql = [
+  const parts: string[] = [
     SQL_TEMPLATES.SELECT,
     SQL_TEMPLATES.COUNT_ALL,
     SQL_TEMPLATES.AS,
@@ -786,18 +807,17 @@ export function buildCountSql(
     SQL_TEMPLATES.FROM,
     tableName,
     alias,
-    whereClause,
   ]
-    .filter((x) => x && String(x).trim().length > 0)
-    .join(' ')
-    .trim()
+  if (whereClause) parts.push(whereClause)
+
+  const sql = parts.join(' ').trim()
 
   validateSelectQuery(sql)
   validateParamConsistency(sql, whereResult.params)
 
-  return Object.freeze({
+  return {
     sql,
-    params: Object.freeze([...whereResult.params]),
-    paramMappings: Object.freeze([...whereResult.paramMappings]),
-  })
+    params: whereResult.params,
+    paramMappings: whereResult.paramMappings,
+  }
 }

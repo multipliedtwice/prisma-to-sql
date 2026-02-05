@@ -25,7 +25,15 @@ interface SqlResult {
   params: unknown[]
 }
 
+interface CacheStats {
+  hits: number
+  misses: number
+  size: number
+}
+
 const queryCache = createBoundedCache<string, string>(1000)
+
+export const queryCacheStats: CacheStats = { hits: 0, misses: 0, size: 0 }
 
 function makeAlias(name: string): string {
   const base = name
@@ -68,6 +76,7 @@ function canonicalizeQuery(
   modelName: string,
   method: PrismaMethod,
   args: Record<string, unknown>,
+  dialect: SqlDialect,
 ): string {
   function normalize(obj: any): any {
     if (obj === null || obj === undefined) return obj
@@ -93,7 +102,7 @@ function canonicalizeQuery(
   }
 
   const canonical = normalize(args)
-  return `${modelName}:${method}:${JSON.stringify(canonical)}`
+  return `${dialect}:${modelName}:${method}:${JSON.stringify(canonical)}`
 }
 
 function buildSQLFull(
@@ -178,16 +187,19 @@ export function buildSQLWithCache(
   args: Record<string, unknown>,
   dialect: SqlDialect,
 ): SqlResult {
-  const cacheKey = canonicalizeQuery(model.name, method, args)
+  const cacheKey = canonicalizeQuery(model.name, method, args, dialect)
   const cachedSql = queryCache.get(cacheKey)
 
   if (cachedSql) {
+    queryCacheStats.hits++
     const result = buildSQLFull(model, models, method, args, dialect)
     return { sql: cachedSql, params: result.params }
   }
 
+  queryCacheStats.misses++
   const result = buildSQLFull(model, models, method, args, dialect)
   queryCache.set(cacheKey, result.sql)
+  queryCacheStats.size = queryCache.size
 
   return result
 }

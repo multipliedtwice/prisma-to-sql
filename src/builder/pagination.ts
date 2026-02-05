@@ -33,13 +33,8 @@ type OrderByEntry = {
 
 type IntOrDynamic = number | string
 type MaybeIntOrDynamic = IntOrDynamic | undefined
-
-type SkipTakeReadResult = {
-  hasSkip: boolean
-  hasTake: boolean
-  skipVal: MaybeIntOrDynamic
-  takeVal: MaybeIntOrDynamic
-}
+type OrderByInput = unknown
+type IncludeSelectArgs = Pick<PrismaQueryArgs, 'include' | 'select'>
 
 const MAX_LIMIT_OFFSET = 2147483647
 const ORDER_BY_ALLOWED_KEYS = new Set(['sort', 'nulls'])
@@ -136,7 +131,12 @@ function hasNonNullishProp(
   return isPlainObject(v) && key in v && isNotNullish((v as any)[key])
 }
 
-export function readSkipTake(relArgs: unknown): SkipTakeReadResult {
+export function readSkipTake(relArgs: unknown): {
+  hasSkip: boolean
+  hasTake: boolean
+  skipVal: MaybeIntOrDynamic
+  takeVal: MaybeIntOrDynamic
+} {
   const hasSkip = hasNonNullishProp(relArgs, 'skip')
   const hasTake = hasNonNullishProp(relArgs, 'take')
 
@@ -178,19 +178,19 @@ function buildOrderByFragment(
       const nulls = isNotNullish(e.nulls)
         ? ` NULLS ${e.nulls.toUpperCase()}`
         : ''
-      out.push(`${c} ${dir}${nulls}`)
+      out.push(c + ' ' + dir + nulls)
       continue
     }
 
     if (isNotNullish(e.nulls)) {
       const isNullExpr = `(${c} IS NULL)`
       const nullRankDir = e.nulls === 'first' ? 'DESC' : 'ASC'
-      out.push(`${isNullExpr} ${nullRankDir}`)
-      out.push(`${c} ${dir}`)
+      out.push(isNullExpr + ' ' + nullRankDir)
+      out.push(c + ' ' + dir)
       continue
     }
 
-    out.push(`${c} ${dir}`)
+    out.push(c + ' ' + dir)
   }
 
   return out.join(SQL_SEPARATORS.ORDER_BY)
@@ -233,99 +233,49 @@ function buildCursorFilterParts(
   cursorAlias: string,
   params: ParamStore,
   model?: Model,
-): { whereSql: string; placeholdersByField: Map<string, string> } {
-  const entries = Object.entries(cursor)
-  if (entries.length === 0)
-    throw new Error('cursor must have at least one field')
-
-  const placeholdersByField = new Map<string, string>()
+): { whereSql: string } {
   const parts: string[] = []
 
-  for (const [field, value] of entries) {
-    const c = `${cursorAlias}.${quoteColumn(model, field)}`
+  for (const field in cursor) {
+    if (!Object.prototype.hasOwnProperty.call(cursor, field)) continue
+
+    const value = cursor[field]
+    const c = cursorAlias + '.' + quoteColumn(model, field)
+
     if (value === null) {
-      parts.push(`${c} IS NULL`)
+      parts.push(c + ' IS NULL')
       continue
     }
+
     const ph = addAutoScoped(params, value, `cursor.filter.${field}`)
-    placeholdersByField.set(field, ph)
-    parts.push(`${c} = ${ph}`)
+    parts.push(c + ' = ' + ph)
   }
 
   return {
-    whereSql: parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`,
-    placeholdersByField,
+    whereSql: parts.length === 1 ? parts[0] : '(' + parts.join(' AND ') + ')',
   }
 }
 
 function buildCursorEqualityExpr(
   columnExpr: string,
-  valueExpr: string,
+  cursorField: string,
 ): string {
-  return `((${valueExpr} IS NULL AND ${columnExpr} IS NULL) OR (${valueExpr} IS NOT NULL AND ${columnExpr} = ${valueExpr}))`
+  return `((${cursorField} IS NULL AND ${columnExpr} IS NULL) OR (${cursorField} IS NOT NULL AND ${columnExpr} = ${cursorField}))`
 }
 
 function buildCursorInequalityExpr(
   columnExpr: string,
   direction: OrderByDirection,
   nulls: NullsPosition,
-  valueExpr: string,
+  cursorField: string,
 ): string {
   const op = direction === 'asc' ? '>' : '<'
 
   if (nulls === 'first') {
-    return `(CASE WHEN ${valueExpr} IS NULL THEN (${columnExpr} IS NOT NULL) ELSE (${columnExpr} ${op} ${valueExpr}) END)`
+    return `(CASE WHEN ${cursorField} IS NULL THEN (${columnExpr} IS NOT NULL) ELSE (${columnExpr} ${op} ${cursorField}) END)`
   }
 
-  return `(CASE WHEN ${valueExpr} IS NULL THEN 0=1 ELSE ((${columnExpr} ${op} ${valueExpr}) OR (${columnExpr} IS NULL)) END)`
-}
-
-function buildOuterCursorMatch(
-  cursor: Record<string, unknown>,
-  outerAlias: string,
-  placeholdersByField: Map<string, string>,
-  params: ParamStore,
-  model?: Model,
-): string {
-  const parts: string[] = []
-
-  for (const [field, value] of Object.entries(cursor)) {
-    const c = col(outerAlias, field, model)
-    if (value === null) {
-      parts.push(`${c} IS NULL`)
-      continue
-    }
-
-    const existing = placeholdersByField.get(field)
-    if (typeof existing === 'string' && existing.length > 0) {
-      parts.push(`${c} = ${existing}`)
-      continue
-    }
-
-    const ph = addAutoScoped(params, value, `cursor.outerMatch.${field}`)
-    parts.push(`${c} = ${ph}`)
-  }
-
-  return parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`
-}
-
-function buildOrderEntries(orderBy: unknown): OrderByEntry[] {
-  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue) as Array<
-    Record<string, string | OrderByValueObject>
-  >
-  const entries: OrderByEntry[] = []
-
-  for (const item of normalized) {
-    for (const [field, value] of Object.entries(item)) {
-      if (typeof value === 'string') {
-        entries.push({ field, direction: value as OrderByDirection })
-      } else {
-        entries.push({ field, direction: value.direction, nulls: value.nulls })
-      }
-    }
-  }
-
-  return entries
+  return `(CASE WHEN ${cursorField} IS NULL THEN 0=1 ELSE ((${columnExpr} ${op} ${cursorField}) OR (${columnExpr} IS NULL)) END)`
 }
 
 function buildCursorCteSelectList(
@@ -387,8 +337,13 @@ function assertCursorAndOrderFieldsScalar(
   orderEntries: OrderByEntry[],
 ): void {
   if (!model) return
-  for (const k of Object.keys(cursor)) assertScalarField(model, k, 'cursor')
-  for (const e of orderEntries) assertScalarField(model, e.field, 'orderBy')
+  for (const k in cursor) {
+    if (!Object.prototype.hasOwnProperty.call(cursor, k)) continue
+    assertScalarField(model, k, 'cursor')
+  }
+  for (const e of orderEntries) {
+    assertScalarField(model, e.field, 'orderBy')
+  }
 }
 
 export function buildCursorCondition(
@@ -405,7 +360,13 @@ export function buildCursorCondition(
 
   const d = dialect ?? getGlobalDialect()
 
-  const cursorEntries = Object.entries(cursor)
+  const cursorEntries: Array<[string, unknown]> = []
+  for (const k in cursor) {
+    if (Object.prototype.hasOwnProperty.call(cursor, k)) {
+      cursorEntries.push([k, cursor[k]])
+    }
+  }
+
   if (cursorEntries.length === 0)
     throw new Error('cursor must have at least one field')
 
@@ -421,20 +382,31 @@ export function buildCursorCondition(
 
   let orderEntries = buildOrderEntries(deterministicOrderBy)
   if (orderEntries.length === 0) {
-    orderEntries = cursorEntries.map(([field]) => ({ field, direction: 'asc' }))
+    orderEntries = cursorEntries.map(([field]) => ({
+      field,
+      direction: 'asc' as const,
+    }))
   } else {
     orderEntries = ensureCursorFieldsInOrder(orderEntries, cursorEntries)
   }
 
   assertCursorAndOrderFieldsScalar(model, cursor, orderEntries)
 
-  const { whereSql: cursorWhereSql, placeholdersByField } =
-    buildCursorFilterParts(cursor, srcAlias, params, model)
+  const { whereSql: cursorWhereSql } = buildCursorFilterParts(
+    cursor,
+    srcAlias,
+    params,
+    model,
+  )
 
   const cursorOrderBy = orderEntries
     .map(
       (e) =>
-        `${srcAlias}.${quoteColumn(model, e.field)} ${e.direction.toUpperCase()}`,
+        srcAlias +
+        '.' +
+        quoteColumn(model, e.field) +
+        ' ' +
+        e.direction.toUpperCase(),
     )
     .join(', ')
 
@@ -444,25 +416,21 @@ export function buildCursorCondition(
     model,
   )
 
-  const cte = `${cteName} AS (
-    SELECT ${selectList} FROM ${tableName} ${srcAlias}
-    WHERE ${cursorWhereSql}
-    ORDER BY ${cursorOrderBy}
-    LIMIT 1
-  )`
+  const cte =
+    cteName +
+    ' AS (\n    SELECT ' +
+    selectList +
+    ' FROM ' +
+    tableName +
+    ' ' +
+    srcAlias +
+    '\n    WHERE ' +
+    cursorWhereSql +
+    '\n    ORDER BY ' +
+    cursorOrderBy +
+    '\n    LIMIT 1\n  )'
 
-  const existsExpr = `EXISTS (SELECT 1 FROM ${cteName})`
-
-  const outerCursorMatch = buildOuterCursorMatch(
-    cursor,
-    alias,
-    placeholdersByField,
-    params,
-    model,
-  )
-
-  const getValueExpr = (field: string): string =>
-    `(SELECT ${quoteColumn(model, field)} FROM ${cteName})`
+  const existsExpr = 'EXISTS (SELECT 1 FROM ' + cteName + ')'
 
   const orClauses: string[] = []
 
@@ -472,21 +440,47 @@ export function buildCursorCondition(
     for (let i = 0; i < level; i++) {
       const e = orderEntries[i]
       const c = col(alias, e.field, model)
-      const v = getValueExpr(e.field)
-      andParts.push(buildCursorEqualityExpr(c, v))
+      const cursorField = cteName + '.' + quoteColumn(model, e.field)
+      andParts.push(buildCursorEqualityExpr(c, cursorField))
     }
 
     const e = orderEntries[level]
     const c = col(alias, e.field, model)
-    const v = getValueExpr(e.field)
+    const cursorField = cteName + '.' + quoteColumn(model, e.field)
     const nulls = e.nulls ?? defaultNullsFor(d, e.direction)
-    andParts.push(buildCursorInequalityExpr(c, e.direction, nulls, v))
+    andParts.push(buildCursorInequalityExpr(c, e.direction, nulls, cursorField))
 
-    orClauses.push(`(${andParts.join(SQL_SEPARATORS.CONDITION_AND)})`)
+    orClauses.push('(' + andParts.join(SQL_SEPARATORS.CONDITION_AND) + ')')
   }
 
   const exclusive = orClauses.join(SQL_SEPARATORS.CONDITION_OR)
-  const condition = `(${existsExpr} ${SQL_SEPARATORS.CONDITION_AND} ((${exclusive})${SQL_SEPARATORS.CONDITION_OR}(${outerCursorMatch})))`
+
+  const outerMatchParts: string[] = []
+  for (const [field, value] of cursorEntries) {
+    const c = col(alias, field, model)
+    if (value === null) {
+      outerMatchParts.push(c + ' IS NULL')
+      continue
+    }
+    const ph = addAutoScoped(params, value, `cursor.outerMatch.${field}`)
+    outerMatchParts.push(c + ' = ' + ph)
+  }
+  const outerCursorMatch =
+    outerMatchParts.length === 1
+      ? outerMatchParts[0]
+      : '(' + outerMatchParts.join(SQL_SEPARATORS.CONDITION_AND) + ')'
+
+  const condition =
+    '(' +
+    existsExpr +
+    SQL_SEPARATORS.CONDITION_AND +
+    '((' +
+    exclusive +
+    ')' +
+    SQL_SEPARATORS.CONDITION_OR +
+    '(' +
+    outerCursorMatch +
+    ')))'
 
   return { cte, condition }
 }
@@ -567,4 +561,26 @@ export function getPaginationParams(
   }
 
   return {}
+}
+
+function buildOrderEntries(orderBy: unknown): OrderByEntry[] {
+  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue) as Array<
+    Record<string, string | OrderByValueObject>
+  >
+  const entries: OrderByEntry[] = []
+
+  for (const item of normalized) {
+    for (const field in item) {
+      if (!Object.prototype.hasOwnProperty.call(item, field)) continue
+
+      const value = item[field]
+      if (typeof value === 'string') {
+        entries.push({ field, direction: value as OrderByDirection })
+      } else {
+        entries.push({ field, direction: value.direction, nulls: value.nulls })
+      }
+    }
+  }
+
+  return entries
 }
