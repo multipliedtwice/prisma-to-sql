@@ -5,8 +5,6 @@ import type { Model } from '../../types'
 import { getColumnMap } from './model-field-cache'
 import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
-const NUL = String.fromCharCode(0)
-
 function containsControlChars(s: string): boolean {
   return /[\u0000-\u001F\u007F]/.test(s)
 }

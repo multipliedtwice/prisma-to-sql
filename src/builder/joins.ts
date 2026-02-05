@@ -2,7 +2,12 @@ import { Model, Field } from '../types'
 import { SPECIAL_FIELDS } from './shared/constants'
 import { createError } from './shared/errors'
 import { getRelationFieldSet } from './shared/model-field-cache'
-import { quoteColumn, normalizeKeyList } from './shared/sql-utils'
+import {
+  assertSafeAlias,
+  normalizeKeyList,
+  quoteColumn,
+} from './shared/sql-utils'
+
 import { isNotNullish } from './shared/validators/type-guards'
 
 export function isRelationField(fieldName: string, model: Model): boolean {
@@ -56,6 +61,9 @@ export function joinCondition(
   parentAlias: string,
   childAlias: string,
 ): string {
+  assertSafeAlias(parentAlias)
+  assertSafeAlias(childAlias)
+
   const fkFields = normalizeKeyList((field as any).foreignKey)
 
   if (fkFields.length === 0) {

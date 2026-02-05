@@ -2,7 +2,6 @@ import { PrismaQueryArgs, Model } from '../types'
 import { SQL_SEPARATORS, SQL_TEMPLATES } from './shared/constants'
 import {
   col,
-  quote,
   quoteColumn,
   assertSafeAlias,
   assertSafeTableRef,
@@ -18,6 +17,7 @@ import { normalizeIntLike } from './shared/int-like'
 import { addAutoScoped } from './shared/dynamic-params'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
 import { normalizeOrderByInput } from './shared/order-by-utils'
+import { ensureDeterministicOrderByInput } from './shared/order-by-determinism'
 
 type OrderByDirection = 'asc' | 'desc'
 type NullsPosition = 'first' | 'last'
@@ -363,34 +363,29 @@ function buildCursorCteSelectList(
   return cols.join(SQL_SEPARATORS.FIELD_LIST)
 }
 
-function modelHasScalarId(model?: Model): boolean {
-  if (!model) return false
-  const idField = model.fields.find((f) => f.name === 'id' && !f.isRelation)
-  return !!idField
+function truncateIdent(name: string, maxLen: number): string {
+  const s = String(name)
+  if (s.length <= maxLen) return s
+  return s.slice(0, maxLen)
 }
 
-function hasIdTiebreaker(orderBy: unknown): boolean {
-  if (!isNotNullish(orderBy)) return false
-  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue)
-  return normalized.some((obj) =>
-    Object.prototype.hasOwnProperty.call(obj, 'id'),
-  )
-}
+function buildCursorNames(outerAlias: string): {
+  cteName: string
+  srcAlias: string
+} {
+  const maxLen = 63
+  const base = outerAlias.toLowerCase()
+  const cteName = truncateIdent(`__tp_cursor_${base}`, maxLen)
+  const srcAlias = truncateIdent(`__tp_cursor_src_${base}`, maxLen)
 
-function addIdTiebreaker(orderBy: unknown): unknown {
-  if (Array.isArray(orderBy)) return [...orderBy, { id: 'asc' }]
-  return [orderBy, { id: 'asc' }]
-}
-
-function ensureDeterministicOrderBy(orderBy: unknown, model?: Model): unknown {
-  if (!modelHasScalarId(model)) return orderBy
-
-  if (!isNotNullish(orderBy)) {
-    return { id: 'asc' }
+  if (cteName === outerAlias || srcAlias === outerAlias) {
+    return {
+      cteName: truncateIdent(`__tp_cursor_${base}_x`, maxLen),
+      srcAlias: truncateIdent(`__tp_cursor_src_${base}_x`, maxLen),
+    }
   }
 
-  if (hasIdTiebreaker(orderBy)) return orderBy
-  return addIdTiebreaker(orderBy)
+  return { cteName, srcAlias }
 }
 
 export function buildCursorCondition(
@@ -412,11 +407,19 @@ export function buildCursorCondition(
     throw new Error('cursor must have at least one field')
   }
 
-  const cursorAlias = '__tp_cursor_src'
-  const { whereSql: cursorWhereSql, placeholdersByField } =
-    buildCursorFilterParts(cursor, cursorAlias, params, model)
+  const { cteName, srcAlias } = buildCursorNames(alias)
+  assertSafeAlias(cteName)
+  assertSafeAlias(srcAlias)
 
-  const deterministicOrderBy = ensureDeterministicOrderBy(orderBy, model)
+  const { whereSql: cursorWhereSql, placeholdersByField } =
+    buildCursorFilterParts(cursor, srcAlias, params, model)
+
+  const deterministicOrderBy = ensureDeterministicOrderByInput({
+    orderBy,
+    model,
+    parseValue: parseOrderByValue,
+  })
+
   let orderEntries = buildOrderEntries(deterministicOrderBy)
 
   if (orderEntries.length === 0) {
@@ -431,7 +434,7 @@ export function buildCursorCondition(
   const cursorOrderBy = orderEntries
     .map(
       (e) =>
-        `${cursorAlias}.${quoteColumn(model, e.field)} ${e.direction.toUpperCase()}`,
+        `${srcAlias}.${quoteColumn(model, e.field)} ${e.direction.toUpperCase()}`,
     )
     .join(', ')
 
@@ -441,14 +444,14 @@ export function buildCursorCondition(
     model,
   )
 
-  const cte = `__tp_cursor AS (
-    SELECT ${selectList} FROM ${tableName} ${cursorAlias}
+  const cte = `${cteName} AS (
+    SELECT ${selectList} FROM ${tableName} ${srcAlias}
     WHERE ${cursorWhereSql}
     ORDER BY ${cursorOrderBy}
     LIMIT 1
   )`
 
-  const existsExpr = `EXISTS (SELECT 1 FROM __tp_cursor)`
+  const existsExpr = `EXISTS (SELECT 1 FROM ${cteName})`
 
   const outerCursorMatch = buildOuterCursorMatch(
     cursor,
@@ -459,7 +462,7 @@ export function buildCursorCondition(
   )
 
   const getValueExpr = (field: string): string => {
-    return `(SELECT ${quoteColumn(model, field)} FROM __tp_cursor)`
+    return `(SELECT ${quoteColumn(model, field)} FROM ${cteName})`
   }
 
   const orClauses: string[] = []

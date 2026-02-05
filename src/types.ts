@@ -1,4 +1,3 @@
-// src/types.ts
 import { OrderByType } from './builder/shared/order-by-utils'
 
 export interface Field {

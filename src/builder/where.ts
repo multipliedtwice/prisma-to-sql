@@ -26,7 +26,6 @@ export function buildWhereClause(
   where: Record<string, unknown>,
   options: BuildWhereOptions,
 ): WhereClauseResult {
-  // ✅ CRITICAL FIX: Validate alias parameter
   assertSafeAlias(options.alias)
 
   const dialect = options.dialect || getGlobalDialect()

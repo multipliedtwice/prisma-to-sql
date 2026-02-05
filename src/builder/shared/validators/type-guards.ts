@@ -1,14 +1,7 @@
-// packages/generator/src/optimizer/builder/shared/validators/type-guards.ts
-
 /**
  * Type Guards and Checks
  * Pure type checking with no business logic
  */
-
-// ═══════════════════════════════════════════════════════════════
-// Basic Type Guards
-// ═══════════════════════════════════════════════════════════════
-
 export function isNotNullish<T>(
   value: T | null | undefined,
 ): value is NonNullable<T> {
@@ -45,10 +38,6 @@ export function hasProperty<K extends string>(
   return isPlainObject(obj) && key in obj
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Prisma Type Checks
-// ═══════════════════════════════════════════════════════════════
-
 export function isArrayType(t: string | undefined): boolean {
   if (!isNotNullish(t)) return false
   const normalized = t.replace(/\?$/, '')
@@ -58,10 +47,6 @@ export function isArrayType(t: string | undefined): boolean {
 export function isJsonType(t: string | undefined): boolean {
   return isNotNullish(t) && (t === 'Json' || t === 'Json?')
 }
-
-// ═══════════════════════════════════════════════════════════════
-// Content Validation
-// ═══════════════════════════════════════════════════════════════
 
 export function hasValidContent(sql: string): boolean {
   return isNotNullish(sql) && sql.trim().length > 0

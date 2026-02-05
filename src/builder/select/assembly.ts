@@ -16,7 +16,6 @@ import { addAutoScoped } from '../shared/dynamic-params'
 import { jsonBuildObject } from '../../sql-builder-dialect'
 import { buildRelationCountSql } from './includes'
 
-// ✅ MEDIUM-PRIORITY FIX: Remove per-alias cache, use single compiled pattern
 const ALIAS_CAPTURE = '([A-Za-z_][A-Za-z0-9_]*)'
 const COLUMN_PART = '(?:"([^"]+)"|([a-z_][a-z0-9_]*))'
 const AS_PART = `(?:\\s+AS\\s+${COLUMN_PART})?`
@@ -85,9 +84,8 @@ function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
       )
     }
 
-    // ✅ Validate alias matches expected
     const actualAlias = m[1]
-    if (actualAlias !== fromAlias) {
+    if (actualAlias.toLowerCase() !== fromAlias.toLowerCase()) {
       throw new Error(
         `Expected alias '${fromAlias}', got '${actualAlias}' in: ${p}`,
       )
@@ -112,9 +110,12 @@ function replaceOrderByAlias(
   fromAlias: string,
   outerAlias: string,
 ): string {
-  const needle = `${fromAlias}.`
-  const replacement = `${outerAlias}.`
-  return orderBy.split(needle).join(replacement)
+  const src = String(fromAlias)
+  if (src.length === 0) return orderBy
+
+  const escaped = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`\\b${escaped}\\.`, 'gi')
+  return orderBy.replace(re, `${outerAlias}.`)
 }
 
 function buildDistinctColumns(
@@ -150,14 +151,19 @@ function buildWindowOrder(args: {
   model?: any
 }): string {
   const { baseOrder, idField, fromAlias, model } = args
+  const fromLower = String(fromAlias).toLowerCase()
+
   const orderFields = baseOrder
     .split(SQL_SEPARATORS.ORDER_BY)
     .map((s) => s.trim().toLowerCase())
+
   const hasIdInOrder = orderFields.some(
     (f) =>
-      f.startsWith(`${fromAlias}.id `) || f.startsWith(`${fromAlias}."id" `),
+      f.startsWith(`${fromLower}.id `) || f.startsWith(`${fromLower}."id" `),
   )
+
   if (hasIdInOrder) return baseOrder
+
   const idTiebreaker = idField ? `, ${col(fromAlias, 'id', model)} ASC` : ''
   return `${baseOrder}${idTiebreaker}`
 }

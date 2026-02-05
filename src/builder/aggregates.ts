@@ -332,7 +332,6 @@ function assertHavingAggTarget(
     return
   }
 
-  // ✅ Use shared validators
   if (aggKey === '_sum' || aggKey === '_avg') {
     assertNumericField(model, field, 'HAVING')
   } else {
@@ -340,7 +339,6 @@ function assertHavingAggTarget(
   }
 }
 
-// ✅ DEDUPLICATION FIX: Use shared buildComparisons utility
 function buildHavingOpsForExpr(
   expr: string,
   filter: Record<string, unknown>,
@@ -387,7 +385,6 @@ function buildHavingForFieldFirstShape(
     throw new Error(`HAVING '${fieldName}' must be an object`)
   }
 
-  // ✅ Use shared validator
   const field = assertScalarField(model, fieldName, 'HAVING')
   const out: string[] = []
   const obj = target as Record<string, unknown>
@@ -397,7 +394,6 @@ function buildHavingForFieldFirstShape(
     const aggFilter = obj[aggKey]
     if (!isPlainObject(aggFilter)) continue
 
-    // ✅ Use shared validator for numeric check
     if (aggKey === '_sum' || aggKey === '_avg') {
       assertNumericField(model, fieldName, 'HAVING')
     }
@@ -407,7 +403,6 @@ function buildHavingForFieldFirstShape(
 
     const expr = aggExprForField(aggKey, fieldName, alias, model)
 
-    // ✅ Use shared buildComparisons utility
     const clauses = buildComparisons(
       expr,
       aggFilter,
@@ -454,7 +449,6 @@ function pushCountAllField(fields: string[]): void {
 }
 
 function assertCountableScalarField(model: Model, fieldName: string): void {
-  // ✅ Use shared validator
   assertScalarField(model, fieldName, '_count')
 }
 
@@ -512,7 +506,6 @@ function assertAggregatableScalarField(
   agg: AggregateKey,
   fieldName: string,
 ): void {
-  // ✅ Use shared validator
   if (agg === '_sum' || agg === '_avg') {
     assertNumericField(model, fieldName, agg)
   } else {
@@ -623,7 +616,6 @@ function assertGroupByBy(args: PrismaQueryArgs, model: Model): string[] {
   }
 
   for (const f of byFields) {
-    // ✅ Use shared validator
     assertScalarField(model, f, 'groupBy.by')
   }
 
@@ -737,8 +729,33 @@ export function buildCountSql(
   assertSafeTableRef(tableName)
 
   if (skip !== undefined && skip !== null) {
-    const skipValue = typeof skip === 'number' ? skip : undefined
-    if (skipValue !== undefined && skipValue > 0) {
+    if (isDynamicParameter(skip)) {
+      throw new Error(
+        'count() with skip is not supported because it produces nondeterministic results. ' +
+          'Dynamic skip cannot be validated at build time. ' +
+          'Use findMany().length or add explicit orderBy + cursor/skip logic in a deterministic query.',
+      )
+    }
+
+    if (typeof skip === 'string') {
+      const s = skip.trim()
+      if (s.length > 0) {
+        const n = Number(s)
+        if (Number.isFinite(n) && Number.isInteger(n) && n > 0) {
+          throw new Error(
+            'count() with skip is not supported because it produces nondeterministic results. ' +
+              'Use findMany().length or add explicit orderBy to ensure deterministic behavior.',
+          )
+        }
+      }
+    }
+
+    if (
+      typeof skip === 'number' &&
+      Number.isFinite(skip) &&
+      Number.isInteger(skip) &&
+      skip > 0
+    ) {
       throw new Error(
         'count() with skip is not supported because it produces nondeterministic results. ' +
           'Use findMany().length or add explicit orderBy to ensure deterministic behavior.',

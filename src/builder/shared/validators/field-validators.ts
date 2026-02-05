@@ -1,18 +1,7 @@
-// packages/generator/src/optimizer/builder/shared/validators/field-validators.ts
-
-/**
- * Field and Model Validation
- * Validates fields exist on models and operators are valid
- */
-
 import { Model, Field } from '../../../types'
 import { Ops } from '../constants'
 import { createError } from '../errors'
 import { isNotNullish, isArrayType, isJsonType } from './type-guards'
-
-// ═══════════════════════════════════════════════════════════════
-// Field Existence
-// ═══════════════════════════════════════════════════════════════
 
 export function assertFieldExists(
   name: string,
@@ -30,10 +19,6 @@ export function assertFieldExists(
   }
   return field
 }
-
-// ═══════════════════════════════════════════════════════════════
-// Operator Validation
-// ═══════════════════════════════════════════════════════════════
 
 export function assertValidOperator(
   fieldName: string,

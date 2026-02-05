@@ -10,6 +10,7 @@ import {
   buildTableReference,
   sqlStringLiteral,
   normalizeKeyList,
+  quoteColumn,
 } from '../shared/sql-utils'
 import { ParamStore } from '../shared/param-store'
 import { IncludeSpec, AliasGenerator } from '../shared/types'
@@ -29,10 +30,10 @@ import {
   getRelationFieldSet,
   getScalarFieldSet,
 } from '../shared/model-field-cache'
+import { ensureDeterministicOrderByInput } from '../shared/order-by-determinism'
 
 const MAX_INCLUDE_DEPTH = 10
 
-// ✅ MEDIUM-PRIORITY FIX: Track query complexity
 interface IncludeComplexityStats {
   totalIncludes: number
   totalSubqueries: number
@@ -245,48 +246,36 @@ function maybeReverseNegativeTake(
   }
 }
 
-function hasIdTiebreaker(orderByInput: unknown): boolean {
-  if (!isNotNullish(orderByInput)) return false
-  const normalized = normalizeOrderByInput(orderByInput, parseOrderByValue)
-  return normalized.some((obj) =>
-    Object.prototype.hasOwnProperty.call(obj, 'id'),
-  )
-}
-
-function modelHasScalarId(relModel: Model): boolean {
-  const scalarSet = getScalarFieldSet(relModel)
-  return scalarSet.has('id')
-}
-
-function addIdTiebreaker(orderByInput: unknown): unknown {
-  if (Array.isArray(orderByInput)) return [...orderByInput, { id: 'asc' }]
-  return [orderByInput, { id: 'asc' }]
-}
-
-function ensureDeterministicOrderBy(
-  relModel: Model,
-  hasOrderBy: boolean,
-  orderByInput: unknown,
-  hasPagination: boolean,
-): unknown {
-  if (!hasPagination) {
-    if (hasOrderBy && isNotNullish(orderByInput)) {
-      validateOrderByForModel(relModel, orderByInput)
+function ensureDeterministicOrderByForInclude(args: {
+  relModel: Model
+  hasOrderBy: boolean
+  orderByInput: unknown
+  hasPagination: boolean
+}): unknown {
+  if (!args.hasPagination) {
+    if (args.hasOrderBy && isNotNullish(args.orderByInput)) {
+      validateOrderByForModel(args.relModel, args.orderByInput)
     }
-    return orderByInput
+    return args.orderByInput
   }
 
-  if (!hasOrderBy) {
-    return modelHasScalarId(relModel) ? { id: 'asc' } : orderByInput
+  if (!args.hasOrderBy) {
+    return ensureDeterministicOrderByInput({
+      orderBy: undefined,
+      model: args.relModel,
+      parseValue: parseOrderByValue,
+    })
   }
 
-  if (isNotNullish(orderByInput)) {
-    validateOrderByForModel(relModel, orderByInput)
+  if (isNotNullish(args.orderByInput)) {
+    validateOrderByForModel(args.relModel, args.orderByInput)
   }
 
-  if (!modelHasScalarId(relModel)) return orderByInput
-  if (hasIdTiebreaker(orderByInput)) return orderByInput
-  return addIdTiebreaker(orderByInput)
+  return ensureDeterministicOrderByInput({
+    orderBy: args.orderByInput,
+    model: args.relModel,
+    parseValue: parseOrderByValue,
+  })
 }
 
 function buildSelectWithNestedIncludes(
@@ -308,7 +297,7 @@ function buildSelectWithNestedIncludes(
         ctx.dialect,
         ctx.visitPath || [],
         (ctx.depth || 0) + 1,
-        ctx.stats, // ✅ Pass stats through
+        ctx.stats,
       )
     : []
 
@@ -563,12 +552,12 @@ function buildSingleInclude(
     paginationConfig.orderBy,
   )
   const hasPagination = paginationConfig.hasSkip || paginationConfig.hasTake
-  const finalOrderByInput = ensureDeterministicOrderBy(
+  const finalOrderByInput = ensureDeterministicOrderByForInclude({
     relModel,
-    paginationConfig.hasOrderBy,
-    adjusted.orderByInput,
+    hasOrderBy: paginationConfig.hasOrderBy,
+    orderByInput: adjusted.orderByInput,
     hasPagination,
-  )
+  })
 
   const orderBySql = buildOrderBySql(
     finalOrderByInput,
@@ -626,7 +615,6 @@ function buildIncludeSqlInternal(
   depth: number = 0,
   stats?: IncludeComplexityStats,
 ): IncludeSpec[] {
-  // ✅ MEDIUM-PRIORITY FIX: Initialize stats on first call
   if (!stats) {
     stats = { totalIncludes: 0, totalSubqueries: 0, maxDepth: 0 }
   }
@@ -639,7 +627,6 @@ function buildIncludeSqlInternal(
     )
   }
 
-  // ✅ Track depth
   stats.maxDepth = Math.max(stats.maxDepth, depth)
 
   const includes: IncludeSpec[] = []
@@ -648,7 +635,6 @@ function buildIncludeSqlInternal(
   for (const [relName, relArgs] of entries) {
     if (relArgs === false) continue
 
-    // ✅ MEDIUM-PRIORITY FIX: Check total includes limit
     stats.totalIncludes++
     if (stats.totalIncludes > MAX_TOTAL_INCLUDES) {
       throw new Error(
@@ -659,7 +645,6 @@ function buildIncludeSqlInternal(
       )
     }
 
-    // ✅ Count subquery (each include generates at least one subquery)
     stats.totalSubqueries++
     if (stats.totalSubqueries > MAX_TOTAL_SUBQUERIES) {
       throw new Error(
@@ -709,7 +694,7 @@ function buildIncludeSqlInternal(
         params,
         visitPath: currentPath,
         depth: depth + 1,
-        stats, // ✅ Pass stats through
+        stats,
       },
     )
 
@@ -744,7 +729,7 @@ export function buildIncludeSql(
     dialect,
     [],
     0,
-    stats, // ✅ Pass initial stats
+    stats,
   )
 }
 
@@ -821,6 +806,14 @@ function resolveCountKeyPairs(field: Field): {
   return { relKeyFields, parentKeyFields }
 }
 
+function aliasQualifiedColumn(
+  alias: string,
+  model: Model,
+  field: string,
+): string {
+  return `${alias}.${quoteColumn(model, field)}`
+}
+
 function subqueryForCount(args: {
   dialect: SqlDialect
   relTable: string
@@ -831,15 +824,12 @@ function subqueryForCount(args: {
   const selectKeys = args.relKeyFields
     .map(
       (f, i) =>
-        `${args.countAlias}.${(args.relModel as any).columns?.[f] ? `"${(args.relModel as any).columns[f]}"` : `"${f}"`} AS "__fk${i}"`,
+        `${aliasQualifiedColumn(args.countAlias, args.relModel, f)} AS "__fk${i}"`,
     )
     .join(SQL_SEPARATORS.FIELD_LIST)
 
   const groupByKeys = args.relKeyFields
-    .map(
-      (f) =>
-        `${args.countAlias}.${(args.relModel as any).columns?.[f] ? `"${(args.relModel as any).columns[f]}"` : `"${f}"`}`,
-    )
+    .map((f) => aliasQualifiedColumn(args.countAlias, args.relModel, f))
     .join(SQL_SEPARATORS.FIELD_LIST)
 
   const cntExpr =
@@ -854,18 +844,23 @@ function leftJoinOnForCount(args: {
   parentModel: Model
   parentKeyFields: string[]
 }): string {
-  const quoteParent = (f: string): string => {
-    const m = args.parentModel as any
-    const mapped = m.columns?.[f]
-    const colName = mapped ? String(mapped) : f
-    return `"${String(colName).replace(/"/g, '""')}"`
-  }
-
   const parts = args.parentKeyFields.map(
     (f, i) =>
-      `${args.joinAlias}."__fk${i}" = ${args.parentAlias}.${quoteParent(f)}`,
+      `${args.joinAlias}."__fk${i}" = ${aliasQualifiedColumn(args.parentAlias, args.parentModel, f)}`,
   )
   return parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`
+}
+
+function nextAliasAvoiding(
+  aliasGen: ReturnType<typeof createAliasGenerator>,
+  base: string,
+  forbidden: Set<string>,
+): string {
+  let a = aliasGen.next(base)
+  while (forbidden.has(a)) {
+    a = aliasGen.next(base)
+  }
+  return a
 }
 
 function buildCountJoinAndPair(args: {
@@ -881,7 +876,15 @@ function buildCountJoinAndPair(args: {
 
   const { relKeyFields, parentKeyFields } = resolveCountKeyPairs(args.field)
 
-  const countAlias = args.aliasGen.next(`__tp_cnt_${args.relName}`)
+  const forbidden = new Set<string>([args.parentAlias])
+
+  const countAlias = nextAliasAvoiding(
+    args.aliasGen,
+    `__tp_cnt_${args.relName}`,
+    forbidden,
+  )
+  forbidden.add(countAlias)
+
   const subquery = subqueryForCount({
     dialect: args.dialect,
     relTable,
@@ -890,7 +893,12 @@ function buildCountJoinAndPair(args: {
     relKeyFields,
   })
 
-  const joinAlias = args.aliasGen.next(`__tp_cnt_j_${args.relName}`)
+  const joinAlias = nextAliasAvoiding(
+    args.aliasGen,
+    `__tp_cnt_j_${args.relName}`,
+    forbidden,
+  )
+
   const leftJoinOn = leftJoinOnForCount({
     joinAlias,
     parentAlias: args.parentAlias,

@@ -21,6 +21,7 @@ import {
   isNonEmptyArray,
   isPlainObject,
 } from './shared/validators/type-guards'
+import { assertScalarField } from './shared/validators/field-assertions'
 
 type OrderByValue =
   | 'asc'
@@ -76,10 +77,7 @@ function buildPostgresDistinctOrderBy(
   return next
 }
 
-function applyPostgresDistinctOrderBy(
-  args: PrismaQueryArgs,
-  _model: Model,
-): PrismaQueryArgs {
+function applyPostgresDistinctOrderBy(args: PrismaQueryArgs): PrismaQueryArgs {
   const distinctFields = normalizeDistinctFields(args.distinct)
   if (distinctFields.length === 0) return args
   if (!isNotNullish(args.orderBy)) return args
@@ -90,24 +88,6 @@ function applyPostgresDistinctOrderBy(
   return {
     ...args,
     orderBy: buildPostgresDistinctOrderBy(distinctFields, existing),
-  }
-}
-
-function assertScalarFieldOnModel(
-  model: Model,
-  fieldName: string,
-  ctx: string,
-): void {
-  const f = model.fields.find((x) => x.name === fieldName)
-  if (!f) {
-    throw new Error(
-      `${ctx} references unknown field '${fieldName}' on model ${model.name}`,
-    )
-  }
-  if (f.isRelation) {
-    throw new Error(
-      `${ctx} does not support relation field '${fieldName}' on model ${model.name}`,
-    )
   }
 }
 
@@ -124,12 +104,8 @@ function validateDistinct(
       throw new Error(`distinct must not contain duplicates (field: '${f}')`)
     }
     seen.add(f)
-    assertScalarFieldOnModel(model, f, 'distinct')
+    assertScalarField(model, f, 'distinct')
   }
-}
-
-function validateOrderByValue(fieldName: string, v: unknown): void {
-  parseOrderByValue(v, fieldName)
 }
 
 function validateOrderBy(
@@ -143,12 +119,15 @@ function validateOrderBy(
 
   for (const it of items) {
     const entries = Object.entries(it)
+    if (entries.length !== 1) {
+      throw new Error('orderBy array entries must have exactly one field')
+    }
     const fieldName = String(entries[0][0]).trim()
     if (fieldName.length === 0) {
       throw new Error('orderBy field name cannot be empty')
     }
-    assertScalarFieldOnModel(model, fieldName, 'orderBy')
-    validateOrderByValue(fieldName, entries[0][1])
+    assertScalarField(model, fieldName, 'orderBy')
+    parseOrderByValue(entries[0][1], fieldName)
   }
 }
 
@@ -166,7 +145,7 @@ function validateCursor(model: Model, cursor: unknown): void {
     if (f.length === 0) {
       throw new Error('cursor field name cannot be empty')
     }
-    assertScalarFieldOnModel(model, f, 'cursor')
+    assertScalarField(model, f, 'cursor')
   }
 }
 
@@ -197,10 +176,9 @@ function normalizeArgsForNegativeTake(
 function normalizeArgsForDialect(
   dialect: SqlDialect,
   args: PrismaQueryArgs,
-  model: Model,
 ): PrismaQueryArgs {
   if (dialect !== 'postgres') return args
-  return applyPostgresDistinctOrderBy(args, model)
+  return applyPostgresDistinctOrderBy(args)
 }
 
 function buildCursorClauseIfAny(input: {
@@ -285,7 +263,6 @@ function buildSelectSpec(input: {
     model,
   })
 
-  // ✅ HIGH-PRIORITY FIX: Block distinct + cursor in SQLite
   if (
     dialect === 'sqlite' &&
     isNonEmptyArray(normalizedArgs.distinct) &&
@@ -336,11 +313,7 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
   const dialectToUse = resolveDialect(dialect)
 
   const argsForSql = normalizeArgsForNegativeTake(method, args)
-  const normalizedArgs = normalizeArgsForDialect(
-    dialectToUse,
-    argsForSql,
-    model,
-  )
+  const normalizedArgs = normalizeArgsForDialect(dialectToUse, argsForSql)
 
   validateDistinct(model, normalizedArgs.distinct)
   validateOrderBy(model, normalizedArgs.orderBy)

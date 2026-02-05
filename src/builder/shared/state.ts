@@ -1,5 +1,3 @@
-// packages/generator/src/optimizer/builder/shared/state.ts
-
 import { DEFAULT_WHERE_CLAUSE } from './constants'
 import { WhereClauseResult } from './types'
 import { ParamStore } from './param-store'
