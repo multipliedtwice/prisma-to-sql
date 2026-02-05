@@ -18,6 +18,7 @@ import { addAutoScoped } from './shared/dynamic-params'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
 import { normalizeOrderByInput } from './shared/order-by-utils'
 import { ensureDeterministicOrderByInput } from './shared/order-by-determinism'
+import { assertScalarField } from './shared/validators/field-assertions'
 
 type OrderByDirection = 'asc' | 'desc'
 type NullsPosition = 'first' | 'last'
@@ -104,25 +105,28 @@ export function parseOrderByValue(
   return { direction, nulls }
 }
 
-function normalizeFiniteInteger(name: string, v: unknown): number {
-  if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v)) {
-    throw new Error(`${name} must be an integer`)
-  }
-  return v
+function normalizeNonNegativeInt(name: 'skip', v: unknown): IntOrDynamic {
+  if (isDynamicParameter(v)) return v as string
+  const result = normalizeIntLike(name, v, {
+    min: 0,
+    max: MAX_LIMIT_OFFSET,
+    allowZero: true,
+  })
+  if (result === undefined)
+    throw new Error(`${name} normalization returned undefined`)
+  return result
 }
 
-function normalizeNonNegativeInt(name: string, v: unknown): IntOrDynamic {
+function normalizeIntAllowNegative(name: 'take', v: unknown): IntOrDynamic {
   if (isDynamicParameter(v)) return v as string
-
-  const n = normalizeFiniteInteger(name, v)
-
-  if (n < 0) {
-    throw new Error(`${name} must be >= 0`)
-  }
-  if (n > MAX_LIMIT_OFFSET) {
-    throw new Error(`${name} must be <= ${MAX_LIMIT_OFFSET}`)
-  }
-  return n
+  const result = normalizeIntLike(name, v, {
+    min: Number.MIN_SAFE_INTEGER,
+    max: MAX_LIMIT_OFFSET,
+    allowZero: true,
+  })
+  if (result === undefined)
+    throw new Error(`${name} normalization returned undefined`)
+  return result
 }
 
 function hasNonNullishProp(
@@ -130,22 +134,6 @@ function hasNonNullishProp(
   key: 'skip' | 'take',
 ): v is Record<string, unknown> {
   return isPlainObject(v) && key in v && isNotNullish((v as any)[key])
-}
-
-function normalizeIntegerOrDynamic(name: 'take', v: unknown): IntOrDynamic {
-  if (isDynamicParameter(v)) return v as string
-
-  const result = normalizeIntLike(name, v, {
-    min: Number.MIN_SAFE_INTEGER,
-    max: MAX_LIMIT_OFFSET,
-    allowZero: true,
-  })
-
-  if (result === undefined) {
-    throw new Error(`${name} normalization returned undefined`)
-  }
-
-  return result
 }
 
 export function readSkipTake(relArgs: unknown): SkipTakeReadResult {
@@ -167,7 +155,7 @@ export function readSkipTake(relArgs: unknown): SkipTakeReadResult {
     ? normalizeNonNegativeInt('skip', obj.skip)
     : undefined
   const takeVal = hasTake
-    ? normalizeIntegerOrDynamic('take', obj.take)
+    ? normalizeIntAllowNegative('take', obj.take)
     : undefined
 
   return { hasSkip, hasTake, skipVal, takeVal }
@@ -182,7 +170,6 @@ function buildOrderByFragment(
   if (entries.length === 0) return ''
 
   const out: string[] = []
-
   for (const e of entries) {
     const dir = e.direction.toUpperCase()
     const c = col(alias, e.field, model)
@@ -213,9 +200,7 @@ function defaultNullsFor(
   dialect: SqlDialect,
   direction: OrderByDirection,
 ): NullsPosition {
-  if (dialect === 'postgres') {
-    return direction === 'asc' ? 'last' : 'first'
-  }
+  if (dialect === 'postgres') return direction === 'asc' ? 'last' : 'first'
   return direction === 'asc' ? 'first' : 'last'
 }
 
@@ -227,14 +212,12 @@ function ensureCursorFieldsInOrder(
   for (const e of orderEntries) existing.set(e.field, e)
 
   const out: OrderByEntry[] = [...orderEntries]
-
   for (const [field] of cursorEntries) {
     if (!existing.has(field)) {
       out.push({ field, direction: 'asc' })
       existing.set(field, out[out.length - 1])
     }
   }
-
   return out
 }
 
@@ -243,14 +226,10 @@ function buildCursorFilterParts(
   cursorAlias: string,
   params: ParamStore,
   model?: Model,
-): {
-  whereSql: string
-  placeholdersByField: Map<string, string>
-} {
+): { whereSql: string; placeholdersByField: Map<string, string> } {
   const entries = Object.entries(cursor)
-  if (entries.length === 0) {
+  if (entries.length === 0)
     throw new Error('cursor must have at least one field')
-  }
 
   const placeholdersByField = new Map<string, string>()
   const parts: string[] = []
@@ -327,7 +306,6 @@ function buildOrderEntries(orderBy: unknown): OrderByEntry[] {
   const normalized = normalizeOrderByInput(orderBy, parseOrderByValue) as Array<
     Record<string, string | OrderByValueObject>
   >
-
   const entries: OrderByEntry[] = []
 
   for (const item of normalized) {
@@ -335,11 +313,7 @@ function buildOrderEntries(orderBy: unknown): OrderByEntry[] {
       if (typeof value === 'string') {
         entries.push({ field, direction: value as OrderByDirection })
       } else {
-        entries.push({
-          field,
-          direction: value.direction,
-          nulls: value.nulls,
-        })
+        entries.push({ field, direction: value.direction, nulls: value.nulls })
       }
     }
   }
@@ -352,15 +326,28 @@ function buildCursorCteSelectList(
   orderEntries: OrderByEntry[],
   model?: Model,
 ): string {
-  const set = new Set<string>()
-  for (const [f] of cursorEntries) set.add(f)
-  for (const e of orderEntries) set.add(e.field)
+  const seen = new Set<string>()
+  const ordered: string[] = []
 
-  const cols = [...set].map((f) => quoteColumn(model, f))
-  if (cols.length === 0) {
-    throw new Error('cursor cte select list is empty')
+  for (const [f] of cursorEntries) {
+    if (!seen.has(f)) {
+      seen.add(f)
+      ordered.push(f)
+    }
   }
-  return cols.join(SQL_SEPARATORS.FIELD_LIST)
+
+  for (const e of orderEntries) {
+    if (!seen.has(e.field)) {
+      seen.add(e.field)
+      ordered.push(e.field)
+    }
+  }
+
+  if (ordered.length === 0) throw new Error('cursor cte select list is empty')
+
+  return ordered
+    .map((f) => quoteColumn(model, f))
+    .join(SQL_SEPARATORS.FIELD_LIST)
 }
 
 function truncateIdent(name: string, maxLen: number): string {
@@ -388,6 +375,16 @@ function buildCursorNames(outerAlias: string): {
   return { cteName, srcAlias }
 }
 
+function assertCursorAndOrderFieldsScalar(
+  model: Model | undefined,
+  cursor: Record<string, unknown>,
+  orderEntries: OrderByEntry[],
+): void {
+  if (!model) return
+  for (const k of Object.keys(cursor)) assertScalarField(model, k, 'cursor')
+  for (const e of orderEntries) assertScalarField(model, e.field, 'orderBy')
+}
+
 export function buildCursorCondition(
   cursor: Record<string, unknown>,
   orderBy: unknown,
@@ -403,16 +400,12 @@ export function buildCursorCondition(
   const d = dialect ?? getGlobalDialect()
 
   const cursorEntries = Object.entries(cursor)
-  if (cursorEntries.length === 0) {
+  if (cursorEntries.length === 0)
     throw new Error('cursor must have at least one field')
-  }
 
   const { cteName, srcAlias } = buildCursorNames(alias)
   assertSafeAlias(cteName)
   assertSafeAlias(srcAlias)
-
-  const { whereSql: cursorWhereSql, placeholdersByField } =
-    buildCursorFilterParts(cursor, srcAlias, params, model)
 
   const deterministicOrderBy = ensureDeterministicOrderByInput({
     orderBy,
@@ -421,7 +414,6 @@ export function buildCursorCondition(
   })
 
   let orderEntries = buildOrderEntries(deterministicOrderBy)
-
   if (orderEntries.length === 0) {
     orderEntries = cursorEntries.map(([field]) => ({
       field,
@@ -430,6 +422,11 @@ export function buildCursorCondition(
   } else {
     orderEntries = ensureCursorFieldsInOrder(orderEntries, cursorEntries)
   }
+
+  assertCursorAndOrderFieldsScalar(model, cursor, orderEntries)
+
+  const { whereSql: cursorWhereSql, placeholdersByField } =
+    buildCursorFilterParts(cursor, srcAlias, params, model)
 
   const cursorOrderBy = orderEntries
     .map(
@@ -461,9 +458,8 @@ export function buildCursorCondition(
     model,
   )
 
-  const getValueExpr = (field: string): string => {
-    return `(SELECT ${quoteColumn(model, field)} FROM ${cteName})`
-  }
+  const getValueExpr = (field: string): string =>
+    `(SELECT ${quoteColumn(model, field)} FROM ${cteName})`
 
   const orClauses: string[] = []
 
@@ -487,6 +483,7 @@ export function buildCursorCondition(
   }
 
   const exclusive = orClauses.join(SQL_SEPARATORS.CONDITION_OR)
+
   const condition = `(${existsExpr} ${SQL_SEPARATORS.CONDITION_AND} ((${exclusive})${SQL_SEPARATORS.CONDITION_OR}(${outerCursorMatch})))`
 
   return { cte, condition }
@@ -516,13 +513,11 @@ export function buildOrderByClause(
   if (!isNotNullish(args.orderBy)) return ''
 
   const result = buildOrderBy(args.orderBy, alias, dialect, model)
-
   if (!isNonEmptyString(result)) {
     throw new Error(
       'buildOrderByClause: orderBy specified but produced empty result',
     )
   }
-
   return result
 }
 
@@ -532,9 +527,7 @@ function normalizeTakeLike(v: unknown): MaybeIntOrDynamic {
     max: MAX_LIMIT_OFFSET,
     allowZero: true,
   })
-  if (typeof n === 'number') {
-    if (n === 0) return 0
-  }
+  if (typeof n === 'number' && n === 0) return 0
   return n as MaybeIntOrDynamic
 }
 

@@ -59,7 +59,11 @@ function finalizeSql(
 ): SqlResult {
   const snapshot = params.snapshot()
   validateSelectQuery(sql)
-  validateParamConsistencyByDialect(sql, snapshot.params, dialect)
+  validateParamConsistencyByDialect(
+    sql,
+    snapshot.params,
+    dialect === 'sqlite' ? 'postgres' : dialect,
+  )
   return Object.freeze({
     sql,
     params: snapshot.params,

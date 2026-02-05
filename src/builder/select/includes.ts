@@ -144,10 +144,8 @@ function validateOrderByForModel(model: Model, orderBy: unknown): void {
     }
 
     const fieldName = String(entries[0][0]).trim()
-    if (fieldName.length === 0) {
+    if (fieldName.length === 0)
       throw new Error('orderBy field name cannot be empty')
-    }
-
     if (!scalarSet.has(fieldName)) {
       throw new Error(
         `orderBy references unknown or non-scalar field '${fieldName}' on model ${model.name}`,
@@ -237,42 +235,30 @@ function maybeReverseNegativeTake(
 ): { takeVal: OptionalIntOrDynamic; orderByInput: unknown } {
   if (typeof takeVal !== 'number') return { takeVal, orderByInput }
   if (takeVal >= 0) return { takeVal, orderByInput }
-  if (!hasOrderBy) {
+  if (!hasOrderBy)
     throw new Error('Negative take requires orderBy for deterministic results')
-  }
   return {
     takeVal: Math.abs(takeVal),
     orderByInput: reverseOrderByInput(orderByInput),
   }
 }
 
-function ensureDeterministicOrderByForInclude(args: {
+function finalizeOrderByForInclude(args: {
   relModel: Model
   hasOrderBy: boolean
   orderByInput: unknown
   hasPagination: boolean
 }): unknown {
-  if (!args.hasPagination) {
-    if (args.hasOrderBy && isNotNullish(args.orderByInput)) {
-      validateOrderByForModel(args.relModel, args.orderByInput)
-    }
-    return args.orderByInput
-  }
-
-  if (!args.hasOrderBy) {
-    return ensureDeterministicOrderByInput({
-      orderBy: undefined,
-      model: args.relModel,
-      parseValue: parseOrderByValue,
-    })
-  }
-
-  if (isNotNullish(args.orderByInput)) {
+  if (args.hasOrderBy && isNotNullish(args.orderByInput)) {
     validateOrderByForModel(args.relModel, args.orderByInput)
   }
 
+  if (!args.hasPagination) {
+    return args.orderByInput
+  }
+
   return ensureDeterministicOrderByInput({
-    orderBy: args.orderByInput,
+    orderBy: args.hasOrderBy ? args.orderByInput : undefined,
     model: args.relModel,
     parseValue: parseOrderByValue,
   })
@@ -467,11 +453,7 @@ function buildListIncludeSpec(args: {
       whereClause: args.whereClause,
     })
 
-    return Object.freeze({
-      name: args.relName,
-      sql,
-      isOneToOne: false,
-    })
+    return Object.freeze({ name: args.relName, sql, isOneToOne: false })
   }
 
   const rowAlias = args.ctx.aliasGen.next(`${args.relName}_row`)
@@ -485,9 +467,7 @@ function buildListIncludeSpec(args: {
     whereClause: args.whereClause,
   })
 
-  if (args.orderBySql) {
-    base += ` ${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}`
-  }
+  if (args.orderBySql) base += ` ${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}`
 
   base = appendLimitOffset(
     base,
@@ -501,11 +481,7 @@ function buildListIncludeSpec(args: {
   const selectExpr = jsonAgg('row', args.ctx.dialect)
   const sql = `${SQL_TEMPLATES.SELECT} ${selectExpr} ${SQL_TEMPLATES.FROM} (${base}) ${rowAlias}`
 
-  return Object.freeze({
-    name: args.relName,
-    sql,
-    isOneToOne: false,
-  })
+  return Object.freeze({ name: args.relName, sql, isOneToOne: false })
 }
 
 function buildSingleInclude(
@@ -516,8 +492,8 @@ function buildSingleInclude(
   ctx: IncludeBuildContext,
 ): IncludeSpec {
   const relTable = getRelationTableReference(relModel, ctx.dialect)
-
   const relAlias = ctx.aliasGen.next(relName)
+
   const isList = typeof field.type === 'string' && field.type.endsWith('[]')
   const joinPredicate = joinCondition(
     field,
@@ -551,8 +527,10 @@ function buildSingleInclude(
     paginationConfig.hasOrderBy,
     paginationConfig.orderBy,
   )
+
   const hasPagination = paginationConfig.hasSkip || paginationConfig.hasTake
-  const finalOrderByInput = ensureDeterministicOrderByForInclude({
+
+  const finalOrderByInput = finalizeOrderByForInclude({
     relModel,
     hasOrderBy: paginationConfig.hasOrderBy,
     orderByInput: adjusted.orderByInput,
@@ -581,11 +559,7 @@ function buildSingleInclude(
       ctx,
     })
 
-    return Object.freeze({
-      name: relName,
-      sql,
-      isOneToOne: true,
-    })
+    return Object.freeze({ name: relName, sql, isOneToOne: true })
   }
 
   return buildListIncludeSpec({
@@ -615,9 +589,7 @@ function buildIncludeSqlInternal(
   depth: number = 0,
   stats?: IncludeComplexityStats,
 ): IncludeSpec[] {
-  if (!stats) {
-    stats = { totalIncludes: 0, totalSubqueries: 0, maxDepth: 0 }
-  }
+  if (!stats) stats = { totalIncludes: 0, totalSubqueries: 0, maxDepth: 0 }
 
   if (depth > MAX_INCLUDE_DEPTH) {
     throw new Error(
@@ -664,15 +636,13 @@ function buildIncludeSqlInternal(
 
     if (visitPath.includes(relationPath)) {
       throw new Error(
-        `Circular include detected: ${currentPath.join(' -> ')}. ` +
-          `Relation '${relationPath}' creates an infinite loop.`,
+        `Circular include detected: ${currentPath.join(' -> ')}. Relation '${relationPath}' creates an infinite loop.`,
       )
     }
 
     const modelOccurrences = currentPath.filter((p) =>
       p.startsWith(`${resolved.relModel.name}.`),
     ).length
-
     if (modelOccurrences > 2) {
       throw new Error(
         `Include too deeply nested: model '${resolved.relModel.name}' ` +
@@ -680,12 +650,8 @@ function buildIncludeSqlInternal(
       )
     }
 
-    const include = buildSingleInclude(
-      relName,
-      relArgs,
-      resolved.field,
-      resolved.relModel,
-      {
+    includes.push(
+      buildSingleInclude(relName, relArgs, resolved.field, resolved.relModel, {
         model,
         schemas,
         parentAlias,
@@ -695,10 +661,8 @@ function buildIncludeSqlInternal(
         visitPath: currentPath,
         depth: depth + 1,
         stats,
-      },
+      }),
     )
-
-    includes.push(include)
   }
 
   return includes
@@ -751,11 +715,10 @@ function resolveCountRelationOrThrow(
   }
 
   const field = model.fields.find((f) => f.name === relName)
-  if (!field) {
+  if (!field)
     throw new Error(
       `_count.${relName} references unknown relation on model ${model.name}`,
     )
-  }
 
   if (!isValidRelationField(field)) {
     throw new Error(
@@ -785,9 +748,8 @@ function resolveCountKeyPairs(field: Field): {
   parentKeyFields: string[]
 } {
   const fkFields = normalizeKeyList((field as any).foreignKey)
-  if (fkFields.length === 0) {
+  if (fkFields.length === 0)
     throw new Error('Relation count requires foreignKey')
-  }
 
   const refsRaw = (field as any).references
   const refs = normalizeKeyList(refsRaw)
@@ -857,9 +819,7 @@ function nextAliasAvoiding(
   forbidden: Set<string>,
 ): string {
   let a = aliasGen.next(base)
-  while (forbidden.has(a)) {
-    a = aliasGen.next(base)
-  }
+  while (forbidden.has(a)) a = aliasGen.next(base)
   return a
 }
 
@@ -873,7 +833,6 @@ function buildCountJoinAndPair(args: {
   aliasGen: ReturnType<typeof createAliasGenerator>
 }): { joinSql: string; pairSql: string } {
   const relTable = getRelationTableReference(args.relModel, args.dialect)
-
   const { relKeyFields, parentKeyFields } = resolveCountKeyPairs(args.field)
 
   const forbidden = new Set<string>([args.parentAlias])
@@ -942,8 +901,5 @@ export function buildRelationCountSql(
     pairs.push(built.pairSql)
   }
 
-  return {
-    joins,
-    jsonPairs: pairs.join(SQL_SEPARATORS.FIELD_LIST),
-  }
+  return { joins, jsonPairs: pairs.join(SQL_SEPARATORS.FIELD_LIST) }
 }

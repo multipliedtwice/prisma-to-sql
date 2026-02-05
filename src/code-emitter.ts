@@ -347,34 +347,39 @@ function normalizeQuery(args: any): string {
 
 function extractDynamicParams(args: any, dynamicKeys: string[]): unknown[] {
   const params: unknown[] = []
-  
+
   for (const key of dynamicKeys) {
     const parts = key.split(':')
     const lookupKey = parts.length === 2 ? parts[1] : key
-    const value = args[lookupKey]
-    
+
+    const value =
+      lookupKey.includes('.') ? getByPath(args, lookupKey) : args?.[lookupKey]
+
     if (value === undefined) {
       throw new Error(\`Missing required parameter: \${key}\`)
     }
-    
+
     params.push(normalizeValue(value))
   }
-  
+
   return params
 }
 
+
 async function executeQuery(client: any, sql: string, params: unknown[]): Promise<unknown[]> {
+  const normalizedParams = normalizeParams(params)
+
   if (DIALECT === 'postgres') {
-    return await client.unsafe(sql, params)
+    return await client.unsafe(sql, normalizedParams)
   }
-  
+
   const stmt = client.prepare(sql)
-  
+
   if (sql.toUpperCase().includes('COUNT(*) AS')) {
-    return [stmt.get(...params)]
+    return [stmt.get(...normalizedParams)]
   }
-  
-  return stmt.all(...params)
+
+  return stmt.all(...normalizedParams)
 }
 
 export function speedExtension(config: {
@@ -419,18 +424,21 @@ export function speedExtension(config: {
 
       if (prebakedQuery) {
         sql = prebakedQuery.sql
-        params = [...prebakedQuery.params, ...extractDynamicParams(transformedArgs, prebakedQuery.dynamicKeys)]
+        params = normalizeParams([
+          ...prebakedQuery.params,
+          ...extractDynamicParams(transformedArgs, prebakedQuery.dynamicKeys),
+        ])
         prebaked = true
       } else {
         const model = MODELS.find((m) => m.name === modelName)
-        
+
         if (!model) {
           return this.$parent[modelName][method](args)
         }
 
         const result = buildSQL(model, MODELS, method, transformedArgs, DIALECT)
         sql = result.sql
-        params = result.params
+        params = normalizeParams(result.params as unknown[])
       }
 
       if (debug) {

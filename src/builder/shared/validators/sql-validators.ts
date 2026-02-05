@@ -1,7 +1,6 @@
 import { DEFAULT_WHERE_CLAUSE, REGEX_CACHE, SQL_KEYWORDS } from '../constants'
 import {
   isNotNullish,
-  isNonEmptyString,
   hasValidContent,
   hasRequiredKeywords,
 } from './type-guards'
@@ -22,36 +21,34 @@ export function isEmptyWhere(
   return Object.keys(where).length === 0
 }
 
+function sqlPreview(sql: string): string {
+  const s = String(sql)
+  if (s.length <= 160) return s
+  return `${s.slice(0, 160)}...`
+}
+
 export function validateSelectQuery(sql: string): void {
   if (!hasValidContent(sql)) {
     throw new Error('CRITICAL: Generated empty SQL query')
   }
 
   if (!hasRequiredKeywords(sql)) {
-    throw new Error(
-      `CRITICAL: Invalid SQL structure. SQL: ${sql.substring(0, 100)}...`,
-    )
+    throw new Error(`CRITICAL: Invalid SQL structure. SQL: ${sqlPreview(sql)}`)
   }
 }
 
-function sqlPreview(sql: string): string {
-  return `${sql.substring(0, 100)}...`
-}
-
-type PlaceholderScan = {
-  count: number
+type DollarScan = {
   min: number
   max: number
   seen: Uint8Array
+  sawAny: boolean
 }
 
-type ParseResult = {
-  next: number
-  num: number
-  ok: boolean
-}
-
-function parseDollarNumber(sql: string, start: number, n: number): ParseResult {
+function parseDollarNumber(
+  sql: string,
+  start: number,
+): { next: number; num: number } {
+  const n = sql.length
   let i = start
   let num = 0
   let hasDigit = false
@@ -64,18 +61,15 @@ function parseDollarNumber(sql: string, start: number, n: number): ParseResult {
     i++
   }
 
-  if (!hasDigit || num <= 0) return { next: i, num: 0, ok: false }
-  return { next: i, num, ok: true }
+  if (!hasDigit || num <= 0) return { next: i, num: 0 }
+  return { next: i, num }
 }
 
-function scanDollarPlaceholders(
-  sql: string,
-  markUpTo: number,
-): PlaceholderScan {
+function scanDollarPlaceholders(sql: string, markUpTo: number): DollarScan {
   const seen = new Uint8Array(markUpTo + 1)
-  let count = 0
   let min = Number.POSITIVE_INFINITY
   let max = 0
+  let sawAny = false
 
   const n = sql.length
   let i = 0
@@ -86,21 +80,27 @@ function scanDollarPlaceholders(
       continue
     }
 
-    const { next, num, ok } = parseDollarNumber(sql, i + 1, n)
-    i = next
-    if (!ok) continue
+    const parsed = parseDollarNumber(sql, i + 1)
+    i = parsed.next
 
-    count++
+    const num = parsed.num
+    if (num === 0) continue
+
+    sawAny = true
     if (num < min) min = num
     if (num > max) max = num
     if (num <= markUpTo) seen[num] = 1
   }
 
-  return { count, min, max, seen }
+  if (!sawAny) {
+    return { min: 0, max: 0, seen, sawAny: false }
+  }
+
+  return { min, max, seen, sawAny: true }
 }
 
 function assertNoGapsDollar(
-  scan: PlaceholderScan,
+  scan: DollarScan,
   rangeMin: number,
   rangeMax: number,
   sql: string,
@@ -120,189 +120,91 @@ export function validateParamConsistency(
   params: readonly unknown[],
 ): void {
   const paramLen = params.length
-
-  if (paramLen === 0) {
-    if (sql.indexOf('$') === -1) return
-  }
-
   const scan = scanDollarPlaceholders(sql, paramLen)
 
-  if (scan.count === 0) {
-    if (paramLen !== 0) {
+  if (paramLen === 0) {
+    if (scan.sawAny) {
       throw new Error(
-        `CRITICAL: Parameter mismatch - SQL has no placeholders but ${paramLen} params provided.`,
+        `CRITICAL: SQL contains placeholders but params is empty. SQL: ${sqlPreview(sql)}`,
       )
     }
     return
+  }
+
+  if (!scan.sawAny) {
+    throw new Error(
+      `CRITICAL: SQL is missing placeholders ($1..$${paramLen}) but params has length ${paramLen}. SQL: ${sqlPreview(sql)}`,
+    )
+  }
+
+  if (scan.min !== 1) {
+    throw new Error(
+      `CRITICAL: Placeholder range must start at $1, got min=$${scan.min}. SQL: ${sqlPreview(sql)}`,
+    )
   }
 
   if (scan.max !== paramLen) {
     throw new Error(
-      `CRITICAL: Parameter mismatch - SQL max placeholder is $${scan.max} but ${paramLen} params provided. ` +
-        `This will cause SQL execution to fail. SQL: ${sqlPreview(sql)}`,
+      `CRITICAL: Placeholder max must match params length. max=$${scan.max}, params=${paramLen}. SQL: ${sqlPreview(sql)}`,
     )
   }
 
-  assertNoGapsDollar(scan, 1, scan.max, sql)
+  assertNoGapsDollar(scan, 1, paramLen, sql)
 }
 
-export function needsQuoting(id: string): boolean {
-  if (!isNonEmptyString(id)) return true
-
-  const isKeyword = SQL_KEYWORDS.has(id.toLowerCase())
-  if (isKeyword) return true
-
-  const isValidIdentifier = REGEX_CACHE.VALID_IDENTIFIER.test(id)
-  return !isValidIdentifier
+function countQuestionMarkPlaceholders(sql: string): number {
+  const s = String(sql)
+  let count = 0
+  for (let i = 0; i < s.length; i++) {
+    if (s.charCodeAt(i) === 63) count++
+  }
+  return count
 }
 
-export function validateParamConsistencyFragment(
+function validateQuestionMarkConsistency(
   sql: string,
   params: readonly unknown[],
 ): void {
-  const paramLen = params.length
-  const scan = scanDollarPlaceholders(sql, paramLen)
+  const expected = params.length
+  const found = countQuestionMarkPlaceholders(sql)
 
-  if (scan.max === 0) return
-
-  if (scan.max > paramLen) {
+  if (expected !== found) {
     throw new Error(
-      `CRITICAL: Parameter mismatch - SQL references $${scan.max} but only ${paramLen} params provided. SQL: ${sqlPreview(sql)}`,
-    )
-  }
-
-  assertNoGapsDollar(scan, scan.min, scan.max, sql)
-}
-
-function assertOrThrow(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message)
-}
-
-function parseSqlitePlaceholderIndices(sql: string): {
-  indices: number[]
-  sawNumbered: boolean
-  sawAnonymous: boolean
-} {
-  const re = /\?(?:(\d+))?/g
-  const indices: number[] = []
-  let anonCount = 0
-  let sawNumbered = false
-  let sawAnonymous = false
-
-  for (const m of sql.matchAll(re)) {
-    const n = m[1]
-    if (n) {
-      sawNumbered = true
-      indices.push(parseInt(n, 10))
-    } else {
-      sawAnonymous = true
-      anonCount += 1
-      indices.push(anonCount)
-    }
-  }
-
-  return { indices, sawNumbered, sawAnonymous }
-}
-
-function parseDollarPlaceholderIndices(sql: string): number[] {
-  const re = /\$(\d+)/g
-  const indices: number[] = []
-  for (const m of sql.matchAll(re)) indices.push(parseInt(m[1], 10))
-  return indices
-}
-
-function maxIndex(indices: readonly number[]): number {
-  return indices.length > 0 ? Math.max(...indices) : 0
-}
-
-function ensureSequentialIndices(
-  seen: ReadonlySet<number>,
-  max: number,
-  prefix: string,
-): void {
-  for (let i = 1; i <= max; i++) {
-    assertOrThrow(
-      seen.has(i),
-      `CRITICAL: Missing SQL placeholder ${prefix}${i} - placeholders must be sequential 1..${max}.`,
+      `CRITICAL: Parameter mismatch - expected ${expected} '?' placeholders, found ${found}. SQL: ${sqlPreview(sql)}`,
     )
   }
 }
 
-function validateSqlitePlaceholders(
-  sql: string,
-  params: readonly unknown[],
-): void {
-  const paramLen = params.length
-  const { indices, sawNumbered, sawAnonymous } =
-    parseSqlitePlaceholderIndices(sql)
-
-  if (indices.length === 0) {
-    if (paramLen !== 0) {
-      throw new Error(
-        `CRITICAL: Parameter mismatch - SQL has no sqlite placeholders but ${paramLen} params provided. SQL: ${sqlPreview(sql)}`,
-      )
-    }
-    return
-  }
-
-  assertOrThrow(
-    !(sawNumbered && sawAnonymous),
-    `CRITICAL: Mixed sqlite placeholders ('?' and '?NNN') are not supported.`,
-  )
-
-  const max = maxIndex(indices)
-  assertOrThrow(
-    max === paramLen,
-    `CRITICAL: SQL placeholder max mismatch - max is ?${max}, but params length is ${paramLen}. SQL: ${sqlPreview(sql)}`,
-  )
-
-  const set = new Set(indices)
-  ensureSequentialIndices(set, max, '?')
-}
-
-function validateDollarPlaceholders(
-  sql: string,
-  params: readonly unknown[],
-): void {
-  validateParamConsistency(sql, params)
-}
-
-function detectPlaceholderStyle(sql: string): {
-  hasDollar: boolean
-  hasSqliteQ: boolean
-} {
-  const hasDollar = /\$\d+/.test(sql)
-  const hasSqliteQ = /\?(?:\d+)?/.test(sql)
-  return { hasDollar, hasSqliteQ }
-}
-
-/**
- * Dialect-aware consistency validator.
- * - postgres: enforces $1..$N (existing behavior)
- * - sqlite: supports either $1..$N OR ?/?NNN, but rejects mixing.
- */
 export function validateParamConsistencyByDialect(
   sql: string,
   params: readonly unknown[],
   dialect: SqlDialect,
 ): void {
-  const { hasDollar, hasSqliteQ } = detectPlaceholderStyle(sql)
-
-  if (dialect !== 'sqlite') {
-    if (hasSqliteQ && !hasDollar) {
-      throw new Error(
-        `CRITICAL: Non-sqlite dialect query contains sqlite '?' placeholders. SQL: ${sqlPreview(sql)}`,
-      )
-    }
-    return validateDollarPlaceholders(sql, params)
+  if (dialect === 'postgres') {
+    validateParamConsistency(sql, params)
+    return
   }
 
-  if (hasDollar && hasSqliteQ) {
-    throw new Error(
-      `CRITICAL: Mixed placeholder styles ($N and ?/ ?NNN) are not supported. SQL: ${sqlPreview(sql)}`,
-    )
+  if (dialect === 'sqlite') {
+    validateQuestionMarkConsistency(sql, params)
+    return
   }
 
-  if (hasSqliteQ) return validateSqlitePlaceholders(sql, params)
-  return validateDollarPlaceholders(sql, params)
+  if ((dialect as any) === 'mysql' || (dialect as any) === 'mariadb') {
+    validateQuestionMarkConsistency(sql, params)
+    return
+  }
+
+  validateParamConsistency(sql, params)
+}
+
+export function needsQuoting(identifier: string): boolean {
+  const s = String(identifier)
+
+  if (!REGEX_CACHE.VALID_IDENTIFIER.test(s)) return true
+
+  const lowered = s.toLowerCase()
+  if (SQL_KEYWORDS.has(lowered)) return true
+
+  return false
 }

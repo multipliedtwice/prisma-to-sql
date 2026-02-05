@@ -34,17 +34,16 @@ import {
 import { isDynamicParameter } from '@dee-wan/schema-parser'
 import { addAutoScoped } from './shared/dynamic-params'
 import { buildNotComposite } from './where/operators-scalar'
-import { getFieldInfo } from './shared/model-field-cache'
 import {
   assertScalarField,
   assertNumericField,
 } from './shared/validators/field-assertions'
-import { buildComparisons, joinComparisons } from './shared/comparison-builder'
+import { buildComparisons } from './shared/comparison-builder'
 
 type AggregateKey = '_count' | '_sum' | '_avg' | '_min' | '_max'
 type LogicalKey = 'AND' | 'OR' | 'NOT'
 
-const AGGREGATES: ReadonlyArray<[AggregateKey, string]> = [
+const AGGREGATES: ReadonlyArray<[Exclude<AggregateKey, '_count'>, string]> = [
   ['_sum', 'SUM'],
   ['_avg', 'AVG'],
   ['_min', 'MIN'],
@@ -73,6 +72,30 @@ const HAVING_ALLOWED_OPS = new Set<string>([
 
 function isTruthySelection(v: unknown): boolean {
   return v === true
+}
+
+function isLogicalKey(key: string): key is LogicalKey {
+  return (
+    key === LogicalOps.AND || key === LogicalOps.OR || key === LogicalOps.NOT
+  )
+}
+
+function isAggregateKey(key: string): key is AggregateKey {
+  return (
+    key === '_count' ||
+    key === '_sum' ||
+    key === '_avg' ||
+    key === '_min' ||
+    key === '_max'
+  )
+}
+
+function assertHavingOp(op: string): void {
+  if (!HAVING_ALLOWED_OPS.has(op)) {
+    throw new Error(
+      `Unsupported HAVING operator '${op}'. Allowed: ${[...HAVING_ALLOWED_OPS].join(', ')}`,
+    )
+  }
 }
 
 function aggExprForField(
@@ -124,19 +147,9 @@ function normalizeLogicalValue(
     return out
   }
 
-  if (isPlainObject(value)) {
-    return [value]
-  }
+  if (isPlainObject(value)) return [value]
 
   throw new Error(`${operator} must be an object or array of objects in HAVING`)
-}
-
-function assertHavingOp(op: string): void {
-  if (!HAVING_ALLOWED_OPS.has(op)) {
-    throw new Error(
-      `Unsupported HAVING operator '${op}'. Allowed: ${[...HAVING_ALLOWED_OPS].join(', ')}`,
-    )
-  }
 }
 
 function buildNullComparison(expr: string, op: string): string {
@@ -214,22 +227,6 @@ function buildSimpleComparison(
   return buildBinaryComparison(expr, op, val, params)
 }
 
-function isLogicalKey(key: string): key is LogicalKey {
-  return (
-    key === LogicalOps.AND || key === LogicalOps.OR || key === LogicalOps.NOT
-  )
-}
-
-function isAggregateKey(key: string): key is AggregateKey {
-  return (
-    key === '_count' ||
-    key === '_sum' ||
-    key === '_avg' ||
-    key === '_min' ||
-    key === '_max'
-  )
-}
-
 function negateClauses(subClauses: string[]): string {
   if (subClauses.length === 1) return `${SQL_TEMPLATES.NOT} ${subClauses[0]}`
   return `${SQL_TEMPLATES.NOT} (${subClauses.join(SQL_SEPARATORS.CONDITION_AND)})`
@@ -238,6 +235,26 @@ function negateClauses(subClauses: string[]): string {
 function combineLogical(key: LogicalKey, subClauses: string[]): string {
   if (key === LogicalOps.NOT) return negateClauses(subClauses)
   return subClauses.join(` ${key} `)
+}
+
+function buildHavingNode(
+  node: Record<string, unknown>,
+  alias: string,
+  params: ParamStore,
+  dialect: SqlDialect,
+  model: Model,
+): string {
+  const clauses: string[] = []
+
+  const entries = Object.entries(node)
+  for (const [key, value] of entries) {
+    const built = buildHavingEntry(key, value, alias, params, dialect, model)
+    for (const c of built) {
+      if (c && c.trim().length > 0) clauses.push(c)
+    }
+  }
+
+  return clauses.join(SQL_SEPARATORS.CONDITION_AND)
 }
 
 function buildLogicalClause(
@@ -253,11 +270,96 @@ function buildLogicalClause(
 
   for (const it of items) {
     const c = buildHavingNode(it, alias, params, dialect, model)
-    if (c && c !== '') subClauses.push(`(${c})`)
+    if (c && c.trim().length > 0) subClauses.push(`(${c})`)
   }
 
   if (subClauses.length === 0) return ''
   return combineLogical(key, subClauses)
+}
+
+function assertHavingAggTarget(
+  aggKey: AggregateKey,
+  field: string,
+  model: Model,
+): void {
+  if (field === '_all') {
+    if (aggKey !== '_count')
+      throw new Error(`HAVING '${aggKey}' does not support '_all'`)
+    return
+  }
+
+  if (aggKey === '_sum' || aggKey === '_avg') {
+    assertNumericField(model, field, 'HAVING')
+  } else {
+    assertScalarField(model, field, 'HAVING')
+  }
+}
+
+function buildHavingOpsForExpr(
+  expr: string,
+  filter: Record<string, unknown>,
+  params: ParamStore,
+  dialect: SqlDialect,
+): string[] {
+  return buildComparisons(expr, filter, params, dialect, buildSimpleComparison)
+}
+
+function buildHavingForAggregateFirstShape(
+  aggKey: AggregateKey,
+  target: unknown,
+  alias: string,
+  params: ParamStore,
+  dialect: SqlDialect,
+  model: Model,
+): string[] {
+  if (!isPlainObject(target)) {
+    throw new Error(`HAVING '${aggKey}' must be an object`)
+  }
+
+  const out: string[] = []
+  for (const [field, filter] of Object.entries(target)) {
+    assertHavingAggTarget(aggKey, field, model)
+    if (!isPlainObject(filter) || Object.keys(filter).length === 0) continue
+
+    const expr = aggExprForField(aggKey, field, alias, model)
+    out.push(...buildHavingOpsForExpr(expr, filter, params, dialect))
+  }
+
+  return out
+}
+
+function buildHavingForFieldFirstShape(
+  fieldName: string,
+  target: unknown,
+  alias: string,
+  params: ParamStore,
+  dialect: SqlDialect,
+  model: Model,
+): string[] {
+  if (!isPlainObject(target)) {
+    throw new Error(`HAVING '${fieldName}' must be an object`)
+  }
+
+  assertScalarField(model, fieldName, 'HAVING')
+
+  const out: string[] = []
+  const obj = target as Record<string, unknown>
+
+  const keys: AggregateKey[] = ['_count', '_sum', '_avg', '_min', '_max']
+  for (const aggKey of keys) {
+    const aggFilter = obj[aggKey]
+    if (!isPlainObject(aggFilter)) continue
+    if (Object.keys(aggFilter).length === 0) continue
+
+    if (aggKey === '_sum' || aggKey === '_avg') {
+      assertNumericField(model, fieldName, 'HAVING')
+    }
+
+    const expr = aggExprForField(aggKey, fieldName, alias, model)
+    out.push(...buildHavingOpsForExpr(expr, aggFilter, params, dialect))
+  }
+
+  return out
 }
 
 function buildHavingEntry(
@@ -301,121 +403,6 @@ function buildHavingEntry(
   )
 }
 
-function buildHavingNode(
-  node: Record<string, unknown>,
-  alias: string,
-  params: ParamStore,
-  dialect: SqlDialect,
-  model: Model,
-): string {
-  const clauses: string[] = []
-
-  for (const [key, value] of Object.entries(node)) {
-    const built = buildHavingEntry(key, value, alias, params, dialect, model)
-    for (const c of built) {
-      if (c && c.trim().length > 0) clauses.push(c)
-    }
-  }
-
-  return clauses.join(SQL_SEPARATORS.CONDITION_AND)
-}
-
-function assertHavingAggTarget(
-  aggKey: AggregateKey,
-  field: string,
-  model: Model,
-): void {
-  if (field === '_all') {
-    if (aggKey !== '_count') {
-      throw new Error(`HAVING '${aggKey}' does not support '_all'`)
-    }
-    return
-  }
-
-  if (aggKey === '_sum' || aggKey === '_avg') {
-    assertNumericField(model, field, 'HAVING')
-  } else {
-    assertScalarField(model, field, 'HAVING')
-  }
-}
-
-function buildHavingOpsForExpr(
-  expr: string,
-  filter: Record<string, unknown>,
-  params: ParamStore,
-  dialect: SqlDialect,
-): string[] {
-  return buildComparisons(expr, filter, params, dialect, buildSimpleComparison)
-}
-
-function buildHavingForAggregateFirstShape(
-  aggKey: AggregateKey,
-  target: unknown,
-  alias: string,
-  params: ParamStore,
-  dialect: SqlDialect,
-  model: Model,
-): string[] {
-  if (!isPlainObject(target)) {
-    throw new Error(`HAVING '${aggKey}' must be an object`)
-  }
-
-  const out: string[] = []
-
-  for (const [field, filter] of Object.entries(target)) {
-    assertHavingAggTarget(aggKey, field, model)
-    if (!isPlainObject(filter) || Object.keys(filter).length === 0) continue
-
-    const expr = aggExprForField(aggKey, field, alias, model)
-    out.push(...buildHavingOpsForExpr(expr, filter, params, dialect))
-  }
-
-  return out
-}
-
-function buildHavingForFieldFirstShape(
-  fieldName: string,
-  target: unknown,
-  alias: string,
-  params: ParamStore,
-  dialect: SqlDialect,
-  model: Model,
-): string[] {
-  if (!isPlainObject(target)) {
-    throw new Error(`HAVING '${fieldName}' must be an object`)
-  }
-
-  const field = assertScalarField(model, fieldName, 'HAVING')
-  const out: string[] = []
-  const obj = target as Record<string, unknown>
-
-  const keys: AggregateKey[] = ['_count', '_sum', '_avg', '_min', '_max']
-  for (const aggKey of keys) {
-    const aggFilter = obj[aggKey]
-    if (!isPlainObject(aggFilter)) continue
-
-    if (aggKey === '_sum' || aggKey === '_avg') {
-      assertNumericField(model, fieldName, 'HAVING')
-    }
-
-    const entries = Object.entries(aggFilter)
-    if (entries.length === 0) continue
-
-    const expr = aggExprForField(aggKey, fieldName, alias, model)
-
-    const clauses = buildComparisons(
-      expr,
-      aggFilter,
-      params,
-      dialect,
-      buildSimpleComparison,
-    )
-    out.push(...clauses)
-  }
-
-  return out
-}
-
 function buildHavingClause(
   having: Record<string, unknown> | undefined,
   alias: string,
@@ -426,9 +413,7 @@ function buildHavingClause(
   if (!isNotNullish(having)) return ''
 
   const d = dialect ?? getGlobalDialect()
-  if (!isPlainObject(having)) {
-    throw new Error('having must be an object')
-  }
+  if (!isPlainObject(having)) throw new Error('having must be an object')
 
   return buildHavingNode(having, alias, params, d, model)
 }
@@ -446,10 +431,6 @@ function pushCountAllField(fields: string[]): void {
   fields.push(
     `${SQL_TEMPLATES.COUNT_ALL} ${SQL_TEMPLATES.AS} ${quote('_count._all')}`,
   )
-}
-
-function assertCountableScalarField(model: Model, fieldName: string): void {
-  assertScalarField(model, fieldName, '_count')
 }
 
 function pushCountField(
@@ -486,9 +467,8 @@ function addCountFields(
   const selected = Object.entries(countArg).filter(
     ([f, v]) => f !== '_all' && isTruthySelection(v),
   )
-
   for (const [f] of selected) {
-    assertCountableScalarField(model, f)
+    assertScalarField(model, f, '_count')
     pushCountField(fields, alias, f, model)
   }
 }
@@ -648,9 +628,7 @@ function buildGroupByHaving(
   dialect: SqlDialect,
 ): string {
   if (!isNotNullish(args.having)) return ''
-  if (!isPlainObject(args.having)) {
-    throw new Error('having must be an object')
-  }
+  if (!isPlainObject(args.having)) throw new Error('having must be an object')
 
   const h = buildHavingClause(args.having, alias, params, model, dialect)
   if (!h || h.trim().length === 0) return ''
@@ -679,7 +657,6 @@ export function buildGroupBySql(
     model,
     byFields,
   )
-
   const havingClause = buildGroupByHaving(args, alias, params, model, d)
 
   const whereClause = isValidWhereClause(whereResult.clause)
@@ -706,11 +683,9 @@ export function buildGroupBySql(
   validateSelectQuery(sql)
   validateParamConsistency(sql, [...whereResult.params, ...snapshot.params])
 
-  const mergedParams = [...whereResult.params, ...snapshot.params]
-
   return Object.freeze({
     sql,
-    params: Object.freeze(mergedParams),
+    params: Object.freeze([...whereResult.params, ...snapshot.params]),
     paramMappings: Object.freeze([
       ...whereResult.paramMappings,
       ...snapshot.mappings,
