@@ -1,3 +1,10 @@
+## [1.48.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.48.0...v1.48.1) (2026-02-05)
+
+
+### Bug Fixes
+
+* **code-emitter.ts:** handle Date instances in transformEnumValues function to prevent incorrect transformations ([50cf1ea](https://github.com/multipliedtwice/prisma-to-sql/commit/50cf1ea06982d6efcf2d0cdc3941cc7b9ad37615))
+
 # [1.48.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.47.0...v1.48.0) (2026-02-05)
 
 # [1.47.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.46.0...v1.47.0) (2026-02-05)
