@@ -66,13 +66,13 @@
   "license": "MIT",
   "dependencies": {
     "@dee-wan/schema-parser": "1.4.0",
-    "@prisma/generator-helper": "^6.16.3",
-    "@prisma/internals": "^6.16.3"
+    "@prisma/generator-helper": "^7.2.0",
+    "@prisma/internals": "^7.2.0"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.2.0",
-    "@prisma/adapter-better-sqlite3": "^6.16.3",
-    "@prisma/adapter-pg": "^6.16.3",
+    "@prisma/adapter-better-sqlite3": "^7.2.0",
+    "@prisma/adapter-pg": "^7.2.0",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
@@ -86,8 +86,8 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18",
-    "@prisma/client": "6.16.3",
-    "prisma": "6.16.3"
+    "@prisma/client": "7.2.0",
+    "prisma": "7.2.0"
   },
   "engines": {
     "node": ">=16.0.0"
