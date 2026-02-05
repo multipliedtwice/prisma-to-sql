@@ -20,6 +20,14 @@
 ### Features
 
 * **code-emitter.ts:** add getByPath function to retrieve nested object values using dot notation ([bb79e9f](https://github.com/multipliedtwice/prisma-to-sql/commit/bb79e9f82d0959bf49f98d734c9d22ed9b3ed287))
+* **code-emitter.ts:** add support for Date objects in transformEnumValues function to ensure proper handling of date instances ([7a34831](https://github.com/multipliedtwice/prisma-to-sql/commit/7a34831ae5c62d5d9b7fc11918010a45981e085d))
+
+# [1.47.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.46.0...v1.47.0) (2026-02-05)
+
+
+### Features
+
+* **code-emitter.ts:** add getByPath function to retrieve nested object values using dot notation ([bb79e9f](https://github.com/multipliedtwice/prisma-to-sql/commit/bb79e9f82d0959bf49f98d734c9d22ed9b3ed287))
 
 # [1.47.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.46.0...v1.47.0) (2026-02-05)
 
