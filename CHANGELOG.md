@@ -5,6 +5,13 @@
 
 * **code-emitter.ts:** add getByPath function to retrieve nested object values using dot notation ([bb79e9f](https://github.com/multipliedtwice/prisma-to-sql/commit/bb79e9f82d0959bf49f98d734c9d22ed9b3ed287))
 
+# [1.47.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.46.0...v1.47.0) (2026-02-05)
+
+
+### Features
+
+* **code-emitter.ts:** add getByPath function to retrieve nested object values using dot notation ([bb79e9f](https://github.com/multipliedtwice/prisma-to-sql/commit/bb79e9f82d0959bf49f98d734c9d22ed9b3ed287))
+
 # [1.46.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.45.0...v1.46.0) (2026-02-05)
 
 # [1.45.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.44.0...v1.45.0) (2026-02-05)
