@@ -78,6 +78,13 @@ const HAVING_FIELD_FIRST_AGG_KEYS: readonly AggregateKey[] = Object.freeze([
   '_max',
 ] as const)
 
+function hasAnyOwnKey(obj: Record<string, unknown>): boolean {
+  for (const k in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) return true
+  }
+  return false
+}
+
 function isTruthySelection(v: unknown): boolean {
   return v === true
 }
@@ -344,14 +351,7 @@ function buildHavingForAggregateFirstShape(
     if (!isPlainObject(filter)) continue
 
     const filterObj = filter as Record<string, unknown>
-    let hasAny = false
-    for (const k in filterObj) {
-      if (Object.prototype.hasOwnProperty.call(filterObj, k)) {
-        hasAny = true
-        break
-      }
-    }
-    if (!hasAny) continue
+    if (!hasAnyOwnKey(filterObj)) continue
 
     const expr = aggExprForField(aggKey, field, alias, model)
     out.push(...buildHavingOpsForExpr(expr, filterObj, params, dialect))
@@ -382,14 +382,7 @@ function buildHavingForFieldFirstShape(
     if (!isPlainObject(aggFilter)) continue
 
     const aggFilterObj = aggFilter as Record<string, unknown>
-    let hasAny = false
-    for (const k in aggFilterObj) {
-      if (Object.prototype.hasOwnProperty.call(aggFilterObj, k)) {
-        hasAny = true
-        break
-      }
-    }
-    if (!hasAny) continue
+    if (!hasAnyOwnKey(aggFilterObj)) continue
 
     if (aggKey === '_sum' || aggKey === '_avg') {
       assertNumericField(model, fieldName, 'HAVING')
@@ -529,7 +522,7 @@ function getAggregateSelectionObject(
   agg: AggregateKey,
 ): Record<string, unknown> | undefined {
   const obj = (args as Record<string, unknown>)[agg]
-  return isPlainObject(obj) ? obj : undefined
+  return isPlainObject(obj) ? (obj as Record<string, unknown>) : undefined
 }
 
 function assertAggregatableScalarField(
