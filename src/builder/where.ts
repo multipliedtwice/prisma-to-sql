@@ -5,10 +5,6 @@ import { createAliasGenerator } from './shared/alias-generator'
 import { createParamStore, ParamStore } from './shared/param-store'
 import { toPublicResult } from './shared/state'
 import { WhereClauseResult, BuildContext } from './shared/types'
-import {
-  validateParamConsistency,
-  validateParamConsistencyFragment,
-} from './shared/validators/sql-validators'
 import { assertSafeAlias } from './shared/sql-utils'
 
 interface BuildWhereOptions {
@@ -45,23 +41,6 @@ export function buildWhereClause(
 
   const result = whereBuilderInstance.build(where, ctx)
   const publicResult = toPublicResult(result.clause, result.joins, params)
-
-  if (!options.isSubquery) {
-    const nums = [...publicResult.clause.matchAll(/\$(\d+)/g)].map((m) =>
-      parseInt(m[1], 10),
-    )
-    if (nums.length > 0) {
-      const min = Math.min(...nums)
-      if (min === 1) {
-        validateParamConsistency(publicResult.clause, publicResult.params)
-      } else {
-        validateParamConsistencyFragment(
-          publicResult.clause,
-          publicResult.params,
-        )
-      }
-    }
-  }
 
   return publicResult
 }
