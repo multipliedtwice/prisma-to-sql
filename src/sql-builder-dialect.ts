@@ -275,7 +275,7 @@ export function prepareArrayParam(
   }
 
   if (dialect === 'postgres') {
-    return value.map(normalizeValue)
+    return value.map((v) => normalizeValue(v))
   }
   return JSON.stringify(value)
 }
