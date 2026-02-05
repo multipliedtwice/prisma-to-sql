@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: 'pages'
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -70,8 +70,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
   build-docs:
+    needs: [test, publish]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
