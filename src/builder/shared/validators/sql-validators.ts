@@ -1,4 +1,9 @@
-import { DEFAULT_WHERE_CLAUSE, REGEX_CACHE, SQL_KEYWORDS } from '../constants'
+import {
+  DEFAULT_WHERE_CLAUSE,
+  REGEX_CACHE,
+  SQL_KEYWORDS,
+  IS_PRODUCTION,
+} from '../constants'
 import {
   isNotNullish,
   hasValidContent,
@@ -28,6 +33,8 @@ function sqlPreview(sql: string): string {
 }
 
 export function validateSelectQuery(sql: string): void {
+  if (IS_PRODUCTION) return
+
   if (!hasValidContent(sql)) {
     throw new Error('CRITICAL: Generated empty SQL query')
   }
@@ -119,6 +126,8 @@ export function validateParamConsistency(
   sql: string,
   params: readonly unknown[],
 ): void {
+  if (IS_PRODUCTION) return
+
   const paramLen = params.length
   const scan = scanDollarPlaceholders(sql, paramLen)
 
@@ -165,6 +174,8 @@ function validateQuestionMarkConsistency(
   sql: string,
   params: readonly unknown[],
 ): void {
+  if (IS_PRODUCTION) return
+
   const expected = params.length
   const found = countQuestionMarkPlaceholders(sql)
 
@@ -180,6 +191,8 @@ export function validateParamConsistencyByDialect(
   params: readonly unknown[],
   dialect: SqlDialect,
 ): void {
+  if (IS_PRODUCTION) return
+
   if (dialect === 'postgres') {
     validateParamConsistency(sql, params)
     return
