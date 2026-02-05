@@ -1,3 +1,5 @@
+export const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+
 export const SQL_SEPARATORS = Object.freeze({
   FIELD_LIST: ', ',
   CONDITION_AND: ' AND ',

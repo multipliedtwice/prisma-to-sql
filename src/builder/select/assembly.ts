@@ -15,6 +15,7 @@ import {
 import { addAutoScoped } from '../shared/dynamic-params'
 import { jsonBuildObject } from '../../sql-builder-dialect'
 import { buildRelationCountSql } from './includes'
+import { joinNonEmpty } from '../shared/string-builder'
 
 const ALIAS_CAPTURE = '([A-Za-z_][A-Za-z0-9_]*)'
 const COLUMN_PART = '(?:"([^"]+)"|([a-z_][a-z0-9_]*))'
@@ -22,18 +23,14 @@ const AS_PART = `(?:\\s+AS\\s+${COLUMN_PART})?`
 const SIMPLE_COLUMN_PATTERN = `^${ALIAS_CAPTURE}\\.${COLUMN_PART}${AS_PART}$`
 const SIMPLE_COLUMN_RE = new RegExp(SIMPLE_COLUMN_PATTERN, 'i')
 
-function joinNonEmpty(parts: string[], sep: string): string {
-  const out: string[] = []
-  for (const p of parts) {
-    const s = p.trim()
-    if (s.length > 0) out.push(s)
-  }
-  return out.join(sep)
-}
-
 function buildWhereSql(conditions: readonly string[]): string {
   if (!isNonEmptyArray(conditions)) return ''
-  return ` ${SQL_TEMPLATES.WHERE} ${conditions.join(SQL_SEPARATORS.CONDITION_AND)}`
+  return (
+    ' ' +
+    SQL_TEMPLATES.WHERE +
+    ' ' +
+    conditions.join(SQL_SEPARATORS.CONDITION_AND)
+  )
 }
 
 function buildJoinsSql(
@@ -45,14 +42,15 @@ function buildJoinsSql(
       for (const j of g) all.push(j)
     }
   }
-  return all.length > 0 ? ` ${all.join(' ')}` : ''
+  return all.length > 0 ? ' ' + all.join(' ') : ''
 }
 
 function buildSelectList(baseSelect: string, extraCols: string): string {
   const base = baseSelect.trim()
   const extra = extraCols.trim()
-  if (base && extra) return `${base}${SQL_SEPARATORS.FIELD_LIST}${extra}`
-  return base || extra
+  if (!base) return extra
+  if (!extra) return base
+  return base + SQL_SEPARATORS.FIELD_LIST + extra
 }
 
 function finalizeSql(
@@ -67,11 +65,11 @@ function finalizeSql(
     snapshot.params,
     dialect === 'sqlite' ? 'postgres' : dialect,
   )
-  return Object.freeze({
+  return {
     sql,
     params: snapshot.params,
-    paramMappings: Object.freeze(snapshot.mappings),
-  })
+    paramMappings: snapshot.mappings,
+  }
 }
 
 function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
@@ -163,7 +161,7 @@ function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
         `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
       )
     }
-    i++ // skip '.'
+    i++
     i = skipSpaces(p, i)
 
     const colPart = readIdentOrQuoted(p, i)
@@ -187,7 +185,6 @@ function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
         }
         let j = i
         j = skipSpaces(p, j)
-        // consume "AS"
         if (!/^AS\b/i.test(p.slice(j))) {
           throw new Error(`Failed to parse AS in: ${p}`)
         }
@@ -223,7 +220,7 @@ function replaceOrderByAlias(
   if (src.length === 0) return orderBy
   const escaped = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const re = new RegExp(`\\b${escaped}\\.`, 'gi')
-  return orderBy.replace(re, `${outerAlias}.`)
+  return orderBy.replace(re, outerAlias + '.')
 }
 
 function buildDistinctColumns(
@@ -269,13 +266,15 @@ function buildWindowOrder(args: {
 
   const hasIdInOrder = orderFields.some(
     (f) =>
-      f.startsWith(`${fromLower}.id `) || f.startsWith(`${fromLower}."id" `),
+      f.startsWith(fromLower + '.id ') || f.startsWith(fromLower + '."id" '),
   )
 
   if (hasIdInOrder) return baseOrder
 
-  const idTiebreaker = idField ? `, ${col(fromAlias, 'id', model)} ASC` : ''
-  return `${baseOrder}${idTiebreaker}`
+  const idTiebreaker = idField
+    ? ', ' + col(fromAlias, 'id', model) + ' ASC'
+    : ''
+  return baseOrder + idTiebreaker
 }
 
 function buildSqliteDistinctQuery(
@@ -301,7 +300,7 @@ function buildSqliteDistinctQuery(
   const distinctCols = buildDistinctColumns([...distinct], from.alias, model)
 
   const fallbackOrder = [...distinct]
-    .map((f) => `${col(from.alias, f, model)} ASC`)
+    .map((f) => col(from.alias, f, model) + ' ASC')
     .join(SQL_SEPARATORS.FIELD_LIST)
 
   const idField = model.fields.find(
@@ -317,8 +316,8 @@ function buildSqliteDistinctQuery(
   })
 
   const outerOrder = isNonEmptyString(orderBy)
-    ? replaceOrderByAlias(orderBy, from.alias, `"__tp_distinct"`)
-    : replaceOrderByAlias(fallbackOrder, from.alias, `"__tp_distinct"`)
+    ? replaceOrderByAlias(orderBy, from.alias, '"__tp_distinct"')
+    : replaceOrderByAlias(fallbackOrder, from.alias, '"__tp_distinct"')
 
   const joins = buildJoinsSql(whereJoins, countJoins)
 
@@ -332,7 +331,11 @@ function buildSqliteDistinctQuery(
   const innerParts: string[] = [
     SQL_TEMPLATES.SELECT,
     innerSelectList + innerComma,
-    `ROW_NUMBER() OVER (PARTITION BY ${distinctCols} ORDER BY ${windowOrder})`,
+    'ROW_NUMBER() OVER (PARTITION BY ' +
+      distinctCols +
+      ' ORDER BY ' +
+      windowOrder +
+      ')',
     SQL_TEMPLATES.AS,
     '"__tp_rn"',
     SQL_TEMPLATES.FROM,
@@ -347,7 +350,7 @@ function buildSqliteDistinctQuery(
     SQL_TEMPLATES.SELECT,
     outerSelectCols,
     SQL_TEMPLATES.FROM,
-    `(${inner})`,
+    '(' + inner + ')',
     SQL_TEMPLATES.AS,
     '"__tp_distinct"',
     SQL_TEMPLATES.WHERE,
@@ -382,7 +385,12 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
         dialect,
       )
       if (countBuild.jsonPairs) {
-        countCols = `${jsonBuildObject(countBuild.jsonPairs, dialect)} ${SQL_TEMPLATES.AS} ${quote('_count')}`
+        countCols =
+          jsonBuildObject(countBuild.jsonPairs, dialect) +
+          ' ' +
+          SQL_TEMPLATES.AS +
+          ' ' +
+          quote('_count')
       }
       countJoins = countBuild.joins
     }
@@ -401,9 +409,9 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
     ? includes
         .map((inc) => {
           const expr = inc.isOneToOne
-            ? `(${inc.sql})`
-            : `COALESCE((${inc.sql}), ${emptyJson})`
-          return `${expr} ${SQL_TEMPLATES.AS} ${quote(inc.name)}`
+            ? '(' + inc.sql + ')'
+            : 'COALESCE((' + inc.sql + '), ' + emptyJson + ')'
+          return expr + ' ' + SQL_TEMPLATES.AS + ' ' + quote(inc.name)
         })
         .join(SQL_SEPARATORS.FIELD_LIST)
     : ''
@@ -502,7 +510,7 @@ function buildPostgresDistinctOnClause(
 ): string | null {
   if (!isNonEmptyArray(distinct)) return null
   const distinctCols = buildDistinctColumns([...distinct], fromAlias, model)
-  return `${SQL_TEMPLATES.DISTINCT_ON} (${distinctCols})`
+  return SQL_TEMPLATES.DISTINCT_ON + ' (' + distinctCols + ')'
 }
 
 function pushJoinGroups(
@@ -563,7 +571,7 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   }
 
   const parts: string[] = []
-  if (cursorCte) parts.push(`WITH ${cursorCte}`)
+  if (cursorCte) parts.push('WITH ' + cursorCte)
 
   parts.push(SQL_TEMPLATES.SELECT)
 
@@ -581,6 +589,11 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
 
   parts.push(fullSelectList)
   parts.push(SQL_TEMPLATES.FROM, from.table, from.alias)
+
+  if (cursorCte) {
+    const cteName = cursorCte.split(' AS ')[0].trim()
+    parts.push('CROSS JOIN', cteName)
+  }
 
   pushJoinGroups(parts, whereJoins, countJoins)
 
