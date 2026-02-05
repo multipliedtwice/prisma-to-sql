@@ -24,7 +24,10 @@ export function isValidRelationField(field: Field | undefined): field is Field {
   const refsRaw = (field as any).references
   const refs = normalizeKeyList(refsRaw)
 
-  if (refs.length === 0) return false
+  if (refs.length === 0) {
+    return fk.length === 1
+  }
+
   if (refs.length !== fk.length) return false
 
   return true

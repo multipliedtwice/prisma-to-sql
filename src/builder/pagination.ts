@@ -1,6 +1,12 @@
 import { PrismaQueryArgs, Model } from '../types'
 import { SQL_SEPARATORS, SQL_TEMPLATES } from './shared/constants'
-import { col, quoteColumn } from './shared/sql-utils'
+import {
+  col,
+  quote,
+  quoteColumn,
+  assertSafeAlias,
+  assertSafeTableRef,
+} from './shared/sql-utils'
 import { ParamStore } from './shared/param-store'
 import { SqlDialect, getGlobalDialect } from '../sql-builder-dialect'
 import {
@@ -15,6 +21,8 @@ import { normalizeOrderByInput } from './shared/order-by-utils'
 
 type OrderByDirection = 'asc' | 'desc'
 type NullsPosition = 'first' | 'last'
+
+type OrderByValueObject = { direction: OrderByDirection; nulls?: NullsPosition }
 
 type OrderByEntry = {
   field: string
@@ -79,7 +87,7 @@ function assertAllowedOrderByKeys(
 export function parseOrderByValue(
   v: unknown,
   fieldName?: string,
-): { direction: OrderByDirection; nulls?: NullsPosition } {
+): OrderByValueObject {
   const errorPrefix = fieldName ? `orderBy for '${fieldName}'` : 'orderBy value'
 
   if (typeof v === 'string') {
@@ -126,7 +134,18 @@ function hasNonNullishProp(
 
 function normalizeIntegerOrDynamic(name: 'take', v: unknown): IntOrDynamic {
   if (isDynamicParameter(v)) return v as string
-  return normalizeFiniteInteger(name, v)
+
+  const result = normalizeIntLike(name, v, {
+    min: Number.MIN_SAFE_INTEGER,
+    max: MAX_LIMIT_OFFSET,
+    allowZero: true,
+  })
+
+  if (result === undefined) {
+    throw new Error(`${name} normalization returned undefined`)
+  }
+
+  return result
 }
 
 export function readSkipTake(relArgs: unknown): SkipTakeReadResult {
@@ -142,7 +161,7 @@ export function readSkipTake(relArgs: unknown): SkipTakeReadResult {
     }
   }
 
-  const obj = relArgs
+  const obj = relArgs as Record<string, unknown>
 
   const skipVal = hasSkip
     ? normalizeNonNegativeInt('skip', obj.skip)
@@ -253,25 +272,6 @@ function buildCursorFilterParts(
   }
 }
 
-function cursorValueExpr(
-  tableName: string,
-  cursorAlias: string,
-  cursorWhereSql: string,
-  field: string,
-  model?: Model,
-): string {
-  const colName = quoteColumn(model, field)
-  return `(SELECT ${cursorAlias}.${colName} ${SQL_TEMPLATES.FROM} ${tableName} ${cursorAlias} ${SQL_TEMPLATES.WHERE} ${cursorWhereSql} ${SQL_TEMPLATES.LIMIT} 1)`
-}
-
-function buildCursorRowExistsExpr(
-  tableName: string,
-  cursorAlias: string,
-  cursorWhereSql: string,
-): string {
-  return `EXISTS (${SQL_TEMPLATES.SELECT} 1 ${SQL_TEMPLATES.FROM} ${tableName} ${cursorAlias} ${SQL_TEMPLATES.WHERE} ${cursorWhereSql} ${SQL_TEMPLATES.LIMIT} 1)`
-}
-
 function buildCursorEqualityExpr(
   columnExpr: string,
   valueExpr: string,
@@ -324,7 +324,10 @@ function buildOuterCursorMatch(
 }
 
 function buildOrderEntries(orderBy: unknown): OrderByEntry[] {
-  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue)
+  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue) as Array<
+    Record<string, string | OrderByValueObject>
+  >
+
   const entries: OrderByEntry[] = []
 
   for (const item of normalized) {
@@ -334,7 +337,7 @@ function buildOrderEntries(orderBy: unknown): OrderByEntry[] {
       } else {
         entries.push({
           field,
-          direction: value.sort,
+          direction: value.direction,
           nulls: value.nulls,
         })
       }
@@ -342,6 +345,52 @@ function buildOrderEntries(orderBy: unknown): OrderByEntry[] {
   }
 
   return entries
+}
+
+function buildCursorCteSelectList(
+  cursorEntries: Array<[string, unknown]>,
+  orderEntries: OrderByEntry[],
+  model?: Model,
+): string {
+  const set = new Set<string>()
+  for (const [f] of cursorEntries) set.add(f)
+  for (const e of orderEntries) set.add(e.field)
+
+  const cols = [...set].map((f) => quoteColumn(model, f))
+  if (cols.length === 0) {
+    throw new Error('cursor cte select list is empty')
+  }
+  return cols.join(SQL_SEPARATORS.FIELD_LIST)
+}
+
+function modelHasScalarId(model?: Model): boolean {
+  if (!model) return false
+  const idField = model.fields.find((f) => f.name === 'id' && !f.isRelation)
+  return !!idField
+}
+
+function hasIdTiebreaker(orderBy: unknown): boolean {
+  if (!isNotNullish(orderBy)) return false
+  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue)
+  return normalized.some((obj) =>
+    Object.prototype.hasOwnProperty.call(obj, 'id'),
+  )
+}
+
+function addIdTiebreaker(orderBy: unknown): unknown {
+  if (Array.isArray(orderBy)) return [...orderBy, { id: 'asc' }]
+  return [orderBy, { id: 'asc' }]
+}
+
+function ensureDeterministicOrderBy(orderBy: unknown, model?: Model): unknown {
+  if (!modelHasScalarId(model)) return orderBy
+
+  if (!isNotNullish(orderBy)) {
+    return { id: 'asc' }
+  }
+
+  if (hasIdTiebreaker(orderBy)) return orderBy
+  return addIdTiebreaker(orderBy)
 }
 
 export function buildCursorCondition(
@@ -352,7 +401,10 @@ export function buildCursorCondition(
   params: ParamStore,
   dialect?: SqlDialect,
   model?: Model,
-): string {
+): { cte: string; condition: string } {
+  assertSafeTableRef(tableName)
+  assertSafeAlias(alias)
+
   const d = dialect ?? getGlobalDialect()
 
   const cursorEntries = Object.entries(cursor)
@@ -364,7 +416,8 @@ export function buildCursorCondition(
   const { whereSql: cursorWhereSql, placeholdersByField } =
     buildCursorFilterParts(cursor, cursorAlias, params, model)
 
-  let orderEntries = buildOrderEntries(orderBy)
+  const deterministicOrderBy = ensureDeterministicOrderBy(orderBy, model)
+  let orderEntries = buildOrderEntries(deterministicOrderBy)
 
   if (orderEntries.length === 0) {
     orderEntries = cursorEntries.map(([field]) => ({
@@ -375,11 +428,27 @@ export function buildCursorCondition(
     orderEntries = ensureCursorFieldsInOrder(orderEntries, cursorEntries)
   }
 
-  const existsExpr = buildCursorRowExistsExpr(
-    tableName,
-    cursorAlias,
-    cursorWhereSql,
+  const cursorOrderBy = orderEntries
+    .map(
+      (e) =>
+        `${cursorAlias}.${quoteColumn(model, e.field)} ${e.direction.toUpperCase()}`,
+    )
+    .join(', ')
+
+  const selectList = buildCursorCteSelectList(
+    cursorEntries,
+    orderEntries,
+    model,
   )
+
+  const cte = `__tp_cursor AS (
+    SELECT ${selectList} FROM ${tableName} ${cursorAlias}
+    WHERE ${cursorWhereSql}
+    ORDER BY ${cursorOrderBy}
+    LIMIT 1
+  )`
+
+  const existsExpr = `EXISTS (SELECT 1 FROM __tp_cursor)`
 
   const outerCursorMatch = buildOuterCursorMatch(
     cursor,
@@ -389,19 +458,8 @@ export function buildCursorCondition(
     model,
   )
 
-  const valueExprByField = new Map<string, string>()
   const getValueExpr = (field: string): string => {
-    const existing = valueExprByField.get(field)
-    if (existing) return existing
-    const v = cursorValueExpr(
-      tableName,
-      cursorAlias,
-      cursorWhereSql,
-      field,
-      model,
-    )
-    valueExprByField.set(field, v)
-    return v
+    return `(SELECT ${quoteColumn(model, field)} FROM __tp_cursor)`
   }
 
   const orClauses: string[] = []
@@ -426,7 +484,9 @@ export function buildCursorCondition(
   }
 
   const exclusive = orClauses.join(SQL_SEPARATORS.CONDITION_OR)
-  return `(${existsExpr} ${SQL_SEPARATORS.CONDITION_AND} ((${exclusive})${SQL_SEPARATORS.CONDITION_OR}(${outerCursorMatch})))`
+  const condition = `(${existsExpr} ${SQL_SEPARATORS.CONDITION_AND} ((${exclusive})${SQL_SEPARATORS.CONDITION_OR}(${outerCursorMatch})))`
+
+  return { cte, condition }
 }
 
 export function buildOrderBy(
@@ -435,6 +495,8 @@ export function buildOrderBy(
   dialect?: SqlDialect,
   model?: Model,
 ): string {
+  assertSafeAlias(alias)
+
   const entries = buildOrderEntries(orderBy)
   if (entries.length === 0) return ''
 
