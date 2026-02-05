@@ -1,5 +1,5 @@
 import { AliasGenerator } from './types'
-import { SQL_KEYWORDS } from './constants'
+import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
 function toSafeSqlIdentifier(input: string): string {
   const raw = String(input)
@@ -8,7 +8,7 @@ function toSafeSqlIdentifier(input: string): string {
   const base = startsOk ? cleaned : `_${cleaned}`
   const fallback = base.length > 0 ? base : '_t'
   const lowered = fallback.toLowerCase()
-  return SQL_KEYWORDS.has(lowered) ? `_${lowered}` : lowered
+  return ALIAS_FORBIDDEN_KEYWORDS.has(lowered) ? `_${lowered}` : lowered
 }
 
 export function createAliasGenerator(

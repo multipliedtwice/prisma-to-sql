@@ -1,16 +1,18 @@
 import { Model } from '../../types'
-import { quote } from './sql-utils'
-import { getColumnMap } from './model-field-cache'
+import { col as colSql, quoteColumn as quoteColumnSql } from './sql-utils'
 
 export function resolveColumnName(model: Model, fieldName: string): string {
-  const map = getColumnMap(model)
-  return map.get(fieldName) || fieldName
+  const q = quoteColumnSql(model, fieldName)
+  if (q.startsWith('"') && q.endsWith('"') && q.length >= 2) {
+    return q.slice(1, -1).replace(/""/g, '"')
+  }
+  return q
 }
 
 export function quoteColumnOf(model: Model, fieldName: string): string {
-  return quote(resolveColumnName(model, fieldName))
+  return quoteColumnSql(model, fieldName)
 }
 
 export function colOf(model: Model, alias: string, fieldName: string): string {
-  return `${alias}.${quoteColumnOf(model, fieldName)}`
+  return colSql(alias, fieldName, model)
 }

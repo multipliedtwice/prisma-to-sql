@@ -8,8 +8,6 @@ import { createAliasGenerator } from '../shared/alias-generator'
 import { SQL_TEMPLATES, SQL_SEPARATORS } from '../shared/constants'
 import {
   buildTableReference,
-  quote,
-  quoteColumn,
   sqlStringLiteral,
   normalizeKeyList,
 } from '../shared/sql-utils'
@@ -32,6 +30,18 @@ import {
   getScalarFieldSet,
 } from '../shared/model-field-cache'
 
+const MAX_INCLUDE_DEPTH = 10
+
+// ✅ MEDIUM-PRIORITY FIX: Track query complexity
+interface IncludeComplexityStats {
+  totalIncludes: number
+  totalSubqueries: number
+  maxDepth: number
+}
+
+const MAX_TOTAL_SUBQUERIES = 100
+const MAX_TOTAL_INCLUDES = 50
+
 type DynamicInt = string
 type IntOrDynamic = number | DynamicInt
 type OptionalIntOrDynamic = IntOrDynamic | undefined
@@ -45,6 +55,9 @@ interface IncludeBuildContext {
   aliasGen: AliasGenerator
   dialect: SqlDialect
   params: ParamStore
+  visitPath?: string[]
+  depth?: number
+  stats?: IncludeComplexityStats
 }
 
 function getRelationTableReference(
@@ -174,7 +187,7 @@ function appendLimitOffset(
 function readWhereInput(relArgs: unknown): Record<string, unknown> {
   if (!isPlainObject(relArgs)) return {}
   if (!hasProperty(relArgs, 'where')) return {}
-  const w = (relArgs as any).where
+  const w = (relArgs as Record<string, unknown>).where
   return isPlainObject(w) ? w : {}
 }
 
@@ -184,7 +197,10 @@ function readOrderByInput(relArgs: unknown): {
 } {
   if (!isPlainObject(relArgs)) return { hasOrderBy: false, orderBy: undefined }
   if (!('orderBy' in relArgs)) return { hasOrderBy: false, orderBy: undefined }
-  return { hasOrderBy: true, orderBy: (relArgs as any).orderBy }
+  return {
+    hasOrderBy: true,
+    orderBy: (relArgs as Record<string, unknown>).orderBy,
+  }
 }
 
 function extractRelationPaginationConfig(relArgs: unknown): {
@@ -290,6 +306,9 @@ function buildSelectWithNestedIncludes(
         ctx.aliasGen,
         ctx.params,
         ctx.dialect,
+        ctx.visitPath || [],
+        (ctx.depth || 0) + 1,
+        ctx.stats, // ✅ Pass stats through
       )
     : []
 
@@ -603,14 +622,78 @@ function buildIncludeSqlInternal(
   aliasGen: AliasGenerator,
   params: ParamStore,
   dialect: SqlDialect,
+  visitPath: string[] = [],
+  depth: number = 0,
+  stats?: IncludeComplexityStats,
 ): IncludeSpec[] {
+  // ✅ MEDIUM-PRIORITY FIX: Initialize stats on first call
+  if (!stats) {
+    stats = { totalIncludes: 0, totalSubqueries: 0, maxDepth: 0 }
+  }
+
+  if (depth > MAX_INCLUDE_DEPTH) {
+    throw new Error(
+      `Maximum include depth of ${MAX_INCLUDE_DEPTH} exceeded. ` +
+        `Path: ${visitPath.join(' -> ')}. ` +
+        `Deep includes cause exponential SQL complexity and performance issues.`,
+    )
+  }
+
+  // ✅ Track depth
+  stats.maxDepth = Math.max(stats.maxDepth, depth)
+
   const includes: IncludeSpec[] = []
   const entries = relationEntriesFromArgs(args, model)
 
   for (const [relName, relArgs] of entries) {
     if (relArgs === false) continue
 
+    // ✅ MEDIUM-PRIORITY FIX: Check total includes limit
+    stats.totalIncludes++
+    if (stats.totalIncludes > MAX_TOTAL_INCLUDES) {
+      throw new Error(
+        `Maximum total includes (${MAX_TOTAL_INCLUDES}) exceeded. ` +
+          `Current: ${stats.totalIncludes} includes. ` +
+          `Query has ${stats.maxDepth} levels deep. ` +
+          `Simplify your query structure or use multiple queries.`,
+      )
+    }
+
+    // ✅ Count subquery (each include generates at least one subquery)
+    stats.totalSubqueries++
+    if (stats.totalSubqueries > MAX_TOTAL_SUBQUERIES) {
+      throw new Error(
+        `Query complexity limit exceeded: ${stats.totalSubqueries} subqueries generated. ` +
+          `Maximum allowed: ${MAX_TOTAL_SUBQUERIES}. ` +
+          `This indicates exponential include nesting. ` +
+          `Stats: depth=${stats.maxDepth}, includes=${stats.totalIncludes}. ` +
+          `Path: ${visitPath.join(' -> ')}. ` +
+          `Simplify your include structure or split into multiple queries.`,
+      )
+    }
+
     const resolved = resolveRelationOrThrow(model, schemas, relName)
+
+    const relationPath = `${model.name}.${relName}`
+    const currentPath = [...visitPath, relationPath]
+
+    if (visitPath.includes(relationPath)) {
+      throw new Error(
+        `Circular include detected: ${currentPath.join(' -> ')}. ` +
+          `Relation '${relationPath}' creates an infinite loop.`,
+      )
+    }
+
+    const modelOccurrences = currentPath.filter((p) =>
+      p.startsWith(`${resolved.relModel.name}.`),
+    ).length
+
+    if (modelOccurrences > 2) {
+      throw new Error(
+        `Include too deeply nested: model '${resolved.relModel.name}' ` +
+          `appears ${modelOccurrences} times in path: ${currentPath.join(' -> ')}`,
+      )
+    }
 
     const include = buildSingleInclude(
       relName,
@@ -624,6 +707,9 @@ function buildIncludeSqlInternal(
         aliasGen,
         dialect,
         params,
+        visitPath: currentPath,
+        depth: depth + 1,
+        stats, // ✅ Pass stats through
       },
     )
 
@@ -642,6 +728,12 @@ export function buildIncludeSql(
   dialect: SqlDialect,
 ): IncludeSpec[] {
   const aliasGen = createAliasGenerator()
+  const stats: IncludeComplexityStats = {
+    totalIncludes: 0,
+    totalSubqueries: 0,
+    maxDepth: 0,
+  }
+
   return buildIncludeSqlInternal(
     args,
     model,
@@ -650,6 +742,9 @@ export function buildIncludeSql(
     aliasGen,
     params,
     dialect,
+    [],
+    0,
+    stats, // ✅ Pass initial stats
   )
 }
 
@@ -674,6 +769,12 @@ function resolveCountRelationOrThrow(
   if (!field) {
     throw new Error(
       `_count.${relName} references unknown relation on model ${model.name}`,
+    )
+  }
+
+  if (!isValidRelationField(field)) {
+    throw new Error(
+      `_count.${relName} has invalid relation metadata on model ${model.name}`,
     )
   }
 
@@ -730,12 +831,15 @@ function subqueryForCount(args: {
   const selectKeys = args.relKeyFields
     .map(
       (f, i) =>
-        `${args.countAlias}.${quoteColumn(args.relModel, f)} AS "__fk${i}"`,
+        `${args.countAlias}.${(args.relModel as any).columns?.[f] ? `"${(args.relModel as any).columns[f]}"` : `"${f}"`} AS "__fk${i}"`,
     )
     .join(SQL_SEPARATORS.FIELD_LIST)
 
   const groupByKeys = args.relKeyFields
-    .map((f) => `${args.countAlias}.${quoteColumn(args.relModel, f)}`)
+    .map(
+      (f) =>
+        `${args.countAlias}.${(args.relModel as any).columns?.[f] ? `"${(args.relModel as any).columns[f]}"` : `"${f}"`}`,
+    )
     .join(SQL_SEPARATORS.FIELD_LIST)
 
   const cntExpr =
@@ -750,9 +854,16 @@ function leftJoinOnForCount(args: {
   parentModel: Model
   parentKeyFields: string[]
 }): string {
+  const quoteParent = (f: string): string => {
+    const m = args.parentModel as any
+    const mapped = m.columns?.[f]
+    const colName = mapped ? String(mapped) : f
+    return `"${String(colName).replace(/"/g, '""')}"`
+  }
+
   const parts = args.parentKeyFields.map(
     (f, i) =>
-      `${args.joinAlias}."__fk${i}" = ${args.parentAlias}.${quoteColumn(args.parentModel, f)}`,
+      `${args.joinAlias}."__fk${i}" = ${args.parentAlias}.${quoteParent(f)}`,
   )
   return parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`
 }
