@@ -297,7 +297,7 @@ function transformEnumValues(modelName: string, obj: any, currentPath: string[] 
       const enumType = modelFields[key]
       
       if (enumType) {
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
+        if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
           const transformedOperators: any = {}
           for (const [op, opValue] of Object.entries(value)) {
             transformedOperators[op] = transformEnumInValue(opValue, enumType)
@@ -306,6 +306,8 @@ function transformEnumValues(modelName: string, obj: any, currentPath: string[] 
         } else {
           transformed[key] = transformEnumInValue(value, enumType)
         }
+      } else if (value instanceof Date) {
+        transformed[key] = value
       } else if (typeof value === 'object' && value !== null) {
         transformed[key] = transformEnumValues(modelName, value, newPath)
       } else {
