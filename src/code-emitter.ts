@@ -283,6 +283,10 @@ function transformEnumValues(modelName: string, obj: any, currentPath: string[] 
     return obj.map(item => transformEnumValues(modelName, item, currentPath))
   }
   
+  if (obj instanceof Date) {
+    return obj
+  }
+  
   if (typeof obj === 'object') {
     const transformed: any = {}
     const modelFields = ENUM_FIELDS[modelName] || {}
@@ -313,6 +317,7 @@ function transformEnumValues(modelName: string, obj: any, currentPath: string[] 
   
   return obj
 }
+
 
 function normalizeQuery(args: any): string {
   if (!args) return '{}'
