@@ -1,3 +1,11 @@
+# [1.45.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.44.0...v1.45.0) (2026-02-05)
+
+
+### Features
+
+* rerun benchmarks ([cc4a49e](https://github.com/multipliedtwice/prisma-to-sql/commit/cc4a49ef8573cc946e9f10727add25d8b5b64388))
+* update benchmark results ([fd347c9](https://github.com/multipliedtwice/prisma-to-sql/commit/fd347c9d018689c1ed3eb599c3f62125254e0c84))
+
 # [1.44.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.43.0...v1.44.0) (2026-02-04)
 
 # [1.43.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.42.0...v1.43.0) (2026-02-04)

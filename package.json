@@ -1,6 +1,6 @@
 {
   "name": "prisma-sql",
-  "version": "1.44.0",
+  "version": "1.45.0",
   "description": "Convert Prisma queries to optimized SQL with type safety. 2-7x faster than Prisma Client.",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
