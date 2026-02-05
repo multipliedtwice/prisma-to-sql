@@ -11,6 +11,7 @@ import { ParamStore } from '../shared/param-store'
 import { isNotNullish, isPlainObject } from '../shared/validators/type-guards'
 
 const SAFE_JSON_PATH_SEGMENT = /^[a-zA-Z_]\w*$/
+const MAX_PATH_SEGMENT_LENGTH = 255
 
 function validateJsonPathSegments(segments: string[]): void {
   for (const segment of segments) {
@@ -19,6 +20,13 @@ function validateJsonPathSegments(segments: string[]): void {
         operator: Ops.PATH,
         value: segment,
       })
+    }
+
+    if (segment.length > MAX_PATH_SEGMENT_LENGTH) {
+      throw createError(
+        `JSON path segment too long: max ${MAX_PATH_SEGMENT_LENGTH} characters`,
+        { operator: Ops.PATH, value: `[${segment.length} chars]` },
+      )
     }
 
     if (!SAFE_JSON_PATH_SEGMENT.test(segment)) {

@@ -1,41 +1,71 @@
 import { Model } from '../../types'
 
-const SCALAR_SET_CACHE = new WeakMap<Model, Set<string>>()
-const RELATION_SET_CACHE = new WeakMap<Model, Set<string>>()
+interface FieldInfo {
+  name: string
+  dbName: string
+  type: string
+  isRelation: boolean
+  isRequired: boolean
+}
+
+interface CachedModelInfo {
+  fieldInfo: Map<string, FieldInfo>
+  scalarFields: Set<string>
+  relationFields: Set<string>
+  columnMap: Map<string, string>
+}
+
+const MODEL_CACHE = new WeakMap<Model, CachedModelInfo>()
+
+function ensureFullCache(model: Model): CachedModelInfo {
+  let cache = MODEL_CACHE.get(model)
+
+  if (!cache) {
+    const fieldInfo = new Map<string, FieldInfo>()
+    const scalarFields = new Set<string>()
+    const relationFields = new Set<string>()
+    const columnMap = new Map<string, string>()
+
+    for (const f of model.fields) {
+      const info: FieldInfo = {
+        name: f.name,
+        dbName: f.dbName || f.name,
+        type: f.type,
+        isRelation: !!f.isRelation,
+        isRequired: !!f.isRequired,
+      }
+      fieldInfo.set(f.name, info)
+
+      if (info.isRelation) {
+        relationFields.add(f.name)
+      } else {
+        scalarFields.add(f.name)
+        columnMap.set(f.name, info.dbName)
+      }
+    }
+
+    cache = { fieldInfo, scalarFields, relationFields, columnMap }
+    MODEL_CACHE.set(model, cache)
+  }
+
+  return cache
+}
+
+export function getFieldInfo(
+  model: Model,
+  fieldName: string,
+): FieldInfo | undefined {
+  return ensureFullCache(model).fieldInfo.get(fieldName)
+}
 
 export function getScalarFieldSet(model: Model): Set<string> {
-  const cached = SCALAR_SET_CACHE.get(model)
-  if (cached) return cached
-
-  const s = new Set<string>()
-  for (const f of model.fields) if (!f.isRelation) s.add(f.name)
-  SCALAR_SET_CACHE.set(model, s)
-  return s
+  return ensureFullCache(model).scalarFields
 }
 
 export function getRelationFieldSet(model: Model): Set<string> {
-  const cached = RELATION_SET_CACHE.get(model)
-  if (cached) return cached
-
-  const s = new Set<string>()
-  for (const f of model.fields) if (f.isRelation) s.add(f.name)
-  RELATION_SET_CACHE.set(model, s)
-  return s
+  return ensureFullCache(model).relationFields
 }
 
-const COLUMN_MAP_CACHE = new WeakMap<Model, Map<string, string>>()
-
 export function getColumnMap(model: Model): Map<string, string> {
-  const cached = COLUMN_MAP_CACHE.get(model)
-  if (cached) return cached
-
-  const map = new Map<string, string>()
-  for (const f of model.fields) {
-    if (!f.isRelation) {
-      map.set(f.name, f.dbName || f.name)
-    }
-  }
-
-  COLUMN_MAP_CACHE.set(model, map)
-  return map
+  return ensureFullCache(model).columnMap
 }

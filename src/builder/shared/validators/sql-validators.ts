@@ -6,7 +6,6 @@ import {
   hasRequiredKeywords,
 } from './type-guards'
 import { SqlDialect } from '../../../sql-builder-dialect'
-import { ParamMap } from '@dee-wan/schema-parser'
 
 export function isValidWhereClause(clause: string): boolean {
   return (
@@ -100,7 +99,7 @@ function scanDollarPlaceholders(
   return { count, min, max, seen }
 }
 
-function assertNoGaps(
+function assertNoGapsDollar(
   scan: PlaceholderScan,
   rangeMin: number,
   rangeMax: number,
@@ -144,7 +143,7 @@ export function validateParamConsistency(
     )
   }
 
-  assertNoGaps(scan, 1, scan.max, sql)
+  assertNoGapsDollar(scan, 1, scan.max, sql)
 }
 
 export function needsQuoting(id: string): boolean {
@@ -172,15 +171,11 @@ export function validateParamConsistencyFragment(
     )
   }
 
-  assertNoGaps(scan, scan.min, scan.max, sql)
+  assertNoGapsDollar(scan, scan.min, scan.max, sql)
 }
 
 function assertOrThrow(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
-}
-
-function dialectPlaceholderPrefix(dialect: SqlDialect): string {
-  return dialect === 'sqlite' ? '?' : '$'
 }
 
 function parseSqlitePlaceholderIndices(sql: string): {
@@ -216,153 +211,98 @@ function parseDollarPlaceholderIndices(sql: string): number[] {
   return indices
 }
 
-function getPlaceholderIndices(
-  sql: string,
-  dialect: SqlDialect,
-): { indices: number[]; sawNumbered: boolean; sawAnonymous: boolean } {
-  if (dialect === 'sqlite') return parseSqlitePlaceholderIndices(sql)
-  return {
-    indices: parseDollarPlaceholderIndices(sql),
-    sawNumbered: false,
-    sawAnonymous: false,
-  }
-}
-
 function maxIndex(indices: readonly number[]): number {
   return indices.length > 0 ? Math.max(...indices) : 0
 }
 
-function ensureNoMixedSqlitePlaceholders(
-  sawNumbered: boolean,
-  sawAnonymous: boolean,
-): void {
-  assertOrThrow(
-    !(sawNumbered && sawAnonymous),
-    `CRITICAL: Mixed sqlite placeholders ('?' and '?NNN') are not supported.`,
-  )
-}
-
-function ensurePlaceholderMaxMatchesMappingsLength(
+function ensureSequentialIndices(
+  seen: ReadonlySet<number>,
   max: number,
-  mappingsLength: number,
-  dialect: SqlDialect,
+  prefix: string,
 ): void {
-  assertOrThrow(
-    max === mappingsLength,
-    `CRITICAL: SQL placeholder max mismatch - max is ${dialectPlaceholderPrefix(dialect)}${max}, but mappings length is ${mappingsLength}.`,
-  )
-}
-
-function ensureSequentialPlaceholders(
-  placeholders: ReadonlySet<number>,
-  max: number,
-  dialect: SqlDialect,
-): void {
-  const prefix = dialectPlaceholderPrefix(dialect)
   for (let i = 1; i <= max; i++) {
     assertOrThrow(
-      placeholders.has(i),
+      seen.has(i),
       `CRITICAL: Missing SQL placeholder ${prefix}${i} - placeholders must be sequential 1..${max}.`,
     )
   }
 }
 
-function validateMappingIndex(mapping: ParamMap, max: number): void {
-  assertOrThrow(
-    Number.isInteger(mapping.index) &&
-      mapping.index >= 1 &&
-      mapping.index <= max,
-    `CRITICAL: ParamMapping index ${mapping.index} out of range 1..${max}.`,
-  )
-}
-
-function ensureUniqueMappingIndex(
-  mappingIndices: Set<number>,
-  index: number,
-  dialect: SqlDialect,
-): void {
-  assertOrThrow(
-    !mappingIndices.has(index),
-    `CRITICAL: Duplicate ParamMapping index ${index} - each placeholder index must map to exactly one ParamMap.`,
-  )
-  mappingIndices.add(index)
-}
-
-function ensureMappingIndexExistsInSql(
-  placeholders: ReadonlySet<number>,
-  index: number,
-): void {
-  assertOrThrow(
-    placeholders.has(index),
-    `CRITICAL: ParamMapping index ${index} not found in SQL placeholders.`,
-  )
-}
-
-function validateMappingValueShape(mapping: ParamMap): void {
-  assertOrThrow(
-    !(mapping.dynamicName !== undefined && mapping.value !== undefined),
-    `CRITICAL: ParamMap ${mapping.index} has both dynamicName and value`,
-  )
-
-  assertOrThrow(
-    !(mapping.dynamicName === undefined && mapping.value === undefined),
-    `CRITICAL: ParamMap ${mapping.index} has neither dynamicName nor value`,
-  )
-}
-
-function ensureMappingsCoverAllIndices(
-  mappingIndices: ReadonlySet<number>,
-  max: number,
-  dialect: SqlDialect,
-): void {
-  const prefix = dialectPlaceholderPrefix(dialect)
-  for (let i = 1; i <= max; i++) {
-    assertOrThrow(
-      mappingIndices.has(i),
-      `CRITICAL: Missing ParamMap for placeholder ${prefix}${i} - mappings must cover 1..${max} with no gaps.`,
-    )
-  }
-}
-
-function validateMappingsAgainstPlaceholders(
-  mappings: readonly ParamMap[],
-  placeholders: ReadonlySet<number>,
-  max: number,
-  dialect: SqlDialect,
-): void {
-  const mappingIndices = new Set<number>()
-
-  for (const mapping of mappings) {
-    validateMappingIndex(mapping, max)
-    ensureUniqueMappingIndex(mappingIndices, mapping.index, dialect)
-    ensureMappingIndexExistsInSql(placeholders, mapping.index)
-    validateMappingValueShape(mapping)
-  }
-
-  ensureMappingsCoverAllIndices(mappingIndices, max, dialect)
-}
-
-export function validateSqlPositions(
+function validateSqlitePlaceholders(
   sql: string,
-  mappings: readonly ParamMap[],
-  dialect: SqlDialect,
+  params: readonly unknown[],
 ): void {
-  const { indices, sawNumbered, sawAnonymous } = getPlaceholderIndices(
-    sql,
-    dialect,
-  )
+  const paramLen = params.length
+  const { indices, sawNumbered, sawAnonymous } =
+    parseSqlitePlaceholderIndices(sql)
 
-  if (dialect === 'sqlite') {
-    ensureNoMixedSqlitePlaceholders(sawNumbered, sawAnonymous)
+  if (indices.length === 0) {
+    if (paramLen !== 0) {
+      throw new Error(
+        `CRITICAL: Parameter mismatch - SQL has no sqlite placeholders but ${paramLen} params provided. SQL: ${sqlPreview(sql)}`,
+      )
+    }
+    return
   }
 
-  const placeholders = new Set(indices)
-
-  if (placeholders.size === 0 && mappings.length === 0) return
+  assertOrThrow(
+    !(sawNumbered && sawAnonymous),
+    `CRITICAL: Mixed sqlite placeholders ('?' and '?NNN') are not supported.`,
+  )
 
   const max = maxIndex(indices)
+  assertOrThrow(
+    max === paramLen,
+    `CRITICAL: SQL placeholder max mismatch - max is ?${max}, but params length is ${paramLen}. SQL: ${sqlPreview(sql)}`,
+  )
 
-  ensurePlaceholderMaxMatchesMappingsLength(max, mappings.length, dialect)
-  ensureSequentialPlaceholders(placeholders, max, dialect)
-  validateMappingsAgainstPlaceholders(mappings, placeholders, max, dialect)
+  const set = new Set(indices)
+  ensureSequentialIndices(set, max, '?')
+}
+
+function validateDollarPlaceholders(
+  sql: string,
+  params: readonly unknown[],
+): void {
+  validateParamConsistency(sql, params)
+}
+
+function detectPlaceholderStyle(sql: string): {
+  hasDollar: boolean
+  hasSqliteQ: boolean
+} {
+  const hasDollar = /\$\d+/.test(sql)
+  const hasSqliteQ = /\?(?:\d+)?/.test(sql)
+  return { hasDollar, hasSqliteQ }
+}
+
+/**
+ * Dialect-aware consistency validator.
+ * - postgres: enforces $1..$N (existing behavior)
+ * - sqlite: supports either $1..$N OR ?/?NNN, but rejects mixing.
+ */
+export function validateParamConsistencyByDialect(
+  sql: string,
+  params: readonly unknown[],
+  dialect: SqlDialect,
+): void {
+  const { hasDollar, hasSqliteQ } = detectPlaceholderStyle(sql)
+
+  if (dialect !== 'sqlite') {
+    if (hasSqliteQ && !hasDollar) {
+      throw new Error(
+        `CRITICAL: Non-sqlite dialect query contains sqlite '?' placeholders. SQL: ${sqlPreview(sql)}`,
+      )
+    }
+    return validateDollarPlaceholders(sql, params)
+  }
+
+  if (hasDollar && hasSqliteQ) {
+    throw new Error(
+      `CRITICAL: Mixed placeholder styles ($N and ?/ ?NNN) are not supported. SQL: ${sqlPreview(sql)}`,
+    )
+  }
+
+  if (hasSqliteQ) return validateSqlitePlaceholders(sql, params)
+  return validateDollarPlaceholders(sql, params)
 }

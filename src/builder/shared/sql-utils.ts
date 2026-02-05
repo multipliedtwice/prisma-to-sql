@@ -3,12 +3,12 @@ import { needsQuoting } from './validators/sql-validators'
 import { isEmptyString, isNotNullish } from './validators/type-guards'
 import type { Model } from '../../types'
 import { getColumnMap } from './model-field-cache'
-import { SQL_KEYWORDS } from './constants'
+import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
 const NUL = String.fromCharCode(0)
 
 function containsControlChars(s: string): boolean {
-  return s.includes(NUL) || s.includes('\n') || s.includes('\r')
+  return /[\u0000-\u001F\u007F]/.test(s)
 }
 
 function assertNoControlChars(label: string, s: string): void {
@@ -305,7 +305,6 @@ export function assertSafeAlias(alias: string): void {
     throw new Error('Invalid alias: leading/trailing whitespace')
   }
 
-  // Check for dangerous SQL injection characters BEFORE whitespace
   if (/[\u0000-\u001F\u007F]/.test(a)) {
     throw new Error(
       'Invalid alias: contains unsafe characters (control characters)',
@@ -326,17 +325,23 @@ export function assertSafeAlias(alias: string): void {
     )
   }
 
-  // Now check for whitespace (after dangerous chars)
   if (/\s/.test(a)) {
     throw new Error(
       'Invalid alias: must be a simple identifier without whitespace',
     )
   }
 
-  // Final validation: must be alphanumeric with underscores
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(a)) {
     throw new Error(
       `Invalid alias: must be a simple identifier (alphanumeric with underscores): "${alias}"`,
+    )
+  }
+
+  const lowered = a.toLowerCase()
+  if (ALIAS_FORBIDDEN_KEYWORDS.has(lowered)) {
+    throw new Error(
+      `Invalid alias: '${alias}' is a SQL keyword that would break query parsing. ` +
+        `Forbidden aliases: ${[...ALIAS_FORBIDDEN_KEYWORDS].join(', ')}`,
     )
   }
 }

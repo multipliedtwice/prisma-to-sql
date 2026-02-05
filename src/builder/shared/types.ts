@@ -34,6 +34,7 @@ export interface SelectQuerySpec {
   readonly pagination: { take?: number | string; skip?: number | string }
   readonly distinct?: readonly string[]
   readonly method: string
+  readonly cursorCte?: string
   readonly cursorClause?: string
   readonly params: ParamStore
   readonly dialect: SqlDialect
