@@ -10,6 +10,12 @@ export interface BatchQuery {
   args?: Record<string, unknown>
 }
 
+export interface BatchCountQuery {
+  model: string
+  method: 'count'
+  args?: { where?: Record<string, unknown> }
+}
+
 export interface BatchResult {
   sql: string
   params: unknown[]
@@ -154,6 +160,65 @@ export function buildBatchSql(
   return { sql, params: allParams, keys }
 }
 
+export function buildBatchCountSql(
+  queries: BatchCountQuery[],
+  modelMap: Map<string, Model>,
+  models: Model[],
+  dialect: SqlDialect,
+): BatchResult {
+  if (queries.length === 0) {
+    throw new Error('buildBatchCountSql requires at least one query')
+  }
+
+  if (dialect !== 'postgres') {
+    throw new Error(
+      'Batch count queries are only supported for postgres dialect',
+    )
+  }
+
+  const ctes: string[] = new Array(queries.length)
+  const selects: string[] = new Array(queries.length)
+  const allParams: unknown[] = []
+
+  for (let i = 0; i < queries.length; i++) {
+    const query = queries[i]
+
+    const model = modelMap.get(query.model)
+    if (!model) {
+      throw new Error(
+        `Model '${query.model}' not found. Available: ${[...modelMap.keys()].join(', ')}`,
+      )
+    }
+
+    const { sql: querySql, params: queryParams } = buildSQLWithCache(
+      model,
+      models,
+      'count',
+      (query.args || {}) as Record<string, unknown>,
+      dialect,
+    )
+
+    const { sql: reindexedSql, params: reindexedParams } = reindexParams(
+      querySql,
+      queryParams,
+      allParams.length,
+    )
+
+    for (let p = 0; p < reindexedParams.length; p++) {
+      allParams.push(reindexedParams[p])
+    }
+
+    const cteName = `count_${i}`
+    const resultKey = `count_${i}`
+    ctes[i] = `${cteName} AS (${reindexedSql})`
+    selects[i] = `(SELECT * FROM ${cteName}) AS ${quoteIdent(resultKey)}`
+  }
+
+  const sql = `WITH ${ctes.join(', ')} SELECT ${selects.join(', ')}`
+
+  return { sql, params: allParams }
+}
+
 function looksLikeJsonString(s: string): boolean {
   const t = s.trim()
   if (t.length === 0) return false
@@ -200,6 +265,21 @@ function parseCountValue(value: unknown): number {
     }
   }
   return 0
+}
+
+export function parseBatchCountResults(
+  row: Record<string, unknown>,
+  count: number,
+): number[] {
+  const results: number[] = []
+
+  for (let i = 0; i < count; i++) {
+    const key = `count_${i}`
+    const value = row[key]
+    results.push(parseCountValue(value))
+  }
+
+  return results
 }
 
 export function parseBatchResults(

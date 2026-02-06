@@ -1,4 +1,3 @@
-// src/index.ts
 import {
   type Model,
   DirectiveProps,
@@ -13,7 +12,14 @@ import {
 } from './sql-generator'
 import { transformQueryResults, type PrismaMethod } from './result-transformers'
 import { buildSQLWithCache } from './query-cache'
-import { buildBatchSql, parseBatchResults, type BatchQuery } from './batch'
+import {
+  buildBatchSql,
+  parseBatchResults,
+  buildBatchCountSql,
+  parseBatchCountResults,
+  type BatchQuery,
+  type BatchCountQuery,
+} from './batch'
 import {
   createTransactionExecutor,
   type TransactionQuery,
@@ -722,6 +728,7 @@ export type {
   PrismaSQLConfig,
   PrismaSQLResult,
   BatchQuery,
+  BatchCountQuery,
   BatchProxy,
   DeferredQueryLike,
   TransactionQuery,
@@ -734,5 +741,10 @@ export { setGlobalDialect, getGlobalDialect } from './sql-builder-dialect'
 export type { Model, Field, PrismaQueryArgs } from './types'
 export { convertDMMFToModels } from '@dee-wan/schema-parser'
 export { transformQueryResults }
-export { buildBatchSql, parseBatchResults } from './batch'
+export {
+  buildBatchSql,
+  parseBatchResults,
+  buildBatchCountSql,
+  parseBatchCountResults,
+} from './batch'
 export { createTransactionExecutor } from './transaction'

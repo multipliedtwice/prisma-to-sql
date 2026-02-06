@@ -1,3 +1,12 @@
+# [1.54.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.53.0...v1.54.0) (2026-02-06)
+
+
+### Features
+
+* **code-emitter.ts:** implement batch processing and transaction support for Prisma queries to enhance performance and usability ([10b5479](https://github.com/multipliedtwice/prisma-to-sql/commit/10b54797f4b2bbeddd5bc5a024a514ae5754efdb))
+
+# [1.53.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.52.0...v1.53.0) (2026-02-06)
+
 # [1.52.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.51.0...v1.52.0) (2026-02-05)
 
 # [1.51.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.50.3...v1.51.0) (2026-02-05)
