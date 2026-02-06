@@ -98,25 +98,6 @@ function makeAlias(name: string): string {
   return SQL_RESERVED_WORDS.has(safe) ? `${safe}_t` : safe
 }
 
-function toSqliteParams(sql: string, params: readonly unknown[]): SqlResult {
-  const positions: number[] = []
-
-  const converted = sql.replace(/\$(\d+)/g, (_, num) => {
-    positions.push(parseInt(num, 10))
-    return '?'
-  })
-
-  const reordered = positions.map((pos) => {
-    const idx = pos - 1
-    if (idx < 0 || idx >= params.length) {
-      throw new Error(`Param $${pos} out of bounds (have ${params.length})`)
-    }
-    return params[idx]
-  })
-
-  return { sql: converted, params: reordered }
-}
-
 export function buildSQL(
   model: Model,
   models: Model[],
@@ -135,11 +116,27 @@ async function executePostgres(
   return await client.unsafe(sql, params as any[])
 }
 
-function executeSqlite(db: any, sql: string, params: unknown[]): unknown[] {
+function shouldSqliteUseGet(method: PrismaMethod): boolean {
+  return (
+    method === 'count' ||
+    method === 'findFirst' ||
+    method === 'findUnique' ||
+    method === 'aggregate'
+  )
+}
+
+function executeSqlite(
+  db: any,
+  method: PrismaMethod,
+  sql: string,
+  params: unknown[],
+): unknown[] {
   const stmt = db.prepare(sql)
 
-  if (sql.toUpperCase().includes('COUNT(*) AS')) {
-    return [stmt.get(...params)]
+  if (shouldSqliteUseGet(method)) {
+    const row = stmt.get(...params)
+    if (row === undefined) return []
+    return [row]
   }
 
   return stmt.all(...params)
@@ -153,7 +150,11 @@ interface ExecuteWithTimingInput {
   args: Record<string, unknown>
   dialect: SqlDialect
   debug: boolean
-  executeQuery: (sql: string, params: unknown[]) => Promise<unknown[]>
+  executeQuery: (
+    method: PrismaMethod,
+    sql: string,
+    params: unknown[],
+  ) => Promise<unknown[]>
   onQuery?: (info: QueryInfo) => void
 }
 
@@ -176,7 +177,7 @@ async function executeWithTiming(
     console.log('Params:', params)
   }
 
-  const results = await input.executeQuery(sql, params)
+  const results = await input.executeQuery(input.method, sql, params)
   const duration = Date.now() - startTime
 
   input.onQuery?.({
@@ -221,12 +222,20 @@ function fallbackToPrisma(
 function createExecuteQuery(
   client: any,
   dialect: SqlDialect,
-): (sql: string, params: unknown[]) => Promise<unknown[]> {
-  return async (sql: string, params: unknown[]): Promise<unknown[]> => {
+): (
+  method: PrismaMethod,
+  sql: string,
+  params: unknown[],
+) => Promise<unknown[]> {
+  return async (
+    method: PrismaMethod,
+    sql: string,
+    params: unknown[],
+  ): Promise<unknown[]> => {
     if (dialect === 'postgres') {
       return await executePostgres(client, sql, params)
     }
-    return executeSqlite(client, sql, params)
+    return executeSqlite(client, method, sql, params)
   }
 }
 
@@ -248,7 +257,11 @@ interface AccelerationDeps {
   allowedModels?: string[]
   allModels: Model[]
   modelMap: Map<string, Model>
-  executeQuery: (sql: string, params: unknown[]) => Promise<unknown[]>
+  executeQuery: (
+    method: PrismaMethod,
+    sql: string,
+    params: unknown[],
+  ) => Promise<unknown[]>
 }
 
 function canAccelerate(
@@ -478,7 +491,7 @@ export function speedExtension(config: SpeedExtensionConfig) {
       }
 
       const startTime = Date.now()
-      const { sql, params, keys } = buildBatchSql(
+      const { sql, params, keys, aliases } = buildBatchSql(
         batchQueries,
         modelMap,
         models,
@@ -491,9 +504,9 @@ export function speedExtension(config: SpeedExtensionConfig) {
         console.log('Params:', params)
       }
 
-      const rows = await executeQuery(sql, params)
+      const rows = await executeQuery('findMany', sql, params)
       const row = rows[0] as Record<string, unknown>
-      const results = parseBatchResults(row, keys, batchQueries)
+      const results = parseBatchResults(row, keys, batchQueries, aliases)
       const duration = Date.now() - startTime
 
       onQuery?.({
@@ -522,7 +535,7 @@ export function speedExtension(config: SpeedExtensionConfig) {
 
       onQuery?.({
         model: '_transaction',
-        method: 'count',
+        method: 'transaction',
         sql: `TRANSACTION(${queries.length})`,
         params: [],
         duration,
