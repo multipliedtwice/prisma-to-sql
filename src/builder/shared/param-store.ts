@@ -79,31 +79,20 @@ function normalizeDynamicNameOrThrow(
   return dn
 }
 
-function assertUniqueDynamicName(dn: string, seen: Set<string>): void {
-  if (seen.has(dn)) {
-    throw new Error(`CRITICAL: Duplicate dynamic param name in mappings: ${dn}`)
-  }
-  seen.add(dn)
-}
-
-function validateMappingEntry(
-  m: ParamMap,
-  expectedIndex: number,
-  seenDynamic: Set<string>,
-): void {
-  assertSequentialIndex(m.index, expectedIndex)
-  assertExactlyOneOfDynamicOrValue(m)
-
-  if (typeof m.dynamicName === 'string') {
-    const dn = normalizeDynamicNameOrThrow(m.dynamicName, m.index)
-    assertUniqueDynamicName(dn, seenDynamic)
-  }
-}
-
 function validateMappings(mappings: readonly ParamMap[]): void {
   const seenDynamic = new Set<string>()
   for (let i = 0; i < mappings.length; i++) {
-    validateMappingEntry(mappings[i], i + 1, seenDynamic)
+    const m = mappings[i]
+    assertSequentialIndex(m.index, i + 1)
+    assertExactlyOneOfDynamicOrValue(m)
+
+    if (typeof m.dynamicName === 'string') {
+      const dn = normalizeDynamicNameOrThrow(m.dynamicName, m.index)
+      if (seenDynamic.has(dn)) {
+        throw new Error(`CRITICAL: Duplicate dynamic param name: ${dn}`)
+      }
+      seenDynamic.add(dn)
+    }
   }
 }
 
@@ -114,9 +103,7 @@ function validateState(
 ): void {
   assertSameLength(params, mappings)
   assertValidNextIndex(index)
-
   if (mappings.length === 0) return
-
   validateMappings(mappings)
   assertNextIndexMatches(mappings.length, index)
 }
@@ -127,12 +114,14 @@ function createStoreInternal(
   initialMappings: ParamMap[] = [],
 ): ParamStore {
   let index = startIndex
-  const params: unknown[] = initialParams.length > 0 ? [...initialParams] : []
+  const params: unknown[] =
+    initialParams.length > 0 ? initialParams.slice() : []
   const mappings: ParamMap[] =
-    initialMappings.length > 0 ? [...initialMappings] : []
+    initialMappings.length > 0 ? initialMappings.slice() : []
 
   const dynamicNameToIndex = new Map<string, number>()
-  for (const m of mappings) {
+  for (let i = 0; i < mappings.length; i++) {
+    const m = mappings[i]
     if (typeof m.dynamicName === 'string') {
       dynamicNameToIndex.set(m.dynamicName.trim(), m.index)
     }
@@ -140,6 +129,9 @@ function createStoreInternal(
 
   let dirty = true
   let cachedSnapshot: ParamSnapshot | null = null
+
+  let frozenParams: readonly unknown[] | null = null
+  let frozenMappings: readonly ParamMap[] | null = null
 
   function assertCanAdd(): void {
     if (index > MAX_PARAM_INDEX) {
@@ -203,14 +195,19 @@ function createStoreInternal(
   function snapshot(): ParamSnapshot {
     if (!dirty && cachedSnapshot) return cachedSnapshot
 
+    if (!frozenParams) frozenParams = Object.freeze(params.slice())
+    if (!frozenMappings) frozenMappings = Object.freeze(mappings.slice())
+
     const snap: ParamSnapshot = {
       index,
-      params: params,
-      mappings: mappings,
+      params: frozenParams,
+      mappings: frozenMappings,
     }
 
     cachedSnapshot = snap
     dirty = false
+    frozenParams = null
+    frozenMappings = null
     return snap
   }
 
@@ -243,10 +240,10 @@ export function createParamStoreFrom(
   existingMappings: readonly ParamMap[],
   nextIndex: number,
 ): ParamStore {
-  validateState([...existingParams], [...existingMappings], nextIndex)
+  validateState(existingParams, existingMappings, nextIndex)
   return createStoreInternal(
     nextIndex,
-    [...existingParams],
-    [...existingMappings],
+    existingParams.slice() as unknown[],
+    existingMappings.slice() as ParamMap[],
   )
 }

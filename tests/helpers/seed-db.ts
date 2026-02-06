@@ -38,6 +38,34 @@ async function safeDeleteMany(fn: () => Promise<unknown>): Promise<void> {
 }
 
 export async function seedDatabase(db: TestDB): Promise<SeedResult> {
+  const existingUsers = await db.prisma.user.count()
+
+  if (existingUsers > 0) {
+    console.log('Database already seeded, skipping...')
+
+    const users = await db.prisma.user.findMany({ select: { id: true } })
+    const organizations = await db.prisma.organization.findMany({
+      select: { id: true },
+    })
+    const projects = await db.prisma.project.findMany({ select: { id: true } })
+    const milestones = await db.prisma.milestone.findMany({
+      select: { id: true },
+    })
+    const labels = await db.prisma.label.findMany({ select: { id: true } })
+    const tasks = await db.prisma.task.findMany({ select: { id: true } })
+    const comments = await db.prisma.comment.findMany({ select: { id: true } })
+
+    return {
+      organizationIds: organizations.map((o: any) => o.id),
+      userIds: users.map((u: any) => u.id),
+      projectIds: projects.map((p: any) => p.id),
+      milestoneIds: milestones.map((m: any) => m.id),
+      labelIds: labels.map((l: any) => l.id),
+      taskIds: tasks.map((t: any) => t.id),
+      commentIds: comments.map((c: any) => c.id),
+    }
+  }
+
   console.log('Seeding database...')
   const start = performance.now()
 
@@ -137,9 +165,7 @@ export async function seedDatabase(db: TestDB): Promise<SeedResult> {
             },
           })
           labelIds.push(label.id)
-        } catch {
-          // skip duplicate label names
-        }
+        } catch {}
       }
 
       const projectLabelIds = labelIds.slice(-labels.length)
@@ -178,9 +204,7 @@ export async function seedDatabase(db: TestDB): Promise<SeedResult> {
               await db.prisma.taskLabel.create({
                 data: { taskId: task.id, labelId },
               })
-            } catch {
-              // skip duplicate task-label assignments
-            }
+            } catch {}
           }
         }
 

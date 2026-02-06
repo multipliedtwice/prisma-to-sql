@@ -1,3 +1,4 @@
+// src/index.ts
 import {
   type Model,
   DirectiveProps,
@@ -12,11 +13,7 @@ import {
 } from './sql-generator'
 import { transformQueryResults, type PrismaMethod } from './result-transformers'
 import { buildSQLWithCache } from './query-cache'
-import {
-  buildBatchCountSql,
-  parseBatchCountResults,
-  type BatchCountQuery,
-} from './batch'
+import { buildBatchSql, parseBatchResults, type BatchQuery } from './batch'
 import {
   createTransactionExecutor,
   type TransactionQuery,
@@ -46,6 +43,36 @@ interface QueryInfo {
   params: unknown[]
   duration: number
 }
+
+interface DeferredQueryLike {
+  readonly model: string
+  readonly method: PrismaMethod
+  readonly args: any
+}
+
+interface BatchProxy {
+  [modelName: string]: {
+    findMany: (args?: any) => DeferredQueryLike
+    findFirst: (args?: any) => DeferredQueryLike
+    findUnique: (args?: any) => DeferredQueryLike
+    count: (args?: any) => DeferredQueryLike
+    aggregate: (args?: any) => DeferredQueryLike
+    groupBy: (args?: any) => DeferredQueryLike
+  }
+}
+
+interface SpeedExtensionClient {
+  $original: any
+  $batch: <T extends Record<string, DeferredQueryLike>>(
+    callback: (batch: BatchProxy) => T | Promise<T>,
+  ) => Promise<{ [K in keyof T]: any }>
+  $transaction: (
+    queries: TransactionQuery[],
+    options?: TransactionOptions,
+  ) => Promise<unknown[]>
+}
+
+type ExtendedPrismaClient<T> = T & SpeedExtensionClient
 
 const ACCELERATED_METHODS = new Set<PrismaMethod>([
   'findMany',
@@ -112,7 +139,7 @@ function executeSqlite(db: any, sql: string, params: unknown[]): unknown[] {
   return stmt.all(...params)
 }
 
-type ExecuteWithTimingInput = {
+interface ExecuteWithTimingInput {
   modelName: string
   method: PrismaMethod
   model: Model
@@ -181,11 +208,14 @@ function fallbackToPrisma(
   modelName: string,
   method: PrismaMethod,
   args: any,
-) {
+): Promise<any> {
   return ctx.$parent[modelName][method](args)
 }
 
-function createExecuteQuery(client: any, dialect: SqlDialect) {
+function createExecuteQuery(
+  client: any,
+  dialect: SqlDialect,
+): (sql: string, params: unknown[]) => Promise<unknown[]> {
   return async (sql: string, params: unknown[]): Promise<unknown[]> => {
     if (dialect === 'postgres') {
       return await executePostgres(client, sql, params)
@@ -200,12 +230,12 @@ function logAcceleratedError(
   modelName: string,
   method: PrismaMethod,
   error: unknown,
-) {
+): void {
   if (!debug) return
   console.error(`[${dialect}] ${modelName}.${method} failed:`, error)
 }
 
-type AccelerationDeps = {
+interface AccelerationDeps {
   dialect: SqlDialect
   debug: boolean
   onQuery?: (info: QueryInfo) => void
@@ -272,6 +302,68 @@ async function handleMethodCall(
   }
 }
 
+class DeferredQuery implements DeferredQueryLike {
+  constructor(
+    public readonly model: string,
+    public readonly method: PrismaMethod,
+    public readonly args: any,
+  ) {}
+
+  then(onfulfilled?: any, onrejected?: any): any {
+    throw new Error(
+      'Cannot await a batch query. Batch queries must not be awaited inside the $batch callback.',
+    )
+  }
+}
+
+function createBatchProxy(
+  modelMap: Map<string, Model>,
+  allowedModels?: string[],
+): BatchProxy {
+  return new Proxy(
+    {},
+    {
+      get(_target, modelName: string): any {
+        if (typeof modelName === 'symbol') return undefined
+
+        const model = modelMap.get(modelName)
+        if (!model) {
+          throw new Error(
+            `Model '${modelName}' not found. Available: ${[...modelMap.keys()].join(', ')}`,
+          )
+        }
+
+        if (allowedModels && !allowedModels.includes(modelName)) {
+          throw new Error(
+            `Model '${modelName}' not allowed. Allowed: ${allowedModels.join(', ')}`,
+          )
+        }
+
+        return new Proxy(
+          {},
+          {
+            get(_target, method: string): (args?: any) => DeferredQuery {
+              if (!ACCELERATED_METHODS.has(method as PrismaMethod)) {
+                throw new Error(
+                  `Method '${method}' not supported in batch. Supported: ${[...ACCELERATED_METHODS].join(', ')}`,
+                )
+              }
+
+              return (args?: any): DeferredQuery => {
+                return new DeferredQuery(
+                  modelName,
+                  method as PrismaMethod,
+                  args,
+                )
+              }
+            },
+          },
+        )
+      },
+    },
+  ) as BatchProxy
+}
+
 export function speedExtension(config: SpeedExtensionConfig) {
   const {
     postgres,
@@ -326,13 +418,15 @@ export function speedExtension(config: SpeedExtensionConfig) {
       executeQuery,
     }
 
-    const createMethodHandler = (method: PrismaMethod) => {
-      return async function (this: any, args: any) {
+    const createMethodHandler = (
+      method: PrismaMethod,
+    ): ((this: any, args?: any) => Promise<any>) => {
+      return async function (this: any, args?: any): Promise<any> {
         return handleMethodCall(this, method, args, deps)
       }
     }
 
-    const methodHandlers: Record<string, any> = {}
+    const methodHandlers: Record<string, (args?: any) => Promise<any>> = {}
     for (const method of ACCELERATED_METHODS) {
       methodHandlers[method] = createMethodHandler(method)
     }
@@ -347,44 +441,64 @@ export function speedExtension(config: SpeedExtensionConfig) {
       throw new Error('Raw execution for sqlite not supported in transactions')
     }
 
-    const txExecutor = createTransactionExecutor({
+    const txExecutor: TransactionExecutor = createTransactionExecutor({
       modelMap,
       allModels: models,
       dialect,
       executeRaw,
+      postgresClient: postgres,
     })
 
-    async function batchCount(queries: BatchCountQuery[]): Promise<number[]> {
-      if (queries.length === 0) return []
+    async function batch<T extends Record<string, DeferredQueryLike>>(
+      callback: (batch: BatchProxy) => T | Promise<T>,
+    ): Promise<{ [K in keyof T]: any }> {
+      const batchProxy = createBatchProxy(modelMap, allowedModels)
+      const queries = await callback(batchProxy)
+
+      const batchQueries: Record<string, BatchQuery> = {}
+
+      for (const [key, deferred] of Object.entries(queries)) {
+        if (!(deferred instanceof DeferredQuery)) {
+          throw new Error(
+            `Batch query '${key}' must be a deferred query. Did you await it?`,
+          )
+        }
+
+        batchQueries[key] = {
+          model: deferred.model,
+          method: deferred.method,
+          args: deferred.args || {},
+        }
+      }
 
       const startTime = Date.now()
-      const { sql, params } = buildBatchCountSql(
-        queries,
+      const { sql, params, keys } = buildBatchSql(
+        batchQueries,
         modelMap,
         models,
         dialect,
       )
 
       if (debug) {
-        console.log(`[${dialect}] $batchCount (${queries.length} queries)`)
+        console.log(`[${dialect}] $batch (${keys.length} queries)`)
         console.log('SQL:', sql)
         console.log('Params:', params)
       }
 
       const rows = await executeQuery(sql, params)
       const row = rows[0] as Record<string, unknown>
-      const results = parseBatchCountResults(row, queries.length)
+      const results = parseBatchResults(row, keys, batchQueries)
       const duration = Date.now() - startTime
 
       onQuery?.({
         model: '_batch',
-        method: 'count',
+        method: 'batch',
         sql,
         params,
         duration,
       })
 
-      return results
+      return results as { [K in keyof T]: any }
     }
 
     async function transaction(
@@ -416,7 +530,7 @@ export function speedExtension(config: SpeedExtensionConfig) {
 
       client: {
         $original: prisma,
-        $batchCount: batchCount,
+        $batch: batch,
         $transaction: transaction,
       },
 
@@ -425,6 +539,14 @@ export function speedExtension(config: SpeedExtensionConfig) {
       },
     })
   }
+}
+
+export function extendPrisma<T>(
+  prisma: T,
+  config: SpeedExtensionConfig,
+): ExtendedPrismaClient<T> {
+  const extension = speedExtension(config)
+  return extension(prisma) as ExtendedPrismaClient<T>
 }
 
 function createToSQLFunction(
@@ -461,7 +583,11 @@ function createToSQLFunction(
 export function createToSQL(
   modelsOrDmmf: Model[] | DMMF.Document,
   dialect: SqlDialect,
-) {
+): (
+  model: string,
+  method: PrismaMethod,
+  args?: Record<string, unknown>,
+) => SqlResult {
   const models = Array.isArray(modelsOrDmmf)
     ? modelsOrDmmf
     : convertDMMFToModels((modelsOrDmmf as DMMF.Document).datamodel)
@@ -481,7 +607,24 @@ interface PrismaSQLConfig<TClient> {
   ) => Promise<unknown[]>
 }
 
-export function createPrismaSQL<TClient>(config: PrismaSQLConfig<TClient>) {
+interface PrismaSQLResult<TClient> {
+  toSQL: (
+    model: string,
+    method: PrismaMethod,
+    args?: Record<string, unknown>,
+  ) => SqlResult
+  query: <T = unknown[]>(
+    model: string,
+    method: PrismaMethod,
+    args?: Record<string, unknown>,
+  ) => Promise<T>
+  batchSql: (queries: Record<string, BatchQuery>) => SqlResult
+  client: TClient
+}
+
+export function createPrismaSQL<TClient>(
+  config: PrismaSQLConfig<TClient>,
+): PrismaSQLResult<TClient> {
   const { client, models: providedModels, dmmf, dialect, execute } = config
 
   let models: Model[]
@@ -510,11 +653,12 @@ export function createPrismaSQL<TClient>(config: PrismaSQLConfig<TClient>) {
     return execute(client, sql, params) as Promise<T>
   }
 
-  function batchCountSql(queries: BatchCountQuery[]): SqlResult {
-    return buildBatchCountSql(queries, modelMap, models, dialect)
+  function batchSql(queries: Record<string, BatchQuery>): SqlResult {
+    const { sql, params } = buildBatchSql(queries, modelMap, models, dialect)
+    return { sql, params }
   }
 
-  return { toSQL, query, batchCountSql, client }
+  return { toSQL, query, batchSql, client }
 }
 
 export function generateSQL(directive: DirectiveProps): SQLDirective {
@@ -570,11 +714,16 @@ export function generateSQLByModel(
 
 export type {
   SpeedExtensionConfig,
+  SpeedExtensionClient,
+  ExtendedPrismaClient,
   QueryInfo,
   SqlResult,
   PrismaMethod,
   PrismaSQLConfig,
-  BatchCountQuery,
+  PrismaSQLResult,
+  BatchQuery,
+  BatchProxy,
+  DeferredQueryLike,
   TransactionQuery,
   TransactionOptions,
   TransactionExecutor,
@@ -585,5 +734,5 @@ export { setGlobalDialect, getGlobalDialect } from './sql-builder-dialect'
 export type { Model, Field, PrismaQueryArgs } from './types'
 export { convertDMMFToModels } from '@dee-wan/schema-parser'
 export { transformQueryResults }
-export { buildBatchCountSql, parseBatchCountResults } from './batch'
+export { buildBatchSql, parseBatchResults } from './batch'
 export { createTransactionExecutor } from './transaction'
