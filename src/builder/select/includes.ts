@@ -75,7 +75,6 @@ function getRelationTableReference(
 
 function resolveRelationOrThrow(
   model: Model,
-  schemas: readonly Model[],
   schemaByName: Map<string, Model>,
   relName: string,
 ): { field: Field; relModel: Model } {
@@ -156,8 +155,9 @@ function validateOrderByForModel(model: Model, orderBy: unknown): void {
     }
 
     const fieldName = String(entries[0][0]).trim()
-    if (fieldName.length === 0)
+    if (fieldName.length === 0) {
       throw new Error('orderBy field name cannot be empty')
+    }
     if (!scalarSet.has(fieldName)) {
       throw new Error(
         `orderBy references unknown or non-scalar field '${fieldName}' on model ${model.name}`,
@@ -247,8 +247,9 @@ function maybeReverseNegativeTake(
 ): { takeVal: OptionalIntOrDynamic; orderByInput: unknown } {
   if (typeof takeVal !== 'number') return { takeVal, orderByInput }
   if (takeVal >= 0) return { takeVal, orderByInput }
-  if (!hasOrderBy)
+  if (!hasOrderBy) {
     throw new Error('Negative take requires orderBy for deterministic results')
+  }
   return {
     takeVal: Math.abs(takeVal),
     orderByInput: reverseOrderByInput(orderByInput),
@@ -265,9 +266,7 @@ function finalizeOrderByForInclude(args: {
     validateOrderByForModel(args.relModel, args.orderByInput)
   }
 
-  if (!args.hasPagination) {
-    return args.orderByInput
-  }
+  if (!args.hasPagination) return args.orderByInput
 
   return ensureDeterministicOrderByInput({
     orderBy: args.hasOrderBy ? args.orderByInput : undefined,
@@ -381,10 +380,12 @@ function buildBaseSql(args: {
   joinPredicate: string
   whereClause: string
 }): string {
+  const joins = args.joins ? ` ${args.joins}` : ''
+  const where = `${SQL_TEMPLATES.WHERE} ${args.joinPredicate}${args.whereClause}`
   return (
     `${SQL_TEMPLATES.SELECT} ${args.selectExpr} ` +
-    `${SQL_TEMPLATES.FROM} ${args.relTable} ${args.relAlias} ${args.joins} ` +
-    `${SQL_TEMPLATES.WHERE} ${args.joinPredicate}${args.whereClause}`
+    `${SQL_TEMPLATES.FROM} ${args.relTable} ${args.relAlias}${joins} ` +
+    where
   )
 }
 
@@ -412,9 +413,7 @@ function buildOneToOneIncludeSql(args: {
     whereClause: args.whereClause,
   })
 
-  if (args.orderBySql) {
-    sql += ` ${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}`
-  }
+  if (args.orderBySql) sql += ` ${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}`
 
   if (isNotNullish(args.takeVal)) {
     return appendLimitOffset(
@@ -492,7 +491,9 @@ function buildListIncludeSpec(args: {
   )
 
   const selectExpr = jsonAgg('row', args.ctx.dialect)
-  const sql = `${SQL_TEMPLATES.SELECT} ${selectExpr} ${SQL_TEMPLATES.FROM} (${base}) ${rowAlias}`
+  const sql =
+    `${SQL_TEMPLATES.SELECT} ${selectExpr} ` +
+    `${SQL_TEMPLATES.FROM} (${base}) ${SQL_TEMPLATES.AS} ${rowAlias}`
 
   return Object.freeze({ name: args.relName, sql, isOneToOne: false })
 }
@@ -571,7 +572,6 @@ function buildSingleInclude(
       skipVal: paginationConfig.skipVal,
       ctx,
     })
-
     return Object.freeze({ name: relName, sql, isOneToOne: true })
   }
 
@@ -643,12 +643,7 @@ function buildIncludeSqlInternal(
       )
     }
 
-    const resolved = resolveRelationOrThrow(
-      model,
-      schemas,
-      schemaByName,
-      relName,
-    )
+    const resolved = resolveRelationOrThrow(model, schemaByName, relName)
 
     const relationPath = `${model.name}.${relName}`
     const currentPath = [...visitPath, relationPath]
@@ -729,7 +724,6 @@ interface RelationCountBuild {
 function resolveCountRelationOrThrow(
   relName: string,
   model: Model,
-  schemas: readonly Model[],
   schemaByName: Map<string, Model>,
 ): { field: Field; relModel: Model } {
   const relationSet = getRelationFieldSet(model)
@@ -740,10 +734,11 @@ function resolveCountRelationOrThrow(
   }
 
   const field = model.fields.find((f) => f.name === relName)
-  if (!field)
+  if (!field) {
     throw new Error(
       `_count.${relName} references unknown relation on model ${model.name}`,
     )
+  }
 
   if (!isValidRelationField(field)) {
     throw new Error(
@@ -783,8 +778,9 @@ function resolveCountKeyPairs(field: Field): {
   parentKeyFields: string[]
 } {
   const fkFields = normalizeKeyList((field as any).foreignKey)
-  if (fkFields.length === 0)
+  if (fkFields.length === 0) {
     throw new Error('Relation count requires foreignKey')
+  }
 
   const refsRaw = (field as any).references
   const refs = normalizeKeyList(refsRaw)
@@ -924,12 +920,7 @@ export function buildRelationCountSql(
   for (const [relName, shouldCount] of Object.entries(countSelect)) {
     if (!shouldCount) continue
 
-    const resolved = resolveCountRelationOrThrow(
-      relName,
-      model,
-      schemas,
-      schemaByName,
-    )
+    const resolved = resolveCountRelationOrThrow(relName, model, schemaByName)
     const built = buildCountJoinAndPair({
       relName,
       field: resolved.field,

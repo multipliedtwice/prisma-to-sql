@@ -1,12 +1,28 @@
+// tests/helpers/datamodel.ts
+
 import { getDMMF } from '@prisma/internals'
 import { readFileSync, existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
 import type { DMMF } from '@prisma/generator-helper'
 
-const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
+function detectPrismaVersion(): number {
+  if (process.env.PRISMA_VERSION) {
+    return parseInt(process.env.PRISMA_VERSION, 10)
+  }
+  try {
+    const pkg = require(
+      resolve(process.cwd(), 'node_modules', 'prisma', 'package.json'),
+    )
+    return parseInt(pkg.version.split('.')[0], 10) >= 7 ? 7 : 6
+  } catch {
+    return 6
+  }
+}
+
+const PRISMA_VERSION = detectPrismaVersion()
 
 function preprocessSchemaForV7(schema: string): string {
-  return schema.replace(/^\s*url\s*=\s*["'][^"']*["']\s*$/gm, '')
+  return schema.replace(/^\s*url\s*=\s*.*$/gm, '')
 }
 
 async function loadDmmfForDialect(
@@ -20,8 +36,29 @@ async function loadDmmfForDialect(
   const versionedPath = resolve(prismaDir, versionedSchemaFile)
   const basePath = resolve(prismaDir, baseSchemaFile)
 
-  const schemaPath = existsSync(versionedPath) ? versionedPath : basePath
-  let datamodel = readFileSync(schemaPath, 'utf8')
+  let schemaPath: string
+  let datamodel: string
+
+  if (existsSync(versionedPath)) {
+    schemaPath = versionedPath
+    datamodel = readFileSync(schemaPath, 'utf8')
+  } else if (existsSync(basePath)) {
+    schemaPath = basePath
+    datamodel = readFileSync(schemaPath, 'utf8')
+  } else {
+    const headerPath = resolve(prismaDir, `${dialect}.prisma`)
+    const baseModelPath = resolve(prismaDir, 'base.prisma')
+
+    if (!existsSync(headerPath) || !existsSync(baseModelPath)) {
+      throw new Error(
+        `Cannot find schema files for ${dialect}. Looked for: ${versionedPath}, ${basePath}, ${headerPath}+${baseModelPath}`,
+      )
+    }
+
+    const header = readFileSync(headerPath, 'utf8')
+    const base = readFileSync(baseModelPath, 'utf8')
+    datamodel = `${header}\n\n${base}`
+  }
 
   if (PRISMA_VERSION >= 7) {
     datamodel = preprocessSchemaForV7(datamodel)

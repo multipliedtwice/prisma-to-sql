@@ -17,6 +17,10 @@ function assertNoControlChars(label: string, s: string): void {
   }
 }
 
+function quoteRawIdent(id: string): string {
+  return `"${id.replace(/"/g, '""')}"`
+}
+
 function isIdentCharCode(c: number): boolean {
   return (
     (c >= 48 && c <= 57) ||
@@ -46,14 +50,14 @@ function parseQuotedPart(input: string, start: number): number {
       }
       if (!sawAny) {
         throw new Error(
-          `tableName/tableRef has empty quoted identifier part: ${JSON.stringify(input)}`,
+          `qualified name has empty quoted identifier part: ${JSON.stringify(input)}`,
         )
       }
       return i + 1
     }
     if (c === 10 || c === 13 || c === 0) {
       throw new Error(
-        `tableName/tableRef contains invalid characters: ${JSON.stringify(input)}`,
+        `qualified name contains invalid characters: ${JSON.stringify(input)}`,
       )
     }
     sawAny = true
@@ -61,7 +65,7 @@ function parseQuotedPart(input: string, start: number): number {
   }
 
   throw new Error(
-    `tableName/tableRef has unterminated quoted identifier: ${JSON.stringify(input)}`,
+    `qualified name has unterminated quoted identifier: ${JSON.stringify(input)}`,
   )
 }
 
@@ -70,13 +74,13 @@ function parseUnquotedPart(input: string, start: number): number {
   let i = start
 
   if (i >= n) {
-    throw new Error(`tableName/tableRef is invalid: ${JSON.stringify(input)}`)
+    throw new Error(`qualified name is invalid: ${JSON.stringify(input)}`)
   }
 
   const c0 = input.charCodeAt(i)
   if (!isIdentStartCharCode(c0)) {
     throw new Error(
-      `tableName/tableRef must use identifiers (or quoted identifiers). Got: ${JSON.stringify(input)}`,
+      `qualified name must use identifiers (or quoted identifiers). Got: ${JSON.stringify(input)}`,
     )
   }
   i++
@@ -86,7 +90,7 @@ function parseUnquotedPart(input: string, start: number): number {
     if (c === 46) break
     if (!isIdentCharCode(c)) {
       throw new Error(
-        `tableName/tableRef contains invalid identifier characters: ${JSON.stringify(input)}`,
+        `qualified name contains invalid identifier characters: ${JSON.stringify(input)}`,
       )
     }
     i++
@@ -95,8 +99,8 @@ function parseUnquotedPart(input: string, start: number): number {
   return i
 }
 
-function assertSafeQualifiedName(tableRef: string): void {
-  const raw = String(tableRef)
+function assertSafeQualifiedName(input: string): void {
+  const raw = String(input)
   const trimmed = raw.trim()
 
   if (trimmed.length === 0) {
@@ -184,10 +188,17 @@ export function quote(id: string): string {
   }
 
   if (needsQuoting(id)) {
-    return `"${id.replace(/"/g, '""')}"`
+    return quoteRawIdent(id)
   }
 
   return id
+}
+
+function quoteQualified(tableRef: string): string {
+  assertSafeQualifiedName(tableRef)
+  const parts = tableRef.split('.')
+  if (parts.length === 1) return quote(parts[0])
+  return `${quote(parts[0])}.${quote(parts[1])}`
 }
 
 export function resolveColumnName(
@@ -377,3 +388,5 @@ export function normalizeKeyList(input: unknown): string[] {
   const s = String(input).trim()
   return s.length > 0 ? [s] : []
 }
+
+export { quoteQualified }
