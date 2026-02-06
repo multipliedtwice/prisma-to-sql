@@ -1,3 +1,10 @@
+# [1.55.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.54.0...v1.55.0) (2026-02-06)
+
+
+### Features
+
+* batch and transactions ([f0db233](https://github.com/multipliedtwice/prisma-to-sql/commit/f0db233c713b6712a05524bbd1285020b54217a5))
+
 # [1.54.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.53.0...v1.54.0) (2026-02-06)
 
 
