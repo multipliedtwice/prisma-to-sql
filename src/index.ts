@@ -12,6 +12,17 @@ import {
 } from './sql-generator'
 import { transformQueryResults, type PrismaMethod } from './result-transformers'
 import { buildSQLWithCache } from './query-cache'
+import {
+  buildBatchCountSql,
+  parseBatchCountResults,
+  type BatchCountQuery,
+} from './batch'
+import {
+  createTransactionExecutor,
+  type TransactionQuery,
+  type TransactionOptions,
+  type TransactionExecutor,
+} from './transaction'
 
 interface SqlResult {
   sql: string
@@ -261,34 +272,6 @@ async function handleMethodCall(
   }
 }
 
-/**
- * Runtime-only Prisma extension for SQL acceleration.
- *
- * ⚠️ RECOMMENDED: Use generated extension instead for zero overhead!
- *
- * @example
- * // RECOMMENDED: Generated extension (no models/dmmf needed)
- * import { speedExtension } from './generated/sql'
- * const prisma = new PrismaClient().$extends(
- *   speedExtension({ postgres: sql })
- * )
- *
- * @example
- * // Runtime with pre-converted models
- * import { speedExtension } from 'prisma-sql'
- * import { MODELS } from './generated/sql'
- * const prisma = new PrismaClient().$extends(
- *   speedExtension({ postgres: sql, models: MODELS })
- * )
- *
- * @example
- * // Runtime with DMMF (auto-converts on startup)
- * import { speedExtension } from 'prisma-sql'
- * import { Prisma } from '@prisma/client'
- * const prisma = new PrismaClient().$extends(
- *   speedExtension({ postgres: sql, dmmf: Prisma.dmmf })
- * )
- */
 export function speedExtension(config: SpeedExtensionConfig) {
   const {
     postgres,
@@ -317,33 +300,7 @@ export function speedExtension(config: SpeedExtensionConfig) {
   } else if (dmmf) {
     models = convertDMMFToModels(dmmf.datamodel)
   } else {
-    throw new Error(
-      'speedExtension requires either models or dmmf parameter.\n\n' +
-        '⚠️  RECOMMENDED APPROACH:\n' +
-        '   Use the generated extension for zero runtime overhead:\n\n' +
-        '   import { speedExtension } from "./generated/sql"\n' +
-        '   const prisma = new PrismaClient().$extends(\n' +
-        '     speedExtension({ postgres: sql })\n' +
-        '   )\n\n' +
-        '   1. Add generator to schema.prisma:\n' +
-        '      generator sql {\n' +
-        '        provider = "prisma-sql-generator"\n' +
-        '      }\n\n' +
-        '   2. Run: npx prisma generate\n\n' +
-        '   3. Import from generated file\n\n' +
-        '❌ RUNTIME-ONLY MODE:\n' +
-        '   If you cannot use the generator, provide models or dmmf:\n\n' +
-        '   import { speedExtension } from "prisma-sql"\n' +
-        '   import { MODELS } from "./generated/sql"\n' +
-        '   const prisma = new PrismaClient().$extends(\n' +
-        '     speedExtension({ postgres: sql, models: MODELS })\n' +
-        '   )\n\n' +
-        '   Or with DMMF (auto-converts on startup):\n\n' +
-        '   import { Prisma } from "@prisma/client"\n' +
-        '   const prisma = new PrismaClient().$extends(\n' +
-        '     speedExtension({ postgres: sql, dmmf: Prisma.dmmf })\n' +
-        '   )',
-    )
+    throw new Error('speedExtension requires either models or dmmf parameter.')
   }
 
   if (!Array.isArray(models) || models.length === 0) {
@@ -380,11 +337,87 @@ export function speedExtension(config: SpeedExtensionConfig) {
       methodHandlers[method] = createMethodHandler(method)
     }
 
+    const executeRaw = async (
+      sql: string,
+      params?: unknown[],
+    ): Promise<unknown[]> => {
+      if (dialect === 'postgres') {
+        return await client.unsafe(sql, params as any[])
+      }
+      throw new Error('Raw execution for sqlite not supported in transactions')
+    }
+
+    const txExecutor = createTransactionExecutor({
+      modelMap,
+      allModels: models,
+      dialect,
+      executeRaw,
+    })
+
+    async function batchCount(queries: BatchCountQuery[]): Promise<number[]> {
+      if (queries.length === 0) return []
+
+      const startTime = Date.now()
+      const { sql, params } = buildBatchCountSql(
+        queries,
+        modelMap,
+        models,
+        dialect,
+      )
+
+      if (debug) {
+        console.log(`[${dialect}] $batchCount (${queries.length} queries)`)
+        console.log('SQL:', sql)
+        console.log('Params:', params)
+      }
+
+      const rows = await executeQuery(sql, params)
+      const row = rows[0] as Record<string, unknown>
+      const results = parseBatchCountResults(row, queries.length)
+      const duration = Date.now() - startTime
+
+      onQuery?.({
+        model: '_batch',
+        method: 'count',
+        sql,
+        params,
+        duration,
+      })
+
+      return results
+    }
+
+    async function transaction(
+      queries: TransactionQuery[],
+      options?: TransactionOptions,
+    ): Promise<unknown[]> {
+      const startTime = Date.now()
+
+      if (debug) {
+        console.log(`[${dialect}] $transaction (${queries.length} queries)`)
+      }
+
+      const results = await txExecutor.execute(queries, options)
+      const duration = Date.now() - startTime
+
+      onQuery?.({
+        model: '_transaction',
+        method: 'count',
+        sql: `TRANSACTION(${queries.length})`,
+        params: [],
+        duration,
+      })
+
+      return results
+    }
+
     return prisma.$extends({
       name: 'prisma-sql-speed',
 
       client: {
         $original: prisma,
+        $batchCount: batchCount,
+        $transaction: transaction,
       },
 
       model: {
@@ -425,18 +458,6 @@ function createToSQLFunction(
   }
 }
 
-/**
- * Create a SQL generator function from models.
- *
- * @example
- * import { createToSQL } from 'prisma-sql'
- * import { MODELS } from './generated/sql'
- *
- * const toSQL = createToSQL(MODELS, 'postgres')
- * const { sql, params } = toSQL('User', 'findMany', {
- *   where: { status: 'ACTIVE' }
- * })
- */
 export function createToSQL(
   modelsOrDmmf: Model[] | DMMF.Document,
   dialect: SqlDialect,
@@ -460,24 +481,6 @@ interface PrismaSQLConfig<TClient> {
   ) => Promise<unknown[]>
 }
 
-/**
- * Create a Prisma SQL client for environments where extensions aren't supported.
- *
- * @example
- * import { createPrismaSQL } from 'prisma-sql'
- * import { MODELS } from './generated/sql'
- *
- * const prismaSQL = createPrismaSQL({
- *   client: sql,
- *   models: MODELS,
- *   dialect: 'postgres',
- *   execute: (client, sql, params) => client.unsafe(sql, params)
- * })
- *
- * const users = await prismaSQL.query('User', 'findMany', {
- *   where: { status: 'ACTIVE' }
- * })
- */
 export function createPrismaSQL<TClient>(config: PrismaSQLConfig<TClient>) {
   const { client, models: providedModels, dmmf, dialect, execute } = config
 
@@ -496,6 +499,7 @@ export function createPrismaSQL<TClient>(config: PrismaSQLConfig<TClient>) {
   }
 
   const toSQL = createToSQLFunction(models, dialect)
+  const modelMap = new Map(models.map((m) => [m.name, m]))
 
   async function query<T = unknown[]>(
     model: string,
@@ -506,7 +510,11 @@ export function createPrismaSQL<TClient>(config: PrismaSQLConfig<TClient>) {
     return execute(client, sql, params) as Promise<T>
   }
 
-  return { toSQL, query, client }
+  function batchCountSql(queries: BatchCountQuery[]): SqlResult {
+    return buildBatchCountSql(queries, modelMap, models, dialect)
+  }
+
+  return { toSQL, query, batchCountSql, client }
 }
 
 export function generateSQL(directive: DirectiveProps): SQLDirective {
@@ -566,6 +574,10 @@ export type {
   SqlResult,
   PrismaMethod,
   PrismaSQLConfig,
+  BatchCountQuery,
+  TransactionQuery,
+  TransactionOptions,
+  TransactionExecutor,
 }
 
 export type { SqlDialect, SQLDirective }
@@ -573,3 +585,5 @@ export { setGlobalDialect, getGlobalDialect } from './sql-builder-dialect'
 export type { Model, Field, PrismaQueryArgs } from './types'
 export { convertDMMFToModels } from '@dee-wan/schema-parser'
 export { transformQueryResults }
+export { buildBatchCountSql, parseBatchCountResults } from './batch'
+export { createTransactionExecutor } from './transaction'

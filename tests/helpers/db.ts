@@ -47,7 +47,28 @@ async function mergeSchema(dialect: 'postgres' | 'sqlite'): Promise<string> {
 const PG_URL = 'postgres://postgres:postgres@localhost:5433/prisma_test'
 const SQLITE_DB_PATH = path.join(process.cwd(), 'tests', 'prisma', 'db.sqlite')
 const SQLITE_URL = `file:${SQLITE_DB_PATH}`
-const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
+
+function detectPrismaVersion(): number {
+  if (process.env.PRISMA_VERSION) {
+    return parseInt(process.env.PRISMA_VERSION, 10)
+  }
+  try {
+    const prismaPackagePath = path.join(
+      process.cwd(),
+      'node_modules',
+      'prisma',
+      'package.json',
+    )
+    const pkg = require(prismaPackagePath)
+    const major = parseInt(pkg.version.split('.')[0], 10)
+    if (major >= 7) return 7
+    return 6
+  } catch {
+    return 6
+  }
+}
+
+const PRISMA_VERSION = detectPrismaVersion()
 
 async function generatePrismaClient(
   dialect: 'postgres' | 'sqlite',
