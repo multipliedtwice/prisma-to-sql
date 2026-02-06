@@ -30,11 +30,9 @@ function extractEnumMappings(datamodel: DMMF.Datamodel): EnumInfo {
 
   for (const enumDef of datamodel.enums) {
     const enumMapping: Record<string, string> = {}
-
     for (const value of enumDef.values) {
       enumMapping[value.name] = value.dbName || value.name
     }
-
     if (Object.keys(enumMapping).length > 0) {
       mappings[enumDef.name] = enumMapping
     }
@@ -42,7 +40,6 @@ function extractEnumMappings(datamodel: DMMF.Datamodel): EnumInfo {
 
   for (const model of datamodel.models) {
     fieldTypes[model.name] = {}
-
     for (const field of model.fields) {
       const baseType = field.type.replace(/\[\]|\?/g, '')
       if (mappings[baseType]) {
@@ -90,7 +87,6 @@ export async function generateClient(options: GenerateClientOptions) {
         }
 
         const methodQueriesMap = modelQueries.get(method)!
-
         const queryKey = createQueryKey(directive.query.processed)
 
         methodQueriesMap.set(queryKey, {
@@ -276,6 +272,10 @@ function normalizeValue(value: unknown, seen = new WeakSet<object>(), depth = 0)
   return value
 }
 
+function normalizeParams(params: unknown[]): unknown[] {
+  return params.map(p => normalizeValue(p))
+}
+
 function getByPath(obj: any, path: string): unknown {
   if (!obj || !path) return undefined
   const keys = path.split('.')
@@ -286,11 +286,6 @@ function getByPath(obj: any, path: string): unknown {
   }
   return result
 }
-
-function normalizeParams(params: unknown[]): unknown[] {
-  return params.map(p => normalizeValue(p))
-}
-
 
 export const MODELS: Model[] = ${JSON.stringify(cleanModels, null, 2)}
 
@@ -309,8 +304,11 @@ const DIALECT = ${JSON.stringify(dialect)}
 
 const MODEL_MAP = new Map(MODELS.map(m => [m.name, m]))
 
-function isDynamicParam(key: string): boolean {
-  return key === 'skip' || key === 'take' || key === 'cursor'
+function isDynamicKeyForQueryKey(path: string[], key: string): boolean {
+  if (key !== 'skip' && key !== 'take' && key !== 'cursor') return false
+  if (path.includes('where')) return false
+  if (path.includes('data')) return false
+  return true
 }
 
 function transformEnumInValue(value: unknown, enumType: string | undefined): unknown {
@@ -339,28 +337,43 @@ function transformEnumInValue(value: unknown, enumType: string | undefined): unk
   return value
 }
 
-function transformEnumValues(modelName: string, obj: any, currentPath: string[] = []): any {
+function getRelatedModelName(currentModelName: string, relationFieldName: string): string | null {
+  const m = MODEL_MAP.get(currentModelName)
+  if (!m) return null
+  const f: any = (m as any).fields?.find((x: any) => x?.name === relationFieldName)
+  if (!f || !f.isRelation) return null
+  return f.relatedModel || null
+}
+
+function transformEnumValuesByModel(modelName: string, obj: any, path: string[] = []): any {
   if (obj === null || obj === undefined) {
     return obj
   }
-  
+
   if (Array.isArray(obj)) {
-    return obj.map(item => transformEnumValues(modelName, item, currentPath))
+    return obj.map(item => transformEnumValuesByModel(modelName, item, path))
   }
-  
+
   if (obj instanceof Date) {
     return obj
   }
-  
+
   if (typeof obj === 'object') {
     const transformed: any = {}
     const modelFields = ENUM_FIELDS[modelName] || {}
-    
+
     for (const [key, value] of Object.entries(obj)) {
-      const newPath = [...currentPath, key]
-      
+      const nextPath = [...path, key]
+
+      const relModel = getRelatedModelName(modelName, key)
+
+      if (relModel && value && typeof value === 'object') {
+        transformed[key] = transformEnumValuesByModel(relModel, value, nextPath)
+        continue
+      }
+
       const enumType = modelFields[key]
-      
+
       if (enumType) {
         if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
           const transformedOperators: any = {}
@@ -374,46 +387,46 @@ function transformEnumValues(modelName: string, obj: any, currentPath: string[] 
       } else if (value instanceof Date) {
         transformed[key] = value
       } else if (typeof value === 'object' && value !== null) {
-        transformed[key] = transformEnumValues(modelName, value, newPath)
+        transformed[key] = transformEnumValuesByModel(modelName, value, nextPath)
       } else {
         transformed[key] = value
       }
     }
+
     return transformed
   }
-  
+
   return obj
 }
 
-
 function normalizeQuery(args: any): string {
   if (!args) return '{}'
-  
+
   const normalized = JSON.parse(JSON.stringify(args))
-  
-  function replaceDynamicParams(obj: any): any {
+
+  function replaceDynamicParams(obj: any, path: string[] = []): any {
     if (!obj || typeof obj !== 'object') return obj
-    
+
     if (Array.isArray(obj)) {
-      return obj.map(replaceDynamicParams)
+      return obj.map((v) => replaceDynamicParams(v, path))
     }
-    
+
     const result: any = {}
     for (const [key, value] of Object.entries(obj)) {
-      if (isDynamicParam(key)) {
+      if (isDynamicKeyForQueryKey(path, key)) {
         result[key] = \`__DYNAMIC_\${key}__\`
       } else {
-        result[key] = replaceDynamicParams(value)
+        result[key] = replaceDynamicParams(value, [...path, key])
       }
     }
     return result
   }
-  
+
   const withMarkers = replaceDynamicParams(normalized)
-  
+
   function removeEmptyObjects(obj: any): any {
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj
-    
+
     const result: any = {}
     for (const [key, value] of Object.entries(obj)) {
       if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) {
@@ -423,14 +436,14 @@ function normalizeQuery(args: any): string {
     }
     return result
   }
-  
+
   const cleaned = removeEmptyObjects(withMarkers)
-  
+
   return JSON.stringify(cleaned, (key, value) => {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const sorted: Record<string, unknown> = {}
       for (const k of Object.keys(value).sort()) {
-        sorted[k] = value[k]
+        sorted[k] = (value as any)[k]
       }
       return sorted
     }
@@ -457,7 +470,6 @@ function extractDynamicParams(args: any, dynamicKeys: string[]): unknown[] {
 
   return params
 }
-
 
 async function executeQuery(client: any, sql: string, params: unknown[]): Promise<unknown[]> {
   const normalizedParams = normalizeParams(params)
@@ -521,7 +533,7 @@ export function speedExtension(config: {
       const modelName = this?.name || this?.$name
       const startTime = Date.now()
 
-      const transformedArgs = transformEnumValues(modelName, args || {})
+      const transformedArgs = transformEnumValuesByModel(modelName, args || {})
 
       const queryKey = normalizeQuery(transformedArgs)
       const prebakedQuery = QUERIES[modelName]?.[method]?.[queryKey]
@@ -674,7 +686,7 @@ export function speedExtension(config: {
 
       onQuery?.({
         model: '_transaction',
-        method: 'count',
+        method: 'transaction',
         sql: \`TRANSACTION(\${queries.length})\`,
         params: [],
         duration,
@@ -686,7 +698,7 @@ export function speedExtension(config: {
 
     return prisma.$extends({
       name: 'prisma-sql-generated',
-      
+
       client: {
         $original: prisma,
         $batch: batch as <T extends Record<string, DeferredQuery>>(

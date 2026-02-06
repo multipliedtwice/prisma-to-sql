@@ -30,11 +30,224 @@ function assertNoControlChars(label: string, s: string): void {
   }
 }
 
+function assertSafeIdentifier(label: string, s: string): void {
+  const raw = String(s)
+  if (raw.trim() !== raw) {
+    throw new Error(`${label} must not contain leading/trailing whitespace`)
+  }
+  if (raw.length === 0) throw new Error(`${label} cannot be empty`)
+  assertNoControlChars(label, raw)
+
+  if (/[ \t\r\n]/.test(raw)) {
+    throw new Error(`${label} must not contain whitespace`)
+  }
+  if (raw.includes(';')) {
+    throw new Error(`${label} must not contain semicolons`)
+  }
+  if (raw.includes('--') || raw.includes('/*') || raw.includes('*/')) {
+    throw new Error(`${label} must not contain SQL comment tokens`)
+  }
+}
+
 function quoteIdent(id: string): string {
   const raw = String(id)
-  if (raw.length === 0) throw new Error('Identifier cannot be empty')
-  assertNoControlChars('Identifier', raw)
+  assertSafeIdentifier('Identifier', raw)
   return `"${raw.replace(/"/g, '""')}"`
+}
+
+function makeBatchAlias(i: number): string {
+  return `k${i}`
+}
+
+type ScanMode =
+  | 'normal'
+  | 'single'
+  | 'double'
+  | 'lineComment'
+  | 'blockComment'
+  | 'dollar'
+
+function replacePgPlaceholders(
+  sql: string,
+  replace: (oldIndex: number) => string,
+): string {
+  const s = String(sql)
+  const n = s.length
+  let i = 0
+  let mode: ScanMode = 'normal'
+  let dollarTag: string | null = null
+  let out = ''
+
+  const startsWith = (pos: number, lit: string): boolean =>
+    s.slice(pos, pos + lit.length) === lit
+
+  const readDollarTag = (pos: number): string | null => {
+    if (s.charCodeAt(pos) !== 36) return null
+    let j = pos + 1
+    while (j < n) {
+      const c = s.charCodeAt(j)
+      if (
+        (c >= 48 && c <= 57) ||
+        (c >= 65 && c <= 90) ||
+        (c >= 97 && c <= 122) ||
+        c === 95
+      ) {
+        j++
+        continue
+      }
+      break
+    }
+    if (j < n && s.charCodeAt(j) === 36 && j > pos) {
+      return s.slice(pos, j + 1)
+    }
+    if (pos + 1 < n && s.charCodeAt(pos + 1) === 36) {
+      return '$$'
+    }
+    return null
+  }
+
+  while (i < n) {
+    const ch = s.charCodeAt(i)
+
+    if (mode === 'normal') {
+      if (ch === 39) {
+        out += s[i]
+        mode = 'single'
+        i++
+        continue
+      }
+
+      if (ch === 34) {
+        out += s[i]
+        mode = 'double'
+        i++
+        continue
+      }
+
+      if (ch === 45 && i + 1 < n && s.charCodeAt(i + 1) === 45) {
+        out += '--'
+        mode = 'lineComment'
+        i += 2
+        continue
+      }
+
+      if (ch === 47 && i + 1 < n && s.charCodeAt(i + 1) === 42) {
+        out += '/*'
+        mode = 'blockComment'
+        i += 2
+        continue
+      }
+
+      if (ch === 36) {
+        const tag = readDollarTag(i)
+        if (tag) {
+          out += tag
+          mode = 'dollar'
+          dollarTag = tag
+          i += tag.length
+          continue
+        }
+
+        let j = i + 1
+        if (j < n) {
+          const c1 = s.charCodeAt(j)
+          if (c1 >= 48 && c1 <= 57) {
+            while (j < n) {
+              const cj = s.charCodeAt(j)
+              if (cj >= 48 && cj <= 57) {
+                j++
+                continue
+              }
+              break
+            }
+            const numStr = s.slice(i + 1, j)
+            const oldIndex = Number(numStr)
+            if (!Number.isInteger(oldIndex) || oldIndex < 1) {
+              throw new Error(`Invalid param placeholder: $${numStr}`)
+            }
+            out += replace(oldIndex)
+            i = j
+            continue
+          }
+        }
+      }
+
+      out += s[i]
+      i++
+      continue
+    }
+
+    if (mode === 'single') {
+      out += s[i]
+      if (ch === 39) {
+        if (i + 1 < n && s.charCodeAt(i + 1) === 39) {
+          out += s[i + 1]
+          i += 2
+          continue
+        }
+        mode = 'normal'
+        i++
+        continue
+      }
+      i++
+      continue
+    }
+
+    if (mode === 'double') {
+      out += s[i]
+      if (ch === 34) {
+        if (i + 1 < n && s.charCodeAt(i + 1) === 34) {
+          out += s[i + 1]
+          i += 2
+          continue
+        }
+        mode = 'normal'
+        i++
+        continue
+      }
+      i++
+      continue
+    }
+
+    if (mode === 'lineComment') {
+      out += s[i]
+      if (ch === 10) {
+        mode = 'normal'
+      }
+      i++
+      continue
+    }
+
+    if (mode === 'blockComment') {
+      if (ch === 42 && i + 1 < n && s.charCodeAt(i + 1) === 47) {
+        out += '*/'
+        i += 2
+        mode = 'normal'
+        continue
+      }
+      out += s[i]
+      i++
+      continue
+    }
+
+    if (mode === 'dollar') {
+      if (dollarTag && startsWith(i, dollarTag)) {
+        out += dollarTag
+        i += dollarTag.length
+        mode = 'normal'
+        dollarTag = null
+        continue
+      }
+      out += s[i]
+      i++
+      continue
+    }
+
+    out += s[i]
+    i++
+  }
+
+  return out
 }
 
 function reindexParams(
@@ -49,12 +262,7 @@ function reindexParams(
   const newParams: unknown[] = []
   const paramMap = new Map<number, number>()
 
-  const reindexed = sql.replace(/\$(\d+)/g, (_match, num) => {
-    const oldIndex = Number(num)
-    if (!Number.isInteger(oldIndex) || oldIndex < 1) {
-      throw new Error(`Invalid param placeholder: $${num}`)
-    }
-
+  const reindexed = replacePgPlaceholders(sql, (oldIndex) => {
     const existing = paramMap.get(oldIndex)
     if (existing !== undefined) return `$${existing}`
 
@@ -77,9 +285,9 @@ function reindexParams(
 function wrapQueryForMethod(
   method: PrismaMethod,
   cteName: string,
-  resultKey: string,
+  resultAlias: string,
 ): string {
-  const outKey = quoteIdent(resultKey)
+  const outKey = quoteIdent(resultAlias)
 
   switch (method) {
     case 'findMany':
@@ -101,12 +309,188 @@ function wrapQueryForMethod(
   }
 }
 
+function isAllCountQueries(
+  queries: Record<string, BatchQuery>,
+  keys: string[],
+) {
+  for (let i = 0; i < keys.length; i++) {
+    if (queries[keys[i]]?.method !== 'count') return false
+  }
+  return true
+}
+
+function looksTooComplexForFilter(sql: string): boolean {
+  const s = sql.toLowerCase()
+  if (s.includes(' group by ')) return true
+  if (s.includes(' having ')) return true
+  if (s.includes(' union ')) return true
+  if (s.includes(' intersect ')) return true
+  if (s.includes(' except ')) return true
+  if (s.includes(' window ')) return true
+  if (s.includes(' distinct ')) return true
+  return false
+}
+
+function containsPgPlaceholder(sql: string): boolean {
+  return /\$[1-9][0-9]*/.test(sql)
+}
+
+function parseSimpleCountSql(
+  sql: string,
+): { fromSql: string; whereSql: string | null } | null {
+  const trimmed = sql.trim().replace(/;$/, '').trim()
+  const lower = trimmed.toLowerCase()
+  if (!lower.startsWith('select')) return null
+  if (!lower.includes('count(*)')) return null
+  if (looksTooComplexForFilter(trimmed)) return null
+
+  const match = trimmed.match(
+    /^select\s+count\(\*\)(?:\s*::\s*[a-zA-Z0-9_\."]+)?\s+as\s+("[^"]+"|[a-zA-Z_][a-zA-Z0-9_\.]*)\s+from\s+([\s\S]+?)(?:\s+where\s+([\s\S]+))?$/i,
+  )
+  if (!match) return null
+
+  const fromSql = match[2].trim()
+  const whereSql = match[3] ? match[3].trim() : null
+
+  if (!fromSql) return null
+  return { fromSql, whereSql }
+}
+
+function buildMergedCountBatchSql(
+  queries: Record<string, BatchQuery>,
+  keys: string[],
+  aliasesByKey: Map<string, string>,
+  modelMap: Map<string, Model>,
+  models: Model[],
+  dialect: SqlDialect,
+): (BatchResult & { keys: string[]; aliases: string[] }) | null {
+  const modelGroups = new Map<
+    string,
+    Array<{ key: string; alias: string; args: Record<string, unknown> }>
+  >()
+
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i]
+    const q = queries[key]
+    const alias = aliasesByKey.get(key)
+    if (!alias) return null
+    if (!modelGroups.has(q.model)) modelGroups.set(q.model, [])
+    modelGroups
+      .get(q.model)!
+      .push({ key, alias, args: (q.args || {}) as Record<string, unknown> })
+  }
+
+  const subqueries: Array<{
+    alias: string
+    sql: string
+    params: unknown[]
+    keys: string[]
+    aliases: string[]
+  }> = []
+
+  let aliasIndex = 0
+
+  for (const [modelName, items] of modelGroups) {
+    const model = modelMap.get(modelName)
+    if (!model) return null
+
+    let sharedFrom: string | null = null
+    const expressions: string[] = []
+    const localParams: unknown[] = []
+    const localKeys: string[] = []
+    const localAliases: string[] = []
+
+    for (let i = 0; i < items.length; i++) {
+      const { key, alias, args } = items[i]
+      const built = buildSQLWithCache(model, models, 'count', args, dialect)
+      const parsed = parseSimpleCountSql(built.sql)
+      if (!parsed) return null
+
+      if (containsPgPlaceholder(parsed.fromSql)) {
+        return null
+      }
+
+      if (!parsed.whereSql) {
+        if (built.params.length > 0) return null
+
+        if (sharedFrom === null) sharedFrom = parsed.fromSql
+        if (sharedFrom !== parsed.fromSql) return null
+
+        expressions.push(`count(*) AS ${quoteIdent(alias)}`)
+        localKeys.push(key)
+        localAliases.push(alias)
+        continue
+      }
+
+      if (sharedFrom === null) sharedFrom = parsed.fromSql
+      if (sharedFrom !== parsed.fromSql) return null
+
+      const re = reindexParams(
+        parsed.whereSql,
+        built.params,
+        localParams.length,
+      )
+      for (let p = 0; p < re.params.length; p++) localParams.push(re.params[p])
+
+      expressions.push(
+        `count(*) FILTER (WHERE ${re.sql}) AS ${quoteIdent(alias)}`,
+      )
+      localKeys.push(key)
+      localAliases.push(alias)
+    }
+
+    if (!sharedFrom) return null
+
+    const alias = `m_${aliasIndex++}`
+    const subSql = `(SELECT ${expressions.join(', ')} FROM ${sharedFrom}) ${alias}`
+
+    subqueries.push({
+      alias,
+      sql: subSql,
+      params: localParams,
+      keys: localKeys,
+      aliases: localAliases,
+    })
+  }
+
+  if (subqueries.length === 0) return null
+
+  let offset = 0
+  const rewrittenSubs: string[] = []
+  const finalParams: unknown[] = []
+
+  for (let i = 0; i < subqueries.length; i++) {
+    const sq = subqueries[i]
+    const re = reindexParams(sq.sql, sq.params, offset)
+    offset += re.params.length
+    rewrittenSubs.push(re.sql)
+    for (let p = 0; p < re.params.length; p++) finalParams.push(re.params[p])
+  }
+
+  const selectParts: string[] = []
+  for (let i = 0; i < subqueries.length; i++) {
+    const sq = subqueries[i]
+    for (let k = 0; k < sq.aliases.length; k++) {
+      const outAlias = sq.aliases[k]
+      selectParts.push(
+        `${sq.alias}.${quoteIdent(outAlias)} AS ${quoteIdent(outAlias)}`,
+      )
+    }
+  }
+
+  const fromSql = rewrittenSubs.join(' CROSS JOIN ')
+  const sql = `SELECT ${selectParts.join(', ')} FROM ${fromSql}`
+
+  const aliases = keys.map((k) => aliasesByKey.get(k)!)
+  return { sql, params: finalParams, keys, aliases }
+}
+
 export function buildBatchSql(
   queries: Record<string, BatchQuery>,
   modelMap: Map<string, Model>,
   models: Model[],
   dialect: SqlDialect,
-): BatchResult & { keys: string[] } {
+): BatchResult & { keys: string[]; aliases: string[] } {
   const keys = Object.keys(queries)
 
   if (keys.length === 0) {
@@ -115,6 +499,26 @@ export function buildBatchSql(
 
   if (dialect !== 'postgres') {
     throw new Error('Batch queries are only supported for postgres dialect')
+  }
+
+  const aliases = new Array(keys.length)
+  const aliasesByKey = new Map<string, string>()
+  for (let i = 0; i < keys.length; i++) {
+    const a = makeBatchAlias(i)
+    aliases[i] = a
+    aliasesByKey.set(keys[i], a)
+  }
+
+  if (isAllCountQueries(queries, keys)) {
+    const merged = buildMergedCountBatchSql(
+      queries,
+      keys,
+      aliasesByKey,
+      modelMap,
+      models,
+      dialect,
+    )
+    if (merged) return merged
   }
 
   const ctes: string[] = new Array(keys.length)
@@ -152,12 +556,12 @@ export function buildBatchSql(
 
     const cteName = `batch_${i}`
     ctes[i] = `${cteName} AS (${reindexedSql})`
-    selects[i] = wrapQueryForMethod(query.method, cteName, key)
+    selects[i] = wrapQueryForMethod(query.method, cteName, aliases[i])
   }
 
   const sql = `WITH ${ctes.join(', ')} SELECT ${selects.join(', ')}`
 
-  return { sql, params: allParams, keys }
+  return { sql, params: allParams, keys, aliases }
 }
 
 export function buildBatchCountSql(
@@ -272,13 +676,11 @@ export function parseBatchCountResults(
   count: number,
 ): number[] {
   const results: number[] = []
-
   for (let i = 0; i < count; i++) {
     const key = `count_${i}`
     const value = row[key]
     results.push(parseCountValue(value))
   }
-
   return results
 }
 
@@ -286,12 +688,14 @@ export function parseBatchResults(
   row: Record<string, unknown>,
   keys: string[],
   queries: Record<string, BatchQuery>,
+  aliases?: string[],
 ): Record<string, unknown> {
   const results: Record<string, unknown> = {}
 
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i]
-    const rawValue = row[key]
+    const columnKey = aliases && aliases[i] ? aliases[i] : key
+    const rawValue = row[columnKey]
     const query = queries[key]
 
     switch (query.method) {

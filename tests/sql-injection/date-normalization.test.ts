@@ -60,7 +60,7 @@ describe('Date Normalization - Direct Bug Detection', () => {
     queryCache.clear()
   })
 
-  it('🚨 CRITICAL: Catches Date object leak in count queries', () => {
+  it('Catches Date object leak in count queries', () => {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
     const whereResult = buildWhereClause(
