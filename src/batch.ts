@@ -647,10 +647,15 @@ function parseJsonValue(value: unknown): unknown {
 function parseCountValue(value: unknown): number {
   if (value === null || value === undefined) return 0
   if (typeof value === 'number') return value
+  if (typeof value === 'bigint') {
+    const n = Number(value)
+    return Number.isSafeInteger(n) ? n : 0
+  }
   if (typeof value === 'string') {
     const n = Number.parseInt(value, 10)
     return Number.isFinite(n) ? n : 0
   }
+
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>
     const countKey = Object.prototype.hasOwnProperty.call(obj, 'count')
@@ -662,12 +667,17 @@ function parseCountValue(value: unknown): number {
     if (countKey !== undefined) {
       const v = obj[countKey]
       if (typeof v === 'number') return v
+      if (typeof v === 'bigint') {
+        const n = Number(v)
+        return Number.isSafeInteger(n) ? n : 0
+      }
       if (typeof v === 'string') {
         const n = Number.parseInt(v, 10)
         return Number.isFinite(n) ? n : 0
       }
     }
   }
+
   return 0
 }
 
