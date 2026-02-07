@@ -8,18 +8,59 @@ Speed up Prisma reads **2-7x** by executing queries via postgres.js or better-sq
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const basePrisma = new PrismaClient()
 
-// Just use Prisma normally - queries are automatically faster
+export const prisma = basePrisma.$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof basePrisma>
+
+// Regular queries - 2-7x faster
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
   include: { posts: true },
 })
+
+// Batch queries - combine multiple queries into one database call
+const dashboard = await prisma.$batch((batch) => ({
+  activeUsers: batch.user.count({ where: { status: 'ACTIVE' } }),
+  recentPosts: batch.post.findMany({ take: 10 }),
+  taskStats: batch.task.aggregate({ _count: true }),
+}))
 ```
+
+````
+
+## What's New in v1.58.0
+
+### 🚀 Batch Queries - Run Multiple Queries in a Single Database Round Trip
+
+Instead of making separate database calls:
+
+```typescript
+const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
+const posts = await prisma.post.count()
+const stats = await prisma.task.aggregate({ _count: true })
+// ❌ 3 separate database round trips = slower
+```
+
+Batch them into ONE database call:
+
+```typescript
+const results = await prisma.$batch((batch) => ({
+  users: batch.user.findMany({ where: { status: 'ACTIVE' } }),
+  posts: batch.post.count(),
+  stats: batch.task.aggregate({ _count: true }),
+}))
+// ✅ 1 database round trip = 2-3x faster
+```
+
+**Result: 2.12x faster than sequential queries** (measured from real tests)
+
+---
 
 ## Why?
 
@@ -88,36 +129,78 @@ This creates `./generated/sql/index.ts` with pre-converted models and optimized 
 
 ### Step 3: Use the Extension
 
-**PostgreSQL:**
+**PostgreSQL with TypeScript:**
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
+const basePrisma = new PrismaClient()
 
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+// Type the extended client properly
+export const prisma = basePrisma.$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof basePrisma>
 
-// Use Prisma exactly as before - it's just faster now
+// Regular queries - 2-7x faster
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
   include: { posts: true },
 })
+
+// Batch queries - combine multiple queries into one database call
+const dashboard = await prisma.$batch((batch) => ({
+  activeUsers: batch.user.count({ where: { status: 'ACTIVE' } }),
+  recentPosts: batch.post.findMany({
+    take: 10,
+    orderBy: { createdAt: 'desc' },
+  }),
+  stats: batch.task.aggregate({
+    _count: true,
+    _avg: { estimatedHours: true },
+  }),
+}))
+// dashboard.activeUsers, dashboard.recentPosts, dashboard.stats
 ```
 
 **SQLite:**
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 import Database from 'better-sqlite3'
 
 const db = new Database('./data.db')
+const basePrisma = new PrismaClient()
 
-const prisma = new PrismaClient().$extends(speedExtension({ sqlite: db }))
+export const prisma = basePrisma.$extends(
+  speedExtension({ sqlite: db }),
+) as SpeedClient<typeof basePrisma>
 
 const users = await prisma.user.findMany({ where: { status: 'ACTIVE' } })
+```
+
+**With existing extensions:**
+
+```typescript
+import { PrismaClient } from '@prisma/client'
+import { speedExtension, type SpeedClient } from './generated/sql'
+import { myCustomExtension } from './my-extension'
+import postgres from 'postgres'
+
+const sql = postgres(process.env.DATABASE_URL)
+const basePrisma = new PrismaClient()
+
+// Chain extensions - speedExtension should be last
+const extendedPrisma = basePrisma
+  .$extends(myCustomExtension)
+  .$extends(anotherExtension)
+
+export const prisma = extendedPrisma.$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof extendedPrisma>
 ```
 
 That's it! All your read queries are now 2-7x faster with zero runtime overhead.
@@ -128,14 +211,15 @@ Benchmarks from 137 E2E tests comparing identical queries:
 
 ### PostgreSQL Results (Highlights)
 
-| Query Type          | Prisma v6 | Prisma v7 | This Extension | Speedup vs v7 |
-| ------------------- | --------- | --------- | -------------- | ------------- |
-| Simple where        | 0.40ms    | 0.34ms    | 0.17ms         | **2.0x** ⚡   |
-| Complex conditions  | 13.10ms   | 6.90ms    | 2.37ms         | **2.9x** ⚡   |
-| With relations      | 0.83ms    | 0.72ms    | 0.41ms         | **1.8x** ⚡   |
-| Nested relations    | 28.35ms   | 14.34ms   | 4.81ms         | **3.0x** ⚡   |
-| Aggregations        | 0.42ms    | 0.44ms    | 0.24ms         | **1.8x** ⚡   |
-| Multi-field orderBy | 3.97ms    | 2.38ms    | 1.09ms         | **2.2x** ⚡   |
+| Query Type                    | Prisma v6  | Prisma v7 | This Extension | Speedup vs v7 |
+| ----------------------------- | ---------- | --------- | -------------- | ------------- |
+| Simple where                  | 0.40ms     | 0.34ms    | 0.17ms         | **2.0x** ⚡   |
+| Complex conditions            | 13.10ms    | 6.90ms    | 2.37ms         | **2.9x** ⚡   |
+| With relations                | 0.83ms     | 0.72ms    | 0.41ms         | **1.8x** ⚡   |
+| Nested relations              | 28.35ms    | 14.34ms   | 4.81ms         | **3.0x** ⚡   |
+| Aggregations                  | 0.42ms     | 0.44ms    | 0.24ms         | **1.8x** ⚡   |
+| Multi-field orderBy           | 3.97ms     | 2.38ms    | 1.09ms         | **2.2x** ⚡   |
+| **Batch queries (4 queries)** | **1.43ms** | **-**     | **0.67ms**     | **2.12x** ⚡  |
 
 **Overall:** 2.10x faster than Prisma v7, 2.39x faster than v6
 
@@ -290,6 +374,7 @@ Benchmarks from 137 E2E tests comparing identical queries:
 - ✅ `count`
 - ✅ `aggregate` (\_count, \_sum, \_avg, \_min, \_max)
 - ✅ `groupBy` with having clauses
+- ✅ `$batch` - multiple queries in one database round trip
 
 **Unchanged (still uses Prisma):**
 
@@ -305,14 +390,14 @@ Benchmarks from 137 E2E tests comparing identical queries:
 See generated SQL for every query:
 
 ```typescript
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
     postgres: sql,
     debug: true, // Logs SQL for every query
   }),
-)
+) as SpeedClient<typeof PrismaClient>
 ```
 
 ### Performance Monitoring
@@ -320,13 +405,14 @@ const prisma = new PrismaClient().$extends(
 Track query performance:
 
 ```typescript
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
     postgres: sql,
     onQuery: (info) => {
       console.log(`${info.model}.${info.method}: ${info.duration}ms`)
+      console.log(`Prebaked: ${info.prebaked}`)
 
       if (info.duration > 100) {
         logger.warn('Slow query', {
@@ -337,15 +423,15 @@ const prisma = new PrismaClient().$extends(
       }
     },
   }),
-)
+) as SpeedClient<typeof PrismaClient>
 ```
 
 The `onQuery` callback receives:
 
 ```typescript
 interface QueryInfo {
-  model: string // "User"
-  method: string // "findMany"
+  model: string // "User" or "_batch" for batch queries
+  method: string // "findMany", "batch", etc
   sql: string // The executed SQL
   params: unknown[] // SQL parameters
   duration: number // Query duration in ms
@@ -481,6 +567,203 @@ await prisma.task.groupBy({
 
 ## Advanced Usage
 
+### Batch Queries ($batch)
+
+Execute multiple queries in a single database round trip. Perfect for dashboard queries, aggregations, and any scenario where you need multiple pieces of data at once.
+
+**How It Works:**
+
+Instead of this (3 database round trips):
+
+```
+┌─────────┐      Query 1      ┌──────────┐
+│  App    │ ──────────────────▶│ Database │
+│         │ ◀──────────────────│          │
+│         │      Query 2      │          │
+│         │ ──────────────────▶│          │
+│         │ ◀──────────────────│          │
+│         │      Query 3      │          │
+│         │ ──────────────────▶│          │
+│         │ ◀──────────────────│          │
+└─────────┘                    └──────────┘
+Total: ~3ms (3 round trips × ~1ms each)
+```
+
+You get this (1 database round trip):
+
+```
+┌─────────┐   Combined Query   ┌──────────┐
+│  App    │ ──────────────────▶│ Database │
+│         │ ◀──────────────────│          │
+└─────────┘                    └──────────┘
+Total: ~1ms (1 round trip with all queries)
+```
+
+**Real-world example - Dashboard Query:**
+
+```typescript
+const dashboard = await prisma.$batch((batch) => ({
+  // Organization stats
+  totalOrgs: batch.organization.count(),
+  activeOrgs: batch.organization.count({
+    where: { status: 'ACTIVE' },
+  }),
+
+  // User stats
+  totalUsers: batch.user.count(),
+  activeUsers: batch.user.count({
+    where: { status: 'ACTIVE' },
+  }),
+
+  // Recent activity
+  recentProjects: batch.project.findMany({
+    take: 5,
+    orderBy: { createdAt: 'desc' },
+    include: { organization: true },
+  }),
+
+  // Aggregations
+  taskStats: batch.task.aggregate({
+    _count: true,
+    _avg: { estimatedHours: true },
+    where: { status: 'IN_PROGRESS' },
+  }),
+}))
+
+// All results available immediately
+console.log(`Active users: ${dashboard.activeUsers}`)
+console.log(`Recent projects:`, dashboard.recentProjects)
+console.log(`Avg task hours:`, dashboard.taskStats._avg.estimatedHours)
+```
+
+**Performance - From Real Tests:**
+
+Simple queries (4 queries):
+
+- Sequential: 1.43ms (0.36ms per query)
+- Batch: 0.67ms (0.17ms per query)
+- **Speedup: 2.12x** ⚡
+
+Complex dashboard (8 queries with relations):
+
+- Sequential: 9.90ms
+- Batch: 6.07ms
+- **Speedup: 1.63x** ⚡
+
+Stress test (45 queries):
+
+- Build: 1.48ms (0.03ms per query)
+- Execute: 3.13ms
+- Parse: 0.09ms
+- **Total: 4.71ms for 45 queries** ⚡
+
+**Under the hood:**
+
+The library uses PostgreSQL CTEs (Common Table Expressions) to combine queries:
+
+```sql
+-- What gets executed for the dashboard example above
+WITH
+  batch_0 AS (SELECT count(*)::int AS "_count._all" FROM "organizations"),
+  batch_1 AS (SELECT count(*)::int AS "_count._all" FROM "organizations" WHERE status = $1),
+  batch_2 AS (SELECT count(*)::int AS "_count._all" FROM "users"),
+  batch_3 AS (SELECT count(*)::int AS "_count._all" FROM "users" WHERE status = $2),
+  batch_4 AS (SELECT * FROM "projects" ORDER BY created_at DESC LIMIT 5),
+  batch_5 AS (SELECT count(*)::int, avg(estimated_hours) FROM "tasks" WHERE status = $3)
+SELECT
+  (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM batch_0 t) AS k0,
+  (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM batch_1 t) AS k1,
+  (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM batch_2 t) AS k2,
+  (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM batch_3 t) AS k3,
+  (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM batch_4 t) AS k4,
+  (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM batch_5 t) AS k5
+```
+
+**Special optimization for count queries:**
+
+When batching multiple count queries on the same table, they get merged into a single query using `FILTER` clauses:
+
+```typescript
+const counts = await prisma.$batch((batch) => ({
+  total: batch.user.count(),
+  active: batch.user.count({ where: { status: 'ACTIVE' } }),
+  pending: batch.user.count({ where: { status: 'PENDING' } }),
+  inactive: batch.user.count({ where: { status: 'INACTIVE' } }),
+}))
+```
+
+Gets optimized to:
+
+```sql
+SELECT
+  count(*) AS total,
+  count(*) FILTER (WHERE status = $1) AS active,
+  count(*) FILTER (WHERE status = $2) AS pending,
+  count(*) FILTER (WHERE status = $3) AS inactive
+FROM users
+```
+
+**Supported methods in batch:**
+
+- ✅ `findMany` - fetch multiple records
+- ✅ `findFirst` - fetch first matching record
+- ✅ `findUnique` - fetch by unique field
+- ✅ `count` - count records (with special optimization)
+- ✅ `aggregate` - compute aggregations
+- ✅ `groupBy` - group and aggregate
+
+**Important: Don't await inside the batch callback**
+
+```typescript
+// ❌ Wrong - will throw error
+await prisma.$batch(async (batch) => ({
+  users: await batch.user.findMany(), // Don't await!
+  posts: await batch.post.findMany(), // Don't await!
+}))
+
+// ✅ Correct - return queries without awaiting
+await prisma.$batch((batch) => ({
+  users: batch.user.findMany(), // Return the query
+  posts: batch.post.findMany(), // Return the query
+}))
+```
+
+**Type Safety:**
+
+```typescript
+import { speedExtension, type SpeedClient } from './generated/sql'
+
+// Properly type your client
+const prisma = basePrisma.$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof basePrisma>
+
+// TypeScript knows the exact shape of results
+const results = await prisma.$batch((batch) => ({
+  users: batch.user.findMany({ select: { id: true, email: true } }),
+  count: batch.post.count(),
+}))
+
+// ✅ TypeScript autocomplete works
+results.users[0].email // string
+results.count // number
+```
+
+**Use cases:**
+
+1. **Dashboard queries** - Load all dashboard data in one call
+2. **Analytics** - Multiple aggregations at once
+3. **Comparison queries** - Compare different time periods
+4. **Multi-tenant data** - Fetch data for multiple tenants
+5. **Search with counts** - Get results + multiple facet counts
+
+**Limitations:**
+
+- PostgreSQL only (SQLite not yet supported)
+- Queries run in parallel, not in a transaction
+- Each query must be independent (can't reference results from other queries)
+- For transactional guarantees, use `$transaction` instead
+
 ### Prebaked SQL Queries (@optimize)
 
 For maximum performance, prebake your most common queries at build time using `@optimize` directives. This reduces overhead from ~0.2ms (runtime) to ~0.03ms.
@@ -516,9 +799,11 @@ npx prisma generate
 **Use:**
 
 ```typescript
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof PrismaClient>
 
 // ⚡ PREBAKED - Uses pre-generated SQL (~0.03ms overhead)
 const activeUsers = await prisma.user.findMany({
@@ -582,11 +867,13 @@ generator sql {
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const prisma = new PrismaClient().$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof PrismaClient>
 
 export const config = { runtime: 'edge' }
 
@@ -743,11 +1030,15 @@ const users = await prisma.user.findMany()
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const basePrisma = new PrismaClient()
+
+export const prisma = basePrisma.$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof basePrisma>
 
 const users = await prisma.user.findMany() // Same API, just faster
 ```
@@ -773,11 +1064,15 @@ const users = await db
 
 ```typescript
 import { PrismaClient } from '@prisma/client'
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 import postgres from 'postgres'
 
 const sql = postgres(DATABASE_URL)
-const prisma = new PrismaClient().$extends(speedExtension({ postgres: sql }))
+const basePrisma = new PrismaClient()
+
+export const prisma = basePrisma.$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof basePrisma>
 
 const users = await prisma.user.findMany({
   where: { status: 'ACTIVE' },
@@ -820,13 +1115,13 @@ Enable `debug: true` to see which queries are accelerated vs fallback.
 Make sure you're importing from the generated file and passing the database client:
 
 ```typescript
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL)
 const prisma = new PrismaClient().$extends(
   speedExtension({ postgres: sql }), // ✅ Pass postgres client
-)
+) as SpeedClient<typeof PrismaClient>
 ```
 
 ### "Generated code is for postgres, but you provided sqlite"
@@ -845,14 +1140,14 @@ generator sql {
 Enable debug mode and compare SQL:
 
 ```typescript
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
     postgres: sql,
     debug: true, // Shows generated SQL
   }),
-)
+) as SpeedClient<typeof PrismaClient>
 ```
 
 Compare with Prisma's query log:
@@ -884,7 +1179,7 @@ Some queries won't see dramatic improvements:
 Use `onQuery` to measure actual speedup:
 
 ```typescript
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
@@ -893,43 +1188,50 @@ const prisma = new PrismaClient().$extends(
       console.log(`${info.method} took ${info.duration}ms`)
     },
   }),
-)
+) as SpeedClient<typeof PrismaClient>
 ```
 
 ## FAQ
 
-**Q: Do I need to keep using Prisma Client?**  
+**Q: Do I need to keep using Prisma Client?**
 A: Yes. You need Prisma for schema management, migrations, types, and write operations. This extension only speeds up reads.
 
-**Q: Does it work with my existing schema?**  
+**Q: Does it work with my existing schema?**
 A: Yes. No schema changes required except adding the generator. It works with your existing Prisma schema and generated client.
 
-**Q: What about writes (create, update, delete)?**  
+**Q: What about writes (create, update, delete)?**
 A: Writes still use Prisma Client. This extension only accelerates reads.
 
-**Q: Is it production ready?**  
+**Q: Is it production ready?**
 A: Yes. 137 E2E tests verify exact parity with Prisma Client across both Prisma v6 and v7. Used in production.
 
-**Q: Can I use it with PlanetScale, Neon, Supabase?**  
+**Q: Can I use it with PlanetScale, Neon, Supabase?**
 A: Yes. Works with any PostgreSQL-compatible database. Just pass the connection string to postgres.js.
 
-**Q: Does it support Prisma middlewares?**  
+**Q: Does it support Prisma middlewares?**
 A: The extension runs after middlewares. For middleware to see actual SQL, use Prisma's query logging.
 
-**Q: Can I still use `$queryRaw` and `$executeRaw`?**  
+**Q: Can I still use `$queryRaw` and `$executeRaw`?**
 A: Yes. Those methods are unaffected.
 
-**Q: What's the overhead of SQL generation?**  
+**Q: What's the overhead of SQL generation?**
 A: Runtime mode: ~0.2ms per query. Generator mode with `@optimize`: ~0.03ms for prebaked queries. Still 2-7x faster than Prisma overall.
 
-**Q: Do I need @optimize directives?**  
+**Q: Do I need @optimize directives?**
 A: No! The generator works without them. `@optimize` directives are optional for squeezing out the last bit of performance on your hottest queries.
+
+**Q: Can I use batch queries with transactions?**
+A: No. `$batch` executes queries in parallel without transactional guarantees. For transactions, use `$transaction` instead.
+
+**Q: Does batch work with SQLite?**
+A: Not yet. `$batch` is currently PostgreSQL only. SQLite support coming soon.
 
 ## Examples
 
 - [Generator Mode Example](./examples/generator-mode) - Complete working example
 - [PostgreSQL E2E Tests](./tests/e2e/postgres.test.ts) - Comprehensive query examples
 - [SQLite E2E Tests](./tests/e2e/sqlite.e2e.test.ts) - SQLite-specific queries
+- [Batch Query Tests](./tests/sql-injection/batch-transaction.test.ts) - Batch query examples
 
 To run examples locally:
 
@@ -945,9 +1247,9 @@ npm test
 Benchmark your own queries:
 
 ```typescript
-import { speedExtension } from './generated/sql'
+import { speedExtension, type SpeedClient } from './generated/sql'
 
-const queries: { name: string; duration: number }[] = []
+const queries: { name: string; duration: number; prebaked: boolean }[] = []
 
 const prisma = new PrismaClient().$extends(
   speedExtension({
@@ -956,13 +1258,18 @@ const prisma = new PrismaClient().$extends(
       queries.push({
         name: `${info.model}.${info.method}`,
         duration: info.duration,
+        prebaked: info.prebaked,
       })
     },
   }),
-)
+) as SpeedClient<typeof PrismaClient>
 
 await prisma.user.findMany({ where: { status: 'ACTIVE' } })
 await prisma.post.findMany({ include: { author: true } })
+await prisma.$batch((batch) => ({
+  users: batch.user.count(),
+  posts: batch.post.count(),
+}))
 
 console.table(queries)
 ```
@@ -972,6 +1279,7 @@ console.table(queries)
 PRs welcome! Priority areas:
 
 - MySQL support implementation
+- SQLite batch query support
 - Additional PostgreSQL/SQLite operators
 - Performance optimizations
 - Edge runtime compatibility
@@ -1046,3 +1354,4 @@ MIT
 ---
 
 **Made for developers who need Prisma's DX with raw SQL performance.**
+````

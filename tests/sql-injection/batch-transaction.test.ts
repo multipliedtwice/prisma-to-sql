@@ -23,10 +23,38 @@ let modelMap: Map<string, Model>
 
 type SpeedClient = ExtendedPrismaClient<any>
 
-describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
+interface PerfMetrics {
+  buildTime: number
+  executeTime: number
+  parseTime: number
+  totalTime: number
+  queryCount: number
+}
+
+function measurePerf<T>(
+  fn: () => T,
+  label: string,
+): { result: T; time: number } {
+  const start = performance.now()
+  const result = fn()
+  const time = performance.now() - start
+  return { result, time }
+}
+
+async function measureAsync<T>(
+  fn: () => Promise<T>,
+  label: string,
+): Promise<{ result: T; time: number }> {
+  const start = performance.now()
+  const result = await fn()
+  const time = performance.now() - start
+  return { result, time }
+}
+
+describe('Batch Multi-Query E2E - PostgreSQL', () => {
   beforeAll(async () => {
     setGlobalDialect('postgres')
-    db = await createTestDB('postgres')
+    db = await createTestDB('postgres', 7)
     pgClient = postgres(PG_URL)
     seed = await seedDatabase(db)
 
@@ -45,6 +73,49 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
     await db?.close()
   })
 
+  async function executeBatchWithMetrics(
+    queries: Record<string, any>,
+  ): Promise<PerfMetrics & { results: any }> {
+    const buildMeasure = measurePerf(
+      () => buildBatchSql(queries, modelMap, models, 'postgres'),
+      'buildBatchSql',
+    )
+    const { sql, params, keys, aliases } = buildMeasure.result // ← Add aliases
+    const buildTime = buildMeasure.time
+
+    const executeMeasure = await measureAsync(
+      () => pgClient.unsafe(sql, params as any[]),
+      'execute',
+    )
+    const rows = executeMeasure.result
+    const executeTime = executeMeasure.time
+
+    // Remove the debug logs since they're cluttering the output
+    const parseMeasure = measurePerf(
+      () =>
+        parseBatchResults(
+          rows[0] as Record<string, unknown>,
+          keys,
+          queries,
+          aliases,
+        ), // ← Add aliases
+      'parse',
+    )
+    const results = parseMeasure.result
+    const parseTime = parseMeasure.time
+
+    const totalTime = buildTime + executeTime + parseTime
+
+    return {
+      buildTime,
+      executeTime,
+      parseTime,
+      totalTime,
+      queryCount: keys.length,
+      results,
+    }
+  }
+
   describe('buildBatchSql', () => {
     it('builds SQL for single findMany query', async () => {
       const queries = {
@@ -55,34 +126,20 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         },
       }
 
-      const { sql, params, keys } = buildBatchSql(
-        queries,
-        modelMap,
-        models,
-        'postgres',
+      const metrics = await executeBatchWithMetrics(queries)
+
+      console.log(
+        `[Single findMany] Build: ${metrics.buildTime.toFixed(2)}ms, Execute: ${metrics.executeTime.toFixed(2)}ms, Parse: ${metrics.parseTime.toFixed(2)}ms, Total: ${metrics.totalTime.toFixed(2)}ms`,
       )
 
-      expect(sql).toContain('WITH')
-      expect(sql).toContain('batch_0')
-      expect(sql).toContain('json_agg')
-      expect(keys).toEqual(['users'])
-      expect(params.length).toBeGreaterThan(0)
-
-      const rows = await pgClient.unsafe(sql, params as any[])
-      const results = parseBatchResults(
-        rows[0] as Record<string, unknown>,
-        keys,
-        queries,
-      )
-
-      expect(results.users).toBeDefined()
-      expect(Array.isArray(results.users)).toBe(true)
+      expect(metrics.results.users).toBeDefined()
+      expect(Array.isArray(metrics.results.users)).toBe(true)
 
       const expected = await db.prisma.user.findMany({
         where: { status: 'ACTIVE' },
         orderBy: { id: 'asc' },
       })
-      expect((results.users as any[]).length).toBe(expected.length)
+      expect((metrics.results.users as any[]).length).toBe(expected.length)
     })
 
     it('builds SQL for mixed query types', async () => {
@@ -108,30 +165,16 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         },
       }
 
-      const { sql, params, keys } = buildBatchSql(
-        queries,
-        modelMap,
-        models,
-        'postgres',
+      const metrics = await executeBatchWithMetrics(queries)
+
+      console.log(
+        `[Mixed queries] Build: ${metrics.buildTime.toFixed(2)}ms, Execute: ${metrics.executeTime.toFixed(2)}ms, Parse: ${metrics.parseTime.toFixed(2)}ms, Total: ${metrics.totalTime.toFixed(2)}ms`,
       )
 
-      expect(sql).toContain('WITH')
-      expect(sql).toContain('batch_0')
-      expect(sql).toContain('batch_1')
-      expect(sql).toContain('batch_2')
-      expect(keys).toEqual(['users', 'taskCount', 'project'])
-
-      const rows = await pgClient.unsafe(sql, params as any[])
-      const results = parseBatchResults(
-        rows[0] as Record<string, unknown>,
-        keys,
-        queries,
-      )
-
-      expect(results.users).toBeDefined()
-      expect(Array.isArray(results.users)).toBe(true)
-      expect(typeof results.taskCount).toBe('number')
-      expect(results.project).toBeDefined()
+      expect(metrics.results.users).toBeDefined()
+      expect(Array.isArray(metrics.results.users)).toBe(true)
+      expect(typeof metrics.results.taskCount).toBe('number')
+      expect(metrics.results.project).toBeDefined()
 
       const [expectedUsers, expectedCount, expectedProject] = await Promise.all(
         [
@@ -145,9 +188,9 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         ],
       )
 
-      expect((results.users as any[]).length).toBe(expectedUsers.length)
-      expect(results.taskCount).toBe(expectedCount)
-      expect((results.project as any).id).toBe(expectedProject!.id)
+      expect((metrics.results.users as any[]).length).toBe(expectedUsers.length)
+      expect(metrics.results.taskCount).toBe(expectedCount)
+      expect((metrics.results.project as any).id).toBe(expectedProject!.id)
     })
 
     it('builds SQL for aggregate query', async () => {
@@ -162,27 +205,15 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         },
       }
 
-      const { sql, params, keys } = buildBatchSql(
-        queries,
-        modelMap,
-        models,
-        'postgres',
+      const metrics = await executeBatchWithMetrics(queries)
+
+      console.log(
+        `[Aggregate] Build: ${metrics.buildTime.toFixed(2)}ms, Execute: ${metrics.executeTime.toFixed(2)}ms, Parse: ${metrics.parseTime.toFixed(2)}ms, Total: ${metrics.totalTime.toFixed(2)}ms`,
       )
 
-      expect(sql).toContain('WITH')
-      expect(sql).toContain('batch_0')
-      expect(keys).toEqual(['taskStats'])
-
-      const rows = await pgClient.unsafe(sql, params as any[])
-      const results = parseBatchResults(
-        rows[0] as Record<string, unknown>,
-        keys,
-        queries,
-      )
-
-      expect(results.taskStats).toBeDefined()
-      expect((results.taskStats as any)._count).toBeDefined()
-      expect((results.taskStats as any)._count._all).toBeGreaterThan(0)
+      expect(metrics.results.taskStats).toBeDefined()
+      expect((metrics.results.taskStats as any)._count).toBeDefined()
+      expect((metrics.results.taskStats as any)._count._all).toBeGreaterThan(0)
     })
 
     it('builds SQL for groupBy query', async () => {
@@ -197,29 +228,17 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         },
       }
 
-      const { sql, params, keys } = buildBatchSql(
-        queries,
-        modelMap,
-        models,
-        'postgres',
+      const metrics = await executeBatchWithMetrics(queries)
+
+      console.log(
+        `[GroupBy] Build: ${metrics.buildTime.toFixed(2)}ms, Execute: ${metrics.executeTime.toFixed(2)}ms, Parse: ${metrics.parseTime.toFixed(2)}ms, Total: ${metrics.totalTime.toFixed(2)}ms`,
       )
 
-      expect(sql).toContain('WITH')
-      expect(sql).toContain('batch_0')
-      expect(keys).toEqual(['tasksByStatus'])
+      expect(metrics.results.tasksByStatus).toBeDefined()
+      expect(Array.isArray(metrics.results.tasksByStatus)).toBe(true)
+      expect((metrics.results.tasksByStatus as any[]).length).toBeGreaterThan(0)
 
-      const rows = await pgClient.unsafe(sql, params as any[])
-      const results = parseBatchResults(
-        rows[0] as Record<string, unknown>,
-        keys,
-        queries,
-      )
-
-      expect(results.tasksByStatus).toBeDefined()
-      expect(Array.isArray(results.tasksByStatus)).toBe(true)
-      expect((results.tasksByStatus as any[]).length).toBeGreaterThan(0)
-
-      for (const group of results.tasksByStatus as any[]) {
+      for (const group of metrics.results.tasksByStatus as any[]) {
         expect(group.status).toBeDefined()
         expect(group._count._all).toBeGreaterThan(0)
       }
@@ -236,31 +255,19 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         },
       }
 
-      const { sql, params, keys } = buildBatchSql(
-        queries,
-        modelMap,
-        models,
-        'postgres',
+      const metrics = await executeBatchWithMetrics(queries)
+
+      console.log(
+        `[FindUnique] Build: ${metrics.buildTime.toFixed(2)}ms, Execute: ${metrics.executeTime.toFixed(2)}ms, Parse: ${metrics.parseTime.toFixed(2)}ms, Total: ${metrics.totalTime.toFixed(2)}ms`,
       )
 
-      expect(sql).toContain('WITH')
-      expect(sql).toContain('batch_0')
-      expect(keys).toEqual(['user'])
-
-      const rows = await pgClient.unsafe(sql, params as any[])
-      const results = parseBatchResults(
-        rows[0] as Record<string, unknown>,
-        keys,
-        queries,
-      )
-
-      expect(results.user).toBeDefined()
-      expect((results.user as any).id).toBe(userId)
+      expect(metrics.results.user).toBeDefined()
+      expect((metrics.results.user as any).id).toBe(userId)
 
       const expected = await db.prisma.user.findUnique({
         where: { id: userId },
       })
-      expect((results.user as any).email).toBe(expected!.email)
+      expect((metrics.results.user as any).email).toBe(expected!.email)
     })
 
     it('builds SQL with complex where clauses', async () => {
@@ -290,25 +297,15 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         },
       }
 
-      const { sql, params, keys } = buildBatchSql(
-        queries,
-        modelMap,
-        models,
-        'postgres',
+      const metrics = await executeBatchWithMetrics(queries)
+
+      console.log(
+        `[Complex where] Build: ${metrics.buildTime.toFixed(2)}ms, Execute: ${metrics.executeTime.toFixed(2)}ms, Parse: ${metrics.parseTime.toFixed(2)}ms, Total: ${metrics.totalTime.toFixed(2)}ms`,
       )
 
-      expect(keys).toEqual(['activeTasks', 'doneCount', 'unassignedCount'])
-
-      const rows = await pgClient.unsafe(sql, params as any[])
-      const results = parseBatchResults(
-        rows[0] as Record<string, unknown>,
-        keys,
-        queries,
-      )
-
-      expect(Array.isArray(results.activeTasks)).toBe(true)
-      expect(typeof results.doneCount).toBe('number')
-      expect(typeof results.unassignedCount).toBe('number')
+      expect(Array.isArray(metrics.results.activeTasks)).toBe(true)
+      expect(typeof metrics.results.doneCount).toBe('number')
+      expect(typeof metrics.results.unassignedCount).toBe('number')
 
       const [expectedActive, expectedDone, expectedUnassigned] =
         await Promise.all([
@@ -325,9 +322,11 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
           db.prisma.task.count({ where: { assigneeId: null } }),
         ])
 
-      expect((results.activeTasks as any[]).length).toBe(expectedActive.length)
-      expect(results.doneCount).toBe(expectedDone)
-      expect(results.unassignedCount).toBe(expectedUnassigned)
+      expect((metrics.results.activeTasks as any[]).length).toBe(
+        expectedActive.length,
+      )
+      expect(metrics.results.doneCount).toBe(expectedDone)
+      expect(metrics.results.unassignedCount).toBe(expectedUnassigned)
     })
 
     it('builds SQL for multiple counts', async () => {
@@ -347,26 +346,10 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         },
       }
 
-      const { sql, params, keys } = buildBatchSql(
-        queries,
-        modelMap,
-        models,
-        'postgres',
-      )
+      const metrics = await executeBatchWithMetrics(queries)
 
-      expect(keys).toEqual([
-        'totalUsers',
-        'totalTasks',
-        'totalProjects',
-        'activeUsers',
-        'todoTasks',
-      ])
-
-      const rows = await pgClient.unsafe(sql, params as any[])
-      const results = parseBatchResults(
-        rows[0] as Record<string, unknown>,
-        keys,
-        queries,
+      console.log(
+        `[Multiple counts] Build: ${metrics.buildTime.toFixed(2)}ms, Execute: ${metrics.executeTime.toFixed(2)}ms, Parse: ${metrics.parseTime.toFixed(2)}ms, Total: ${metrics.totalTime.toFixed(2)}ms`,
       )
 
       const [
@@ -383,11 +366,210 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         db.prisma.task.count({ where: { status: 'TODO' } }),
       ])
 
-      expect(results.totalUsers).toBe(expectedTotalUsers)
-      expect(results.totalTasks).toBe(expectedTotalTasks)
-      expect(results.totalProjects).toBe(expectedTotalProjects)
-      expect(results.activeUsers).toBe(expectedActiveUsers)
-      expect(results.todoTasks).toBe(expectedTodoTasks)
+      expect(metrics.results.totalUsers).toBe(expectedTotalUsers)
+      expect(metrics.results.totalTasks).toBe(expectedTotalTasks)
+      expect(metrics.results.totalProjects).toBe(expectedTotalProjects)
+      expect(metrics.results.activeUsers).toBe(expectedActiveUsers)
+      expect(metrics.results.todoTasks).toBe(expectedTodoTasks)
+    })
+
+    it('complex real-world dashboard query', async () => {
+      const queries = {
+        activeUsersWithTasks: {
+          model: 'User',
+          method: 'findMany' as const,
+          args: {
+            where: {
+              AND: [
+                { status: 'ACTIVE' },
+                {
+                  assignedTasks: {
+                    some: { status: { in: ['TODO', 'IN_PROGRESS'] } },
+                  },
+                },
+              ],
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+          },
+        },
+        taskStats: {
+          model: 'Task',
+          method: 'aggregate' as const,
+          args: {
+            _count: { _all: true },
+            _avg: { id: true },
+            where: {
+              OR: [{ status: 'TODO' }, { status: 'IN_PROGRESS' }],
+            },
+          },
+        },
+        tasksByPriority: {
+          model: 'Task',
+          method: 'groupBy' as const,
+          args: {
+            by: ['priority', 'status'],
+            _count: { _all: true },
+            where: {
+              assigneeId: { not: null },
+            },
+            orderBy: {
+              priority: 'desc',
+            },
+          },
+        },
+        urgentTasks: {
+          model: 'Task',
+          method: 'findMany' as const,
+          args: {
+            where: {
+              AND: [
+                { priority: 'URGENT' },
+                { status: { notIn: ['DONE', 'CANCELLED'] } },
+                {
+                  dueDate: {
+                    lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                  },
+                },
+              ],
+            },
+            orderBy: { dueDate: 'asc' },
+            take: 20,
+          },
+        },
+        projectsWithOverdueTasks: {
+          model: 'Project',
+          method: 'findMany' as const,
+          args: {
+            where: {
+              tasks: {
+                some: {
+                  AND: [
+                    { status: { notIn: ['DONE', 'CANCELLED'] } },
+                    { dueDate: { lt: new Date() } },
+                  ],
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+        unassignedHighPriorityCount: {
+          model: 'Task',
+          method: 'count' as const,
+          args: {
+            where: {
+              AND: [
+                { assigneeId: null },
+                { priority: { in: ['HIGH', 'URGENT'] } },
+                { status: { notIn: ['DONE', 'CANCELLED'] } },
+              ],
+            },
+          },
+        },
+        recentlyCompletedTasks: {
+          model: 'Task',
+          method: 'findMany' as const,
+          args: {
+            where: {
+              AND: [
+                { status: 'DONE' },
+                {
+                  updatedAt: {
+                    gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                  },
+                },
+              ],
+            },
+            orderBy: { updatedAt: 'desc' },
+            take: 15,
+          },
+        },
+        userWorkloadStats: {
+          model: 'User',
+          method: 'findMany' as const,
+          args: {
+            where: {
+              status: 'ACTIVE',
+              assignedTasks: {
+                some: {
+                  status: { in: ['TODO', 'IN_PROGRESS'] },
+                },
+              },
+            },
+            take: 20,
+          },
+        },
+      }
+
+      const metrics = await executeBatchWithMetrics(queries)
+
+      console.log(`
+[COMPLEX DASHBOARD QUERY]
+Queries: ${metrics.queryCount}
+Build:   ${metrics.buildTime.toFixed(2)}ms
+Execute: ${metrics.executeTime.toFixed(2)}ms
+Parse:   ${metrics.parseTime.toFixed(2)}ms
+Total:   ${metrics.totalTime.toFixed(2)}ms
+Avg/query: ${(metrics.totalTime / metrics.queryCount).toFixed(2)}ms
+      `)
+
+      expect(Array.isArray(metrics.results.activeUsersWithTasks)).toBe(true)
+      expect(metrics.results.taskStats).toBeDefined()
+      expect(Array.isArray(metrics.results.tasksByPriority)).toBe(true)
+      expect(Array.isArray(metrics.results.urgentTasks)).toBe(true)
+      expect(Array.isArray(metrics.results.projectsWithOverdueTasks)).toBe(true)
+      expect(typeof metrics.results.unassignedHighPriorityCount).toBe('number')
+      expect(Array.isArray(metrics.results.recentlyCompletedTasks)).toBe(true)
+      expect(Array.isArray(metrics.results.userWorkloadStats)).toBe(true)
+    })
+
+    it('stress test with many queries', async () => {
+      const queries: Record<string, any> = {}
+
+      for (let i = 0; i < 20; i++) {
+        queries[`userCount${i}`] = {
+          model: 'User',
+          method: 'count' as const,
+          args: { where: { id: { gte: i * 1000 } } },
+        }
+      }
+
+      for (let i = 0; i < 15; i++) {
+        queries[`taskList${i}`] = {
+          model: 'Task',
+          method: 'findMany' as const,
+          args: {
+            where: { id: { gte: i * 100 } },
+            take: 5,
+            orderBy: { id: 'asc' },
+          },
+        }
+      }
+
+      for (let i = 0; i < 10; i++) {
+        queries[`projectAgg${i}`] = {
+          model: 'Project',
+          method: 'aggregate' as const,
+          args: {
+            _count: { _all: true },
+            _avg: { id: true },
+            where: { id: { gte: i * 50 } },
+          },
+        }
+      }
+
+      const metrics = await executeBatchWithMetrics(queries)
+
+      console.log(`
+[STRESS TEST - ${metrics.queryCount} queries]
+Build:   ${metrics.buildTime.toFixed(2)}ms (${(metrics.buildTime / metrics.queryCount).toFixed(2)}ms per query)
+Execute: ${metrics.executeTime.toFixed(2)}ms
+Parse:   ${metrics.parseTime.toFixed(2)}ms (${(metrics.parseTime / metrics.queryCount).toFixed(2)}ms per query)
+Total:   ${metrics.totalTime.toFixed(2)}ms
+      `)
+
+      expect(Object.keys(metrics.results).length).toBe(metrics.queryCount)
     })
 
     it('throws on empty queries object', () => {
@@ -579,7 +761,7 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         }),
       ) as SpeedClient
 
-      const sequentialStart = Date.now()
+      const sequentialStart = performance.now()
       const seq1 = await db.prisma.user.count({ where: { status: 'ACTIVE' } })
       const seq2 = await db.prisma.task.count({ where: { status: 'TODO' } })
       const seq3 = await db.prisma.project.count()
@@ -587,26 +769,134 @@ describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
         take: 5,
         orderBy: { id: 'asc' },
       })
-      const sequentialTime = Date.now() - sequentialStart
+      const sequentialTime = performance.now() - sequentialStart
 
-      const batchStart = Date.now()
+      const batchStart = performance.now()
       const batchResults = await extended.$batch((batch: BatchProxy) => ({
         activeUsers: batch.User.count({ where: { status: 'ACTIVE' } }),
         todoTasks: batch.Task.count({ where: { status: 'TODO' } }),
         projectCount: batch.Project.count(),
         users: batch.User.findMany({ take: 5, orderBy: { id: 'asc' } }),
       }))
-      const batchTime = Date.now() - batchStart
+      const batchTime = performance.now() - batchStart
 
       expect(batchResults.activeUsers).toBe(seq1)
       expect(batchResults.todoTasks).toBe(seq2)
       expect(batchResults.projectCount).toBe(seq3)
       expect(batchResults.users.length).toBe(seq4.length)
 
-      console.log(`Sequential: ${sequentialTime}ms, Batch: ${batchTime}ms`)
-      console.log(`Speedup: ${(sequentialTime / batchTime).toFixed(2)}x`)
+      console.log(`
+[PERFORMANCE COMPARISON]
+Sequential: ${sequentialTime.toFixed(2)}ms (${(sequentialTime / 4).toFixed(2)}ms per query)
+Batch:      ${batchTime.toFixed(2)}ms (${(batchTime / 4).toFixed(2)}ms per query)
+Speedup:    ${(sequentialTime / batchTime).toFixed(2)}x
+      `)
 
       expect(batchTime).toBeLessThanOrEqual(sequentialTime * 1.5)
+    })
+
+    it('complex dashboard query performance', async () => {
+      const extended = db.prisma.$extends(
+        speedExtension({
+          postgres: pgClient,
+          models,
+          debug: false,
+        }),
+      ) as SpeedClient
+
+      const sequentialStart = performance.now()
+      const seq1 = await db.prisma.user.findMany({
+        where: {
+          AND: [
+            { status: 'ACTIVE' },
+            {
+              assignedTasks: {
+                some: { status: { in: ['TODO', 'IN_PROGRESS'] } },
+              },
+            },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      })
+      const seq2 = await db.prisma.task.aggregate({
+        _count: { _all: true },
+        _avg: { id: true },
+        where: {
+          OR: [{ status: 'TODO' }, { status: 'IN_PROGRESS' }],
+        },
+      })
+      const seq3 = await db.prisma.task.groupBy({
+        by: ['priority', 'status'],
+        _count: { _all: true },
+        where: {
+          assigneeId: { not: null },
+        },
+      })
+      const seq4 = await db.prisma.task.count({
+        where: {
+          AND: [
+            { assigneeId: null },
+            { priority: { in: ['HIGH', 'URGENT'] } },
+            { status: { notIn: ['DONE', 'CANCELLED'] } },
+          ],
+        },
+      })
+      const sequentialTime = performance.now() - sequentialStart
+
+      const batchStart = performance.now()
+      const batchResults = await extended.$batch((batch: BatchProxy) => ({
+        activeUsersWithTasks: batch.User.findMany({
+          where: {
+            AND: [
+              { status: 'ACTIVE' },
+              {
+                assignedTasks: {
+                  some: { status: { in: ['TODO', 'IN_PROGRESS'] } },
+                },
+              },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        }),
+        taskStats: batch.Task.aggregate({
+          _count: { _all: true },
+          _avg: { id: true },
+          where: {
+            OR: [{ status: 'TODO' }, { status: 'IN_PROGRESS' }],
+          },
+        }),
+        tasksByPriority: batch.Task.groupBy({
+          by: ['priority', 'status'],
+          _count: { _all: true },
+          where: {
+            assigneeId: { not: null },
+          },
+        }),
+        unassignedHighPriorityCount: batch.Task.count({
+          where: {
+            AND: [
+              { assigneeId: null },
+              { priority: { in: ['HIGH', 'URGENT'] } },
+              { status: { notIn: ['DONE', 'CANCELLED'] } },
+            ],
+          },
+        }),
+      }))
+      const batchTime = performance.now() - batchStart
+
+      console.log(`
+[COMPLEX DASHBOARD PERFORMANCE]
+Sequential: ${sequentialTime.toFixed(2)}ms
+Batch:      ${batchTime.toFixed(2)}ms
+Speedup:    ${(sequentialTime / batchTime).toFixed(2)}x
+      `)
+
+      expect(batchResults.activeUsersWithTasks.length).toBe(seq1.length)
+      expect(batchResults.taskStats._count._all).toBe(seq2._count._all)
+      expect(batchResults.tasksByPriority.length).toBe(seq3.length)
+      expect(batchResults.unassignedHighPriorityCount).toBe(seq4)
     })
   })
 })

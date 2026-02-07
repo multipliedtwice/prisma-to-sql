@@ -655,7 +655,6 @@ function parseCountValue(value: unknown): number {
     const n = Number.parseInt(value, 10)
     return Number.isFinite(n) ? n : 0
   }
-
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>
     const countKey = Object.prototype.hasOwnProperty.call(obj, 'count')
@@ -677,7 +676,6 @@ function parseCountValue(value: unknown): number {
       }
     }
   }
-
   return 0
 }
 

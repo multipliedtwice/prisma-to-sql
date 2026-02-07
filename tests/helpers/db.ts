@@ -13,11 +13,18 @@ export interface TestDB {
   close: () => Promise<void>
 }
 
-async function mergeSchema(dialect: 'postgres' | 'sqlite'): Promise<string> {
+const PG_URL = 'postgres://postgres:postgres@localhost:5433/prisma_test'
+const SQLITE_DB_PATH = path.join(process.cwd(), 'tests', 'prisma', 'db.sqlite')
+const SQLITE_URL = `file:${SQLITE_DB_PATH}`
+const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
+
+async function mergeSchema(
+  dialect: 'postgres' | 'sqlite',
+  version: number,
+): Promise<string> {
   const prismaDir = path.join(process.cwd(), 'tests', 'prisma')
 
-  if (PRISMA_VERSION === 7) {
-    const schemaPath = path.join(prismaDir, `${dialect}-v7.prisma`)
+  if (version === 7) {
     const basePath = path.join(prismaDir, 'base.prisma')
 
     const base = await fs.readFile(basePath, 'utf-8')
@@ -44,15 +51,12 @@ async function mergeSchema(dialect: 'postgres' | 'sqlite'): Promise<string> {
   }
 }
 
-const PG_URL = 'postgres://postgres:postgres@localhost:5433/prisma_test'
-const SQLITE_DB_PATH = path.join(process.cwd(), 'tests', 'prisma', 'db.sqlite')
-const SQLITE_URL = `file:${SQLITE_DB_PATH}`
-const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
-
 async function generatePrismaClient(
   dialect: 'postgres' | 'sqlite',
+  version?: number,
 ): Promise<void> {
-  const schemaPath = await mergeSchema(dialect)
+  const prismaVersion = version ?? PRISMA_VERSION
+  const schemaPath = await mergeSchema(dialect, prismaVersion)
 
   const env = { ...process.env }
   if (dialect === 'postgres') {
@@ -63,7 +67,7 @@ async function generatePrismaClient(
     delete env.DIRECT_URL
   }
 
-  if (PRISMA_VERSION === 6) {
+  if (prismaVersion === 6) {
     const prismaPath = path.join(
       process.cwd(),
       'node_modules',
@@ -94,7 +98,7 @@ async function generatePrismaClient(
       'build',
       'index.js',
     )
-
+    console.log('configFile :>> ', configFile)
     const genCmd = `node ${prismaPath} generate --config=${configFile}`
     await execAsync(genCmd, { env })
 
@@ -110,10 +114,10 @@ async function generatePrismaClient(
   }
 }
 
-async function createPostgresDB(): Promise<TestDB> {
-  await generatePrismaClient('postgres')
-
-  if (PRISMA_VERSION === 6) {
+async function createPostgresDB(version?: number): Promise<TestDB> {
+  await generatePrismaClient('postgres', version)
+  console.log('version || PRISMA_VERSION :>> ', version || PRISMA_VERSION)
+  if ((version || PRISMA_VERSION) === 6) {
     const { PrismaClient } = await import('../generated/postgres/client')
     const prisma = new PrismaClient({
       datasources: { db: { url: PG_URL } },
@@ -151,16 +155,15 @@ async function createPostgresDB(): Promise<TestDB> {
   }
 }
 
-async function createSqliteDB(): Promise<TestDB> {
+async function createSqliteDB(version?: number): Promise<TestDB> {
   const dbDir = path.dirname(SQLITE_DB_PATH)
   await fs.mkdir(dbDir, { recursive: true })
 
-  await generatePrismaClient('sqlite')
+  await generatePrismaClient('sqlite', version)
 
-  if (PRISMA_VERSION === 6) {
+  if ((version || PRISMA_VERSION) === 6) {
     const { PrismaClient } = await import('../generated/sqlite/client')
     const prisma = new PrismaClient({
-      // @ts-ignore
       datasources: { db: { url: SQLITE_URL } },
     })
     const sqliteClient = new Database(SQLITE_DB_PATH)
@@ -179,7 +182,6 @@ async function createSqliteDB(): Promise<TestDB> {
     }
   } else {
     const { PrismaClient } = await import('../generated/sqlite-v7/client')
-    // @ts-ignore
     const { PrismaBetterSqlite3 } = await import(
       '@prisma/adapter-better-sqlite3'
     )
@@ -205,7 +207,8 @@ async function createSqliteDB(): Promise<TestDB> {
 
 export async function createTestDB(
   dialect: 'postgres' | 'sqlite',
+  version?: number,
 ): Promise<TestDB> {
-  if (dialect === 'postgres') return createPostgresDB()
-  return createSqliteDB()
+  if (dialect === 'postgres') return createPostgresDB(version)
+  return createSqliteDB(version)
 }

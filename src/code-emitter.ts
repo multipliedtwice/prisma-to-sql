@@ -605,7 +605,7 @@ export function speedExtension(config: {
       }
 
       const startTime = Date.now()
-      const { sql, params, keys } = buildBatchSql(
+      const { sql, params, keys, aliases } = buildBatchSql(
         batchQueries,
         MODEL_MAP,
         MODELS,
@@ -621,7 +621,7 @@ export function speedExtension(config: {
       const normalizedParams = normalizeParams(params)
       const rows = await client.unsafe(sql, normalizedParams as any[])
       const row = rows[0] as Record<string, unknown>
-      const results = parseBatchResults(row, keys, batchQueries)
+      const results = parseBatchResults(row, keys, batchQueries, aliases)
       const duration = Date.now() - startTime
 
       onQuery?.({
