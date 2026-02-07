@@ -1,3 +1,10 @@
+# [1.57.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.56.0...v1.57.0) (2026-02-07)
+
+
+### Features
+
+* **batch.ts:** enhance parseCountValue function to handle bigint type for improved number parsing and safety checks ([e593110](https://github.com/multipliedtwice/prisma-to-sql/commit/e5931103bd96edd33583b39c65fc84e85fa6a609))
+
 # [1.56.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.55.0...v1.56.0) (2026-02-06)
 
 
