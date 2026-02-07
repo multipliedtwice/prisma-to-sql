@@ -32,7 +32,6 @@ const dashboard = await prisma.$batch((batch) => ({
 }))
 ```
 
-````
 
 ## What's New in v1.58.0
 
