@@ -1,3 +1,10 @@
+# [1.58.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.57.0...v1.58.0) (2026-02-07)
+
+
+### Features
+
+* batch method ([740b22a](https://github.com/multipliedtwice/prisma-to-sql/commit/740b22a299c380584e34c23ceb126bf4bc989ed9))
+
 # [1.57.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.56.0...v1.57.0) (2026-02-07)
 
 
