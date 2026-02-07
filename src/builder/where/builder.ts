@@ -153,7 +153,8 @@ function buildWhereInternal(
   const allJoins: string[] = []
   const clauses: string[] = []
 
-  for (const [key, value] of Object.entries(where)) {
+  for (const key in where) {
+    const value = where[key]
     if (value === undefined) continue
     const result = buildWhereEntry(key, value, ctx, builder)
     appendResult(result, clauses, allJoins)

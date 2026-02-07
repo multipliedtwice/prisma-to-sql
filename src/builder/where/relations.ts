@@ -10,6 +10,7 @@ import {
   buildTableReference,
   normalizeKeyList,
   quote,
+  quoteColumn,
 } from '../shared/sql-utils'
 import { BuildContext, QueryResult } from '../shared/types'
 import { isNotNullish, isPlainObject } from '../shared/validators/type-guards'
@@ -45,6 +46,7 @@ function isListRelation(fieldType: unknown): boolean {
 
 function buildToOneNullCheck(
   field: Field,
+  parentModel: Model,
   parentAlias: string,
   relTable: string,
   relAlias: string,
@@ -52,8 +54,8 @@ function buildToOneNullCheck(
   wantNull: boolean,
 ): string {
   const isLocal = field.isForeignKeyLocal === true
-
   const fkFields = normalizeKeyList(field.foreignKey)
+
   if (isLocal) {
     if (fkFields.length === 0) {
       throw createError(`Relation '${field.name}' is missing foreignKey`, {
@@ -62,8 +64,7 @@ function buildToOneNullCheck(
     }
 
     const parts = fkFields.map((fk) => {
-      const safe = fk.replace(/"/g, '""')
-      const expr = `${parentAlias}."${safe}"`
+      const expr = `${parentAlias}.${quoteColumn(parentModel, fk)}`
       return wantNull
         ? `${expr} ${SQL_TEMPLATES.IS_NULL}`
         : `${expr} ${SQL_TEMPLATES.IS_NOT_NULL}`
@@ -110,6 +111,7 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
   } = args
 
   const noneValue = value[RelationFilters.NONE]
+
   if (noneValue !== undefined && noneValue !== null) {
     const sub = whereBuilder.build(noneValue as Record<string, unknown>, {
       ...ctx,
@@ -123,6 +125,7 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
     const isEmptyFilter =
       isPlainObject(noneValue) &&
       Object.keys(noneValue as Record<string, unknown>).length === 0
+
     const canOptimize =
       !ctx.isSubquery &&
       isEmptyFilter &&
@@ -138,7 +141,6 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
       if (checkField) {
         const leftJoinSql = `LEFT JOIN ${relTable} ${relAlias} ON ${join}`
         const whereClause = `${relAlias}.${quote(checkField.name)} IS NULL`
-
         return Object.freeze({
           clause: whereClause,
           joins: freezeJoins([leftJoinSql]),
@@ -259,6 +261,7 @@ function buildToOneRelationFilters(args: RelationFilterArgs): QueryResult {
     const wantNull = filterKey === 'is'
     const clause = buildToOneNullCheck(
       field,
+      ctx.model,
       ctx.alias,
       relTable,
       relAlias,
@@ -335,6 +338,7 @@ function buildRelation(
   }
 
   const relModel = ctx.schemaModels.find((m) => m.name === field.relatedModel)
+
   if (!isNotNullish(relModel)) {
     throw createError(
       `Related model '${field.relatedModel}' not found in schema. ` +
@@ -352,7 +356,9 @@ function buildRelation(
     relModel.tableName,
     ctx.dialect,
   )
+
   const relAlias = ctx.aliasGen.next(fieldName)
+
   const join = joinCondition(field, ctx.model, relModel, ctx.alias, relAlias)
 
   const args: RelationFilterArgs = {

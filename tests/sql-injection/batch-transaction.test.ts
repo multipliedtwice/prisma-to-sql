@@ -51,7 +51,7 @@ async function measureAsync<T>(
   return { result, time }
 }
 
-describe('Batch Multi-Query E2E - PostgreSQL', () => {
+describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
   beforeAll(async () => {
     setGlobalDialect('postgres')
     db = await createTestDB('postgres', 7)

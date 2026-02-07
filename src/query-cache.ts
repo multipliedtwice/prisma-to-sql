@@ -1,5 +1,4 @@
-import { ParamMap, isDynamicParameter } from '@dee-wan/schema-parser'
-import type { Model } from './types'
+import type { Model, PrismaMethod } from './types'
 import type { SqlDialect } from './sql-builder-dialect'
 import { buildWhereClause } from './builder/where'
 import { buildSelectSql } from './builder/select'
@@ -12,14 +11,6 @@ import { buildTableReference } from './builder/shared/sql-utils'
 import { SQL_TEMPLATES, SQL_RESERVED_WORDS } from './builder/shared/constants'
 import { createBoundedCache } from './utils/s3-fifo'
 
-export type PrismaMethod =
-  | 'findMany'
-  | 'findFirst'
-  | 'findUnique'
-  | 'count'
-  | 'aggregate'
-  | 'groupBy'
-
 interface SqlResult {
   sql: string
   params: unknown[]
@@ -31,7 +22,7 @@ interface CacheStats {
   size: number
 }
 
-const queryCache = createBoundedCache<string, string>(1000)
+const queryCache = createBoundedCache<string, SqlResult>(1000)
 
 export const queryCacheStats: CacheStats = { hits: 0, misses: 0, size: 0 }
 
@@ -44,32 +35,115 @@ function makeAlias(name: string): string {
   return SQL_RESERVED_WORDS.has(safe) ? `${safe}_t` : safe
 }
 
+type SqliteScanMode = 'normal' | 'single' | 'double'
+
 function toSqliteParams(sql: string, params: readonly unknown[]): SqlResult {
   const reorderedParams: unknown[] = []
-  let lastIndex = 0
-  const parts: string[] = []
+  const n = sql.length
+  let i = 0
+  let out = ''
+  let mode: SqliteScanMode = 'normal'
 
-  for (let i = 0; i < sql.length; i++) {
-    if (sql[i] === '$' && i + 1 < sql.length) {
-      let num = 0
-      let j = i + 1
-      while (j < sql.length && sql[j] >= '0' && sql[j] <= '9') {
-        num = num * 10 + (sql.charCodeAt(j) - 48)
-        j++
+  while (i < n) {
+    const ch = sql.charCodeAt(i)
+
+    if (mode === 'normal') {
+      if (ch === 39) {
+        out += sql[i]
+        mode = 'single'
+        i++
+        continue
       }
 
-      if (j > i + 1) {
-        parts.push(sql.substring(lastIndex, i))
-        parts.push('?')
-        reorderedParams.push(params[num - 1])
-        i = j - 1
-        lastIndex = j
+      if (ch === 34) {
+        out += sql[i]
+        mode = 'double'
+        i++
+        continue
       }
+
+      if (ch === 36) {
+        let j = i + 1
+        let num = 0
+        let hasDigit = false
+        while (j < n) {
+          const d = sql.charCodeAt(j)
+          if (d >= 48 && d <= 57) {
+            num = num * 10 + (d - 48)
+            hasDigit = true
+            j++
+          } else {
+            break
+          }
+        }
+        if (hasDigit && num >= 1) {
+          out += '?'
+          reorderedParams.push(params[num - 1])
+          i = j
+          continue
+        }
+      }
+
+      out += sql[i]
+      i++
+      continue
     }
+
+    if (mode === 'single') {
+      out += sql[i]
+      if (ch === 39) {
+        if (i + 1 < n && sql.charCodeAt(i + 1) === 39) {
+          out += sql[i + 1]
+          i += 2
+          continue
+        }
+        mode = 'normal'
+      }
+      i++
+      continue
+    }
+
+    if (mode === 'double') {
+      out += sql[i]
+      if (ch === 34) {
+        if (i + 1 < n && sql.charCodeAt(i + 1) === 34) {
+          out += sql[i + 1]
+          i += 2
+          continue
+        }
+        mode = 'normal'
+      }
+      i++
+      continue
+    }
+
+    out += sql[i]
+    i++
   }
 
-  parts.push(sql.substring(lastIndex))
-  return { sql: parts.join(''), params: reorderedParams }
+  return { sql: out, params: reorderedParams }
+}
+
+function canonicalizeReplacer(key: string, value: unknown): unknown {
+  if (typeof value === 'bigint') return `__bigint__${value.toString()}`
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>
+    const sorted: Record<string, unknown> = {}
+    for (const k of Object.keys(obj).sort()) {
+      const v = obj[k]
+      if (
+        v &&
+        typeof v === 'object' &&
+        !Array.isArray(v) &&
+        Object.keys(v).length === 0
+      ) {
+        continue
+      }
+      sorted[k] = v
+    }
+    return sorted
+  }
+  return value
 }
 
 function canonicalizeQuery(
@@ -78,31 +152,8 @@ function canonicalizeQuery(
   args: Record<string, unknown>,
   dialect: SqlDialect,
 ): string {
-  function normalize(obj: any): any {
-    if (obj === null || obj === undefined) return obj
-
-    if (obj instanceof Date) {
-      return '__DATE_PARAM__'
-    }
-
-    if (Array.isArray(obj)) {
-      return obj.map(normalize)
-    }
-
-    if (typeof obj === 'object') {
-      const sorted: any = {}
-      for (const key of Object.keys(obj).sort()) {
-        const value = obj[key]
-        sorted[key] = isDynamicParameter(value) ? '__DYN__' : normalize(value)
-      }
-      return sorted
-    }
-
-    return obj
-  }
-
-  const canonical = normalize(args)
-  return `${dialect}:${modelName}:${method}:${JSON.stringify(canonical)}`
+  if (!args) return `${dialect}:${modelName}:${method}:{}`
+  return `${dialect}:${modelName}:${method}:${JSON.stringify(args, canonicalizeReplacer)}`
 }
 
 function buildSQLFull(
@@ -132,6 +183,7 @@ function buildSQLFull(
   )
 
   const withMethod = { ...args, method }
+
   let result: { sql: string; params: readonly unknown[] }
 
   switch (method) {
@@ -188,17 +240,18 @@ export function buildSQLWithCache(
   dialect: SqlDialect,
 ): SqlResult {
   const cacheKey = canonicalizeQuery(model.name, method, args, dialect)
-  const cachedSql = queryCache.get(cacheKey)
 
-  if (cachedSql) {
+  const cached = queryCache.get(cacheKey)
+  if (cached) {
     queryCacheStats.hits++
-    const result = buildSQLFull(model, models, method, args, dialect)
-    return { sql: cachedSql, params: result.params }
+    return { sql: cached.sql, params: [...cached.params] }
   }
 
   queryCacheStats.misses++
+
   const result = buildSQLFull(model, models, method, args, dialect)
-  queryCache.set(cacheKey, result.sql)
+
+  queryCache.set(cacheKey, result)
   queryCacheStats.size = queryCache.size
 
   return result

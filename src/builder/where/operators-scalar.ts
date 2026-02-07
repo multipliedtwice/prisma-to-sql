@@ -12,6 +12,8 @@ import { createError } from '../shared/errors'
 import { ParamStore } from '../shared/param-store'
 import { isNotNullish, isPlainObject } from '../shared/validators/type-guards'
 
+const MAX_NOT_DEPTH = 50
+
 export function buildNotComposite(
   expr: string,
   val: Record<string, unknown>,
@@ -50,15 +52,22 @@ export function buildScalarOperator(
   mode?: 'insensitive' | 'default',
   fieldType?: string,
   dialect?: SqlDialect,
+  depth: number = 0,
 ): string {
   if (val === undefined) return ''
+
+  if (depth > MAX_NOT_DEPTH) {
+    throw new Error(
+      `NOT operator nesting too deep (max ${MAX_NOT_DEPTH} levels). This usually indicates a circular reference or adversarial input.`,
+    )
+  }
 
   if (val === null) {
     return handleNullValue(expr, op)
   }
 
   if (op === Ops.NOT && isPlainObject(val)) {
-    return handleNotOperator(expr, val, params, mode, fieldType, dialect)
+    return handleNotOperator(expr, val, params, mode, fieldType, dialect, depth)
   }
 
   if (op === Ops.NOT) {
@@ -129,6 +138,7 @@ function handleNotOperator(
   outerMode?: 'insensitive' | 'default',
   fieldType?: string,
   dialect?: SqlDialect,
+  depth: number = 0,
 ): string {
   const innerMode = normalizeMode(val.mode)
   const effectiveMode = innerMode ?? outerMode
@@ -149,6 +159,7 @@ function handleNotOperator(
         effectiveMode,
         fieldType,
         undefined,
+        depth + 1,
       )
       if (sub && sub.trim().length > 0) clauses.push(`(${sub})`)
     }
@@ -164,29 +175,21 @@ function handleNotOperator(
     params,
     dialect,
     (e, subOp, subVal, p, d) =>
-      buildScalarOperator(e, subOp, subVal, p, effectiveMode, fieldType, d),
+      buildScalarOperator(
+        e,
+        subOp,
+        subVal,
+        p,
+        effectiveMode,
+        fieldType,
+        d,
+        depth + 1,
+      ),
     ` ${SQL_TEMPLATES.AND} `,
   )
 }
 
-function buildDynamicLikePattern(
-  op: string,
-  placeholder: string,
-  dialect: SqlDialect,
-): string {
-  if (dialect === 'postgres') {
-    switch (op) {
-      case Ops.CONTAINS:
-        return `('%' || ${placeholder} || '%')`
-      case Ops.STARTS_WITH:
-        return `(${placeholder} || '%')`
-      case Ops.ENDS_WITH:
-        return `('%' || ${placeholder})`
-      default:
-        return placeholder
-    }
-  }
-
+function buildDynamicLikePattern(op: string, placeholder: string): string {
   switch (op) {
     case Ops.CONTAINS:
       return `('%' || ${placeholder} || '%')`
@@ -211,7 +214,7 @@ function handleLikeOperator(
 
   if (isDynamicParameter(val)) {
     const placeholder = params.addAuto(val)
-    const patternExpr = buildDynamicLikePattern(op, placeholder, dialect)
+    const patternExpr = buildDynamicLikePattern(op, placeholder)
 
     if (mode === Modes.INSENSITIVE) {
       return caseInsensitiveLike(expr, patternExpr, dialect)

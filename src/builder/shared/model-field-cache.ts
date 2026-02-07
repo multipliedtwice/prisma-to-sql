@@ -1,4 +1,5 @@
 import { Model, Field } from '../../types'
+import { needsQuoting } from './validators/sql-validators'
 
 interface FieldInfo {
   name: string
@@ -19,14 +20,16 @@ interface CachedModelInfo {
 
 const MODEL_CACHE = new WeakMap<Model, CachedModelInfo>()
 
-function quote(id: string): string {
-  const needsQuoting =
-    !/^[a-z_][a-z0-9_]*$/.test(id) ||
-    /^(select|from|where|having|order|group|limit|offset|join|inner|left|right|outer|cross|full|and|or|not|by|as|on|union|intersect|except|case|when|then|else|end|user|users|table|column|index|values|in|like|between|is|exists|null|true|false|all|any|some|update|insert|delete|create|drop|alter|truncate|grant|revoke|exec|execute)$/i.test(
-      id,
+function quoteIdent(id: string): string {
+  if (typeof id !== 'string' || id.trim().length === 0) {
+    throw new Error('quoteIdent: identifier is required and cannot be empty')
+  }
+  if (/[\u0000-\u001F\u007F]/.test(id)) {
+    throw new Error(
+      `quoteIdent: identifier contains invalid characters: ${JSON.stringify(id)}`,
     )
-
-  if (needsQuoting) {
+  }
+  if (needsQuoting(id)) {
     return `"${id.replace(/"/g, '""')}"`
   }
   return id
@@ -60,7 +63,7 @@ function ensureFullCache(model: Model): CachedModelInfo {
         scalarFields.add(f.name)
         const dbName = info.dbName
         columnMap.set(f.name, dbName)
-        quotedColumns.set(f.name, quote(dbName))
+        quotedColumns.set(f.name, quoteIdent(dbName))
       }
     }
 

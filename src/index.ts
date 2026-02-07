@@ -5,12 +5,16 @@ import {
 } from '@dee-wan/schema-parser'
 import { DMMF } from '@prisma/generator-helper'
 import { SQL_RESERVED_WORDS } from './builder/shared/constants'
-import { setGlobalDialect, SqlDialect } from './sql-builder-dialect'
+import {
+  setGlobalDialect,
+  SqlDialect,
+  withDialect,
+} from './sql-builder-dialect'
 import {
   generateSQL as generateSQLInternal,
   SQLDirective,
 } from './sql-generator'
-import { transformQueryResults, type PrismaMethod } from './result-transformers'
+import { transformQueryResults } from './result-transformers'
 import { buildSQLWithCache } from './query-cache'
 import {
   buildBatchSql,
@@ -26,6 +30,8 @@ import {
   type TransactionOptions,
   type TransactionExecutor,
 } from './transaction'
+import { tryFastPath } from './fast-path'
+import { PrismaMethod } from './types'
 
 interface SqlResult {
   sql: string
@@ -246,8 +252,13 @@ function logAcceleratedError(
   method: PrismaMethod,
   error: unknown,
 ): void {
-  if (!debug) return
-  console.error(`[${dialect}] ${modelName}.${method} failed:`, error)
+  const msg = error instanceof Error ? error.message : String(error)
+  console.warn(
+    `[prisma-sql] ${modelName}.${method} acceleration failed, falling back to Prisma: ${msg}`,
+  )
+  if (debug && error instanceof Error && error.stack) {
+    console.warn(error.stack)
+  }
 }
 
 interface AccelerationDeps {
@@ -281,19 +292,35 @@ async function runAccelerated(
   model: Model,
   args: any,
 ): Promise<unknown> {
-  const results = await executeWithTiming({
-    modelName,
-    method,
-    model,
-    allModels: deps.allModels,
-    args: (args || {}) as Record<string, unknown>,
-    dialect: deps.dialect,
-    debug: deps.debug,
-    executeQuery: deps.executeQuery,
-    onQuery: deps.onQuery,
-  })
+  return withDialect(deps.dialect, async () => {
+    const fastPath = tryFastPath(model, method, args || {}, deps.dialect)
+    if (fastPath) {
+      if (deps.debug) {
+        console.log(`[${deps.dialect}] ${modelName}.${method} ⚡ FAST PATH`)
+        console.log('SQL:', fastPath.sql)
+        console.log('Params:', fastPath.params)
+      }
+      const results = await deps.executeQuery(
+        method,
+        fastPath.sql,
+        fastPath.params,
+      )
+      return transformQueryResults(method, results)
+    }
 
-  return transformQueryResults(method, results)
+    const results = await executeWithTiming({
+      modelName,
+      method,
+      model,
+      allModels: deps.allModels,
+      args: (args || {}) as Record<string, unknown>,
+      dialect: deps.dialect,
+      debug: deps.debug,
+      executeQuery: deps.executeQuery,
+      onQuery: deps.onQuery,
+    })
+    return transformQueryResults(method, results)
+  })
 }
 
 async function handleMethodCall(

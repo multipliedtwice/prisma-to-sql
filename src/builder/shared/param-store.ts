@@ -195,19 +195,14 @@ function createStoreInternal(
   function snapshot(): ParamSnapshot {
     if (!dirty && cachedSnapshot) return cachedSnapshot
 
-    if (!frozenParams) frozenParams = Object.freeze(params.slice())
-    if (!frozenMappings) frozenMappings = Object.freeze(mappings.slice())
-
     const snap: ParamSnapshot = {
       index,
-      params: frozenParams,
-      mappings: frozenMappings,
+      params: params.slice(),
+      mappings: mappings.slice(),
     }
 
     cachedSnapshot = snap
     dirty = false
-    frozenParams = null
-    frozenMappings = null
     return snap
   }
 

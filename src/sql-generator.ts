@@ -15,23 +15,17 @@ import {
   DirectiveProps,
   convertDMMFToModels,
 } from '@dee-wan/schema-parser'
+import { PrismaMethod } from './types'
 
 export interface SQLDirective {
   method: PrismaMethod
   sql: string
   staticParams: any[]
   dynamicKeys: string[]
+  paramOrder: string
   paramMappings: readonly ParamMap[]
   originalDirective: DirectiveProps
 }
-
-type PrismaMethod =
-  | 'findMany'
-  | 'findFirst'
-  | 'findUnique'
-  | 'aggregate'
-  | 'groupBy'
-  | 'count'
 
 function safeAlias(input: string): string {
   const raw = String(input).toLowerCase()
@@ -90,7 +84,14 @@ function buildSqlResult(args: {
   }
 
   if (method === 'groupBy') {
-    return buildGroupBySql(processed, whereResult, tableName, alias, modelDef)
+    return buildGroupBySql(
+      processed,
+      whereResult,
+      tableName,
+      alias,
+      modelDef,
+      dialect,
+    )
   }
 
   if (method === 'count') {
@@ -99,6 +100,7 @@ function buildSqlResult(args: {
       tableName,
       alias,
       processed.skip as number,
+      dialect,
     )
   }
 
@@ -151,25 +153,28 @@ function normalizeSqlAndMappingsForDialect(
 function buildParamsFromMappings(mappings: readonly ParamMap[]): {
   staticParams: any[]
   dynamicKeys: string[]
+  paramOrder: string
 } {
   const sorted = [...mappings].sort((a, b) => a.index - b.index)
+  const staticParams: any[] = []
+  const dynamicKeys: string[] = []
+  let paramOrder = ''
 
-  return sorted.reduce(
-    (acc, m) => {
-      if (m.dynamicName !== undefined) {
-        acc.dynamicKeys.push(m.dynamicName)
-        return acc
-      }
-      if (m.value !== undefined) {
-        acc.staticParams.push(m.value)
-        return acc
-      }
+  for (const m of sorted) {
+    if (m.dynamicName !== undefined) {
+      dynamicKeys.push(m.dynamicName)
+      paramOrder += 'd'
+    } else if (m.value !== undefined) {
+      staticParams.push(m.value)
+      paramOrder += 's'
+    } else {
       throw new Error(
         `CRITICAL: ParamMap ${m.index} has neither dynamicName nor value`,
       )
-    },
-    { staticParams: [] as any[], dynamicKeys: [] as string[] },
-  )
+    }
+  }
+
+  return { staticParams, dynamicKeys, paramOrder }
 }
 
 function resolveModelContext(directive: DirectiveProps): {
@@ -271,7 +276,7 @@ function finalizeDirective(args: {
   const params = normalizedMappings.map((m) => m.value ?? undefined)
   validateParamConsistencyByDialect(normalizedSql, params, dialect)
 
-  const { staticParams, dynamicKeys } =
+  const { staticParams, dynamicKeys, paramOrder } =
     buildParamsFromMappings(normalizedMappings)
 
   return {
@@ -279,6 +284,7 @@ function finalizeDirective(args: {
     sql: normalizedSql,
     staticParams,
     dynamicKeys,
+    paramOrder,
     paramMappings: normalizedMappings,
     originalDirective: directive,
   }

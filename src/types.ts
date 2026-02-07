@@ -40,3 +40,11 @@ export interface PrismaQueryArgs {
 
   method?: string
 }
+
+export type PrismaMethod =
+  | 'findMany'
+  | 'findFirst'
+  | 'findUnique'
+  | 'count'
+  | 'aggregate'
+  | 'groupBy'

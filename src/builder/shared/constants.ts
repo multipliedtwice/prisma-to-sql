@@ -160,4 +160,5 @@ export const LIMITS = Object.freeze({
   MAX_QUERY_DEPTH: 50,
   MAX_ARRAY_SIZE: 10000,
   MAX_STRING_LENGTH: 10000,
+  MAX_HAVING_DEPTH: 50,
 } as const)

@@ -1,10 +1,4 @@
-export type PrismaMethod =
-  | 'findMany'
-  | 'findFirst'
-  | 'findUnique'
-  | 'count'
-  | 'aggregate'
-  | 'groupBy'
+import { PrismaMethod } from './types'
 
 function parseAggregateValue(value: unknown): unknown {
   if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value)) {
@@ -17,7 +11,6 @@ function transformGroupByResults(results: unknown[]): unknown[] {
   return results.map((row) => {
     const raw = row as Record<string, unknown>
     const parsed: any = {}
-
     for (const [key, value] of Object.entries(raw)) {
       const parts = key.split('.')
       if (parts.length === 2) {
@@ -28,7 +21,6 @@ function transformGroupByResults(results: unknown[]): unknown[] {
         parsed[key] = value
       }
     }
-
     return parsed
   })
 }
@@ -42,7 +34,6 @@ function transformCountResults(results: unknown[]): number {
 function transformAggregateResults(results: unknown[]): Record<string, any> {
   const raw = (results[0] || {}) as Record<string, unknown>
   const parsed: any = {}
-
   for (const [key, value] of Object.entries(raw)) {
     const parts = key.split('.')
     if (parts.length === 2) {
@@ -53,7 +44,6 @@ function transformAggregateResults(results: unknown[]): Record<string, any> {
       parsed[key] = value
     }
   }
-
   return parsed
 }
 

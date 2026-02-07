@@ -4,6 +4,7 @@ import {
   SQL_SEPARATORS,
   Ops,
   LogicalOps,
+  LIMITS,
 } from './shared/constants'
 import {
   assertSafeAlias,
@@ -42,6 +43,8 @@ import { buildComparisons } from './shared/comparison-builder'
 
 type AggregateKey = '_count' | '_sum' | '_avg' | '_min' | '_max'
 type LogicalKey = 'AND' | 'OR' | 'NOT'
+
+const MAX_NOT_DEPTH = 50
 
 const AGGREGATES: ReadonlyArray<[Exclude<AggregateKey, '_count'>, string]> = [
   ['_sum', 'SUM'],
@@ -221,8 +224,15 @@ function buildSimpleComparison(
   val: unknown,
   params: ParamStore,
   dialect: SqlDialect,
+  depth: number = 0,
 ): string {
   assertHavingOp(op)
+
+  if (depth > MAX_NOT_DEPTH) {
+    throw new Error(
+      `NOT operator nesting too deep in HAVING (max ${MAX_NOT_DEPTH} levels).`,
+    )
+  }
 
   if (val === null) return buildNullComparison(expr, op)
 
@@ -232,7 +242,8 @@ function buildSimpleComparison(
       val,
       params,
       dialect,
-      buildSimpleComparison,
+      (e, subOp, subVal, p, d) =>
+        buildSimpleComparison(e, subOp, subVal, p, d, depth + 1),
       SQL_SEPARATORS.CONDITION_AND,
     )
   }
@@ -265,13 +276,28 @@ function buildHavingNode(
   params: ParamStore,
   dialect: SqlDialect,
   model: Model,
+  depth: number = 0,
 ): string {
+  if (depth > LIMITS.MAX_HAVING_DEPTH) {
+    throw new Error(
+      `HAVING clause nesting too deep (max ${LIMITS.MAX_HAVING_DEPTH} levels). This usually indicates a circular reference.`,
+    )
+  }
+
   const clauses: string[] = []
 
   for (const key in node) {
     if (!Object.prototype.hasOwnProperty.call(node, key)) continue
     const value = node[key]
-    const built = buildHavingEntry(key, value, alias, params, dialect, model)
+    const built = buildHavingEntry(
+      key,
+      value,
+      alias,
+      params,
+      dialect,
+      model,
+      depth,
+    )
     for (const c of built) {
       if (c && c.length > 0) clauses.push(c)
     }
@@ -287,16 +313,18 @@ function buildLogicalClause(
   params: ParamStore,
   dialect: SqlDialect,
   model: Model,
+  depth: number = 0,
 ): string {
   const items = normalizeLogicalValue(key, value)
   const subClauses: string[] = []
 
   for (const it of items) {
-    const c = buildHavingNode(it, alias, params, dialect, model)
+    const c = buildHavingNode(it, alias, params, dialect, model, depth + 1)
     if (c && c.length > 0) subClauses.push('(' + c + ')')
   }
 
   if (subClauses.length === 0) return ''
+
   return combineLogical(key, subClauses)
 }
 
@@ -402,6 +430,7 @@ function buildHavingEntry(
   params: ParamStore,
   dialect: SqlDialect,
   model: Model,
+  depth: number = 0,
 ): string[] {
   if (isLogicalKey(key)) {
     const logical = buildLogicalClause(
@@ -411,6 +440,7 @@ function buildHavingEntry(
       params,
       dialect,
       model,
+      depth,
     )
     return logical ? [logical] : []
   }
@@ -444,11 +474,9 @@ function buildHavingClause(
   dialect?: SqlDialect,
 ): string {
   if (!isNotNullish(having)) return ''
-
   const d = dialect ?? getGlobalDialect()
   if (!isPlainObject(having)) throw new Error('having must be an object')
-
-  return buildHavingNode(having, alias, params, d, model)
+  return buildHavingNode(having, alias, params, d, model, 0)
 }
 
 function normalizeCountArg(

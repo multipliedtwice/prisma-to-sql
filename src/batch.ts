@@ -1,8 +1,9 @@
-import type { Model } from './types'
+import type { Model, PrismaMethod } from './types'
 import type { SqlDialect } from './sql-builder-dialect'
-import type { PrismaMethod } from './result-transformers'
+
 import { buildSQLWithCache } from './query-cache'
 import { transformQueryResults } from './result-transformers'
+import { assertSafeAlias } from './builder/shared/sql-utils'
 
 export interface BatchQuery {
   model: string
@@ -21,37 +22,9 @@ export interface BatchResult {
   params: unknown[]
 }
 
-function assertNoControlChars(label: string, s: string): void {
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i)
-    if (c <= 31 || c === 127) {
-      throw new Error(`${label} contains control characters`)
-    }
-  }
-}
-
-function assertSafeIdentifier(label: string, s: string): void {
-  const raw = String(s)
-  if (raw.trim() !== raw) {
-    throw new Error(`${label} must not contain leading/trailing whitespace`)
-  }
-  if (raw.length === 0) throw new Error(`${label} cannot be empty`)
-  assertNoControlChars(label, raw)
-
-  if (/[ \t\r\n]/.test(raw)) {
-    throw new Error(`${label} must not contain whitespace`)
-  }
-  if (raw.includes(';')) {
-    throw new Error(`${label} must not contain semicolons`)
-  }
-  if (raw.includes('--') || raw.includes('/*') || raw.includes('*/')) {
-    throw new Error(`${label} must not contain SQL comment tokens`)
-  }
-}
-
-function quoteIdent(id: string): string {
+function quoteBatchIdent(id: string): string {
   const raw = String(id)
-  assertSafeIdentifier('Identifier', raw)
+  assertSafeAlias(raw)
   return `"${raw.replace(/"/g, '""')}"`
 }
 
@@ -116,28 +89,24 @@ function replacePgPlaceholders(
         i++
         continue
       }
-
       if (ch === 34) {
         out += s[i]
         mode = 'double'
         i++
         continue
       }
-
       if (ch === 45 && i + 1 < n && s.charCodeAt(i + 1) === 45) {
         out += '--'
         mode = 'lineComment'
         i += 2
         continue
       }
-
       if (ch === 47 && i + 1 < n && s.charCodeAt(i + 1) === 42) {
         out += '/*'
         mode = 'blockComment'
         i += 2
         continue
       }
-
       if (ch === 36) {
         const tag = readDollarTag(i)
         if (tag) {
@@ -147,7 +116,6 @@ function replacePgPlaceholders(
           i += tag.length
           continue
         }
-
         let j = i + 1
         if (j < n) {
           const c1 = s.charCodeAt(j)
@@ -171,7 +139,6 @@ function replacePgPlaceholders(
           }
         }
       }
-
       out += s[i]
       i++
       continue
@@ -250,6 +217,15 @@ function replacePgPlaceholders(
   return out
 }
 
+function containsPgPlaceholder(sql: string): boolean {
+  let found = false
+  replacePgPlaceholders(sql, (oldIndex) => {
+    found = true
+    return `$${oldIndex}`
+  })
+  return found
+}
+
 function reindexParams(
   sql: string,
   params: readonly unknown[],
@@ -287,23 +263,19 @@ function wrapQueryForMethod(
   cteName: string,
   resultAlias: string,
 ): string {
-  const outKey = quoteIdent(resultAlias)
+  const outKey = quoteBatchIdent(resultAlias)
 
   switch (method) {
     case 'findMany':
     case 'groupBy':
       return `(SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ${cteName} t) AS ${outKey}`
-
     case 'findFirst':
     case 'findUnique':
       return `(SELECT row_to_json(t) FROM ${cteName} t LIMIT 1) AS ${outKey}`
-
     case 'count':
       return `(SELECT * FROM ${cteName}) AS ${outKey}`
-
     case 'aggregate':
       return `(SELECT row_to_json(t) FROM ${cteName} t) AS ${outKey}`
-
     default:
       throw new Error(`Unsupported batch method: ${method}`)
   }
@@ -331,15 +303,12 @@ function looksTooComplexForFilter(sql: string): boolean {
   return false
 }
 
-function containsPgPlaceholder(sql: string): boolean {
-  return /\$[1-9][0-9]*/.test(sql)
-}
-
 function parseSimpleCountSql(
   sql: string,
 ): { fromSql: string; whereSql: string | null } | null {
   const trimmed = sql.trim().replace(/;$/, '').trim()
   const lower = trimmed.toLowerCase()
+
   if (!lower.startsWith('select')) return null
   if (!lower.includes('count(*)')) return null
   if (looksTooComplexForFilter(trimmed)) return null
@@ -347,12 +316,13 @@ function parseSimpleCountSql(
   const match = trimmed.match(
     /^select\s+count\(\*\)(?:\s*::\s*[a-zA-Z0-9_\."]+)?\s+as\s+("[^"]+"|[a-zA-Z_][a-zA-Z0-9_\.]*)\s+from\s+([\s\S]+?)(?:\s+where\s+([\s\S]+))?$/i,
   )
+
   if (!match) return null
 
   const fromSql = match[2].trim()
   const whereSql = match[3] ? match[3].trim() : null
-
   if (!fromSql) return null
+
   return { fromSql, whereSql }
 }
 
@@ -403,6 +373,7 @@ function buildMergedCountBatchSql(
     for (let i = 0; i < items.length; i++) {
       const { key, alias, args } = items[i]
       const built = buildSQLWithCache(model, models, 'count', args, dialect)
+
       const parsed = parseSimpleCountSql(built.sql)
       if (!parsed) return null
 
@@ -412,11 +383,10 @@ function buildMergedCountBatchSql(
 
       if (!parsed.whereSql) {
         if (built.params.length > 0) return null
-
         if (sharedFrom === null) sharedFrom = parsed.fromSql
         if (sharedFrom !== parsed.fromSql) return null
 
-        expressions.push(`count(*) AS ${quoteIdent(alias)}`)
+        expressions.push(`count(*) AS ${quoteBatchIdent(alias)}`)
         localKeys.push(key)
         localAliases.push(alias)
         continue
@@ -433,7 +403,7 @@ function buildMergedCountBatchSql(
       for (let p = 0; p < re.params.length; p++) localParams.push(re.params[p])
 
       expressions.push(
-        `count(*) FILTER (WHERE ${re.sql}) AS ${quoteIdent(alias)}`,
+        `count(*) FILTER (WHERE ${re.sql}) AS ${quoteBatchIdent(alias)}`,
       )
       localKeys.push(key)
       localAliases.push(alias)
@@ -443,7 +413,6 @@ function buildMergedCountBatchSql(
 
     const alias = `m_${aliasIndex++}`
     const subSql = `(SELECT ${expressions.join(', ')} FROM ${sharedFrom}) ${alias}`
-
     subqueries.push({
       alias,
       sql: subSql,
@@ -473,15 +442,15 @@ function buildMergedCountBatchSql(
     for (let k = 0; k < sq.aliases.length; k++) {
       const outAlias = sq.aliases[k]
       selectParts.push(
-        `${sq.alias}.${quoteIdent(outAlias)} AS ${quoteIdent(outAlias)}`,
+        `${sq.alias}.${quoteBatchIdent(outAlias)} AS ${quoteBatchIdent(outAlias)}`,
       )
     }
   }
 
   const fromSql = rewrittenSubs.join(' CROSS JOIN ')
   const sql = `SELECT ${selectParts.join(', ')} FROM ${fromSql}`
-
   const aliases = keys.map((k) => aliasesByKey.get(k)!)
+
   return { sql, params: finalParams, keys, aliases }
 }
 
@@ -503,6 +472,7 @@ export function buildBatchSql(
 
   const aliases = new Array(keys.length)
   const aliasesByKey = new Map<string, string>()
+
   for (let i = 0; i < keys.length; i++) {
     const a = makeBatchAlias(i)
     aliases[i] = a
@@ -560,7 +530,6 @@ export function buildBatchSql(
   }
 
   const sql = `WITH ${ctes.join(', ')} SELECT ${selects.join(', ')}`
-
   return { sql, params: allParams, keys, aliases }
 }
 
@@ -615,11 +584,10 @@ export function buildBatchCountSql(
     const cteName = `count_${i}`
     const resultKey = `count_${i}`
     ctes[i] = `${cteName} AS (${reindexedSql})`
-    selects[i] = `(SELECT * FROM ${cteName}) AS ${quoteIdent(resultKey)}`
+    selects[i] = `(SELECT * FROM ${cteName}) AS ${quoteBatchIdent(resultKey)}`
   }
 
   const sql = `WITH ${ctes.join(', ')} SELECT ${selects.join(', ')}`
-
   return { sql, params: allParams }
 }
 
@@ -712,33 +680,28 @@ export function parseBatchResults(
         results[key] = Array.isArray(parsed) ? parsed : []
         break
       }
-
       case 'findFirst':
       case 'findUnique': {
         const parsed = parseJsonValue(rawValue)
         results[key] = parsed ?? null
         break
       }
-
       case 'count': {
         results[key] = parseCountValue(rawValue)
         break
       }
-
       case 'aggregate': {
         const parsed = parseJsonValue(rawValue)
         const obj = (parsed ?? {}) as Record<string, unknown>
         results[key] = transformQueryResults('aggregate', [obj])
         break
       }
-
       case 'groupBy': {
         const parsed = parseJsonValue(rawValue)
         const arr = Array.isArray(parsed) ? parsed : []
         results[key] = transformQueryResults('groupBy', arr)
         break
       }
-
       default:
         results[key] = rawValue
     }

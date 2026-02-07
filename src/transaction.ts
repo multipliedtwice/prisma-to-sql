@@ -1,6 +1,5 @@
-import type { Model } from './types'
+import type { Model, PrismaMethod } from './types'
 import type { SqlDialect } from './sql-builder-dialect'
-import type { PrismaMethod } from './result-transformers'
 import { buildSQLWithCache } from './query-cache'
 import { transformQueryResults } from './result-transformers'
 
@@ -35,6 +34,21 @@ function isolationLevelToPostgresKeyword(
     default:
       return undefined
   }
+}
+
+function validateTimeout(timeout: unknown): number {
+  if (typeof timeout !== 'number') {
+    throw new Error(
+      `Transaction timeout must be a number, got ${typeof timeout}`,
+    )
+  }
+  if (!Number.isFinite(timeout)) {
+    throw new Error(`Transaction timeout must be finite, got ${timeout}`)
+  }
+  if (timeout < 0) {
+    throw new Error(`Transaction timeout must be non-negative, got ${timeout}`)
+  }
+  return Math.floor(timeout)
 }
 
 export function createTransactionExecutor(deps: {
@@ -74,10 +88,11 @@ export function createTransactionExecutor(deps: {
           )
         }
 
-        if (options?.timeout) {
-          await sql.unsafe(
-            `SET LOCAL statement_timeout = ${Math.floor(options.timeout)}`,
-          )
+        if (options?.timeout !== undefined && options.timeout !== null) {
+          const validatedTimeout = validateTimeout(options.timeout)
+          await sql.unsafe(`SET LOCAL statement_timeout = $1`, [
+            validatedTimeout,
+          ])
         }
 
         for (const q of queries) {
