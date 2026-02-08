@@ -1,3 +1,11 @@
+# [1.61.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.60.0...v1.61.0) (2026-02-08)
+
+
+### Features
+
+* **index.ts:** enhance SQL module by adding batch and transaction utilities for improved query handling and execution ([1188ffd](https://github.com/multipliedtwice/prisma-to-sql/commit/1188ffd4a9b4f59c187864b4e2cdb01c38aa4b28))
+* **transaction.ts:** change interface declarations from private to public to allow external access and improve usability ([af23086](https://github.com/multipliedtwice/prisma-to-sql/commit/af230868d76eb3840c3bb7dc3b9a7c0ab58a2fc2))
+
 # [1.60.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.59.0...v1.60.0) (2026-02-08)
 
 # [1.59.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.58.0...v1.59.0) (2026-02-07)
