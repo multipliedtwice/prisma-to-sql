@@ -6,7 +6,7 @@ import { normalizeOrderByInput } from './order-by-utils'
 type OrderByDirection = 'asc' | 'desc'
 type NullsPosition = 'first' | 'last'
 
-export type ParsedOrderByValue = {
+type ParsedOrderByValue = {
   direction: OrderByDirection
   nulls?: NullsPosition
 }

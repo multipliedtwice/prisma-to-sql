@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { readFileSync, writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
-import { createToSQL, convertDMMFToModels } from '../../src'
+import { createToSQL } from '../../src'
+import { convertDMMFToModels } from '@dee-wan/schema-parser'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
 import { getDatamodel } from '../helpers/datamodel'
 

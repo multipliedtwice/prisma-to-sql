@@ -1,7 +1,7 @@
 import { ParamStore } from './param-store'
 import { SqlDialect } from '../../sql-builder-dialect'
 
-export type ComparisonBuilder = (
+type ComparisonBuilder = (
   expr: string,
   op: string,
   val: unknown,
@@ -33,10 +33,4 @@ export function buildComparisons(
   }
 
   return out
-}
-
-export function joinComparisons(clauses: string[]): string {
-  if (clauses.length === 0) return ''
-  if (clauses.length === 1) return clauses[0]
-  return clauses.join(' AND ')
 }

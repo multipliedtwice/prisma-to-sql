@@ -40,6 +40,257 @@ type ScanMode =
   | 'blockComment'
   | 'dollar'
 
+interface ScanState {
+  mode: ScanMode
+  dollarTag: string | null
+}
+
+interface ProcessResult {
+  consumed: number
+  output: string
+  newState?: ScanState
+  shouldExitMode?: boolean
+}
+
+function isDigit(charCode: number): boolean {
+  return charCode >= 48 && charCode <= 57
+}
+
+function isAlphaNumericOrUnderscore(charCode: number): boolean {
+  return (
+    isDigit(charCode) ||
+    (charCode >= 65 && charCode <= 90) ||
+    (charCode >= 97 && charCode <= 122) ||
+    charCode === 95
+  )
+}
+
+function readDollarTag(s: string, pos: number, n: number): string | null {
+  if (s.charCodeAt(pos) !== 36) return null
+  let j = pos + 1
+  while (j < n && isAlphaNumericOrUnderscore(s.charCodeAt(j))) {
+    j++
+  }
+  if (j < n && s.charCodeAt(j) === 36 && j > pos) {
+    return s.slice(pos, j + 1)
+  }
+  if (pos + 1 < n && s.charCodeAt(pos + 1) === 36) {
+    return '$$'
+  }
+  return null
+}
+
+function parseParamPlaceholder(
+  s: string,
+  i: number,
+  n: number,
+  replace: (oldIndex: number) => string,
+): { consumed: number; output: string } {
+  let j = i + 1
+  if (j >= n) {
+    return { consumed: 1, output: s[i] }
+  }
+
+  const c1 = s.charCodeAt(j)
+  if (!isDigit(c1)) {
+    return { consumed: 1, output: s[i] }
+  }
+
+  while (j < n && isDigit(s.charCodeAt(j))) {
+    j++
+  }
+
+  const numStr = s.slice(i + 1, j)
+  const oldIndex = Number(numStr)
+  if (!Number.isInteger(oldIndex) || oldIndex < 1) {
+    throw new Error(`Invalid param placeholder: $${numStr}`)
+  }
+
+  return { consumed: j - i, output: replace(oldIndex) }
+}
+
+function handleDollarInNormalMode(
+  s: string,
+  i: number,
+  n: number,
+  state: ScanState,
+  replace: (oldIndex: number) => string,
+): ProcessResult {
+  const tag = readDollarTag(s, i, n)
+  if (tag) {
+    return {
+      consumed: tag.length,
+      output: tag,
+      newState: { mode: 'dollar', dollarTag: tag },
+    }
+  }
+
+  const placeholder = parseParamPlaceholder(s, i, n, replace)
+  return { ...placeholder, newState: state }
+}
+
+function handleCommentStart(
+  s: string,
+  i: number,
+  n: number,
+  ch: number,
+): ProcessResult | null {
+  if (ch === 45 && i + 1 < n && s.charCodeAt(i + 1) === 45) {
+    return {
+      consumed: 2,
+      output: '--',
+      newState: { mode: 'lineComment', dollarTag: null },
+    }
+  }
+
+  if (ch === 47 && i + 1 < n && s.charCodeAt(i + 1) === 42) {
+    return {
+      consumed: 2,
+      output: '/*',
+      newState: { mode: 'blockComment', dollarTag: null },
+    }
+  }
+
+  return null
+}
+
+function processNormalMode(
+  s: string,
+  i: number,
+  n: number,
+  state: ScanState,
+  replace: (oldIndex: number) => string,
+): ProcessResult {
+  const ch = s.charCodeAt(i)
+
+  if (ch === 39) {
+    return {
+      consumed: 1,
+      output: s[i],
+      newState: { mode: 'single', dollarTag: null },
+    }
+  }
+
+  if (ch === 34) {
+    return {
+      consumed: 1,
+      output: s[i],
+      newState: { mode: 'double', dollarTag: null },
+    }
+  }
+
+  const commentResult = handleCommentStart(s, i, n, ch)
+  if (commentResult) return commentResult
+
+  if (ch === 36) {
+    return handleDollarInNormalMode(s, i, n, state, replace)
+  }
+
+  return { consumed: 1, output: s[i], newState: state }
+}
+
+function processQuoteMode(
+  s: string,
+  i: number,
+  n: number,
+  quoteChar: number,
+): ProcessResult {
+  const ch = s.charCodeAt(i)
+
+  if (ch === quoteChar) {
+    if (i + 1 < n && s.charCodeAt(i + 1) === quoteChar) {
+      return { consumed: 2, output: s[i] + s[i + 1], shouldExitMode: false }
+    }
+    return { consumed: 1, output: s[i], shouldExitMode: true }
+  }
+
+  return { consumed: 1, output: s[i], shouldExitMode: false }
+}
+
+function processBlockCommentMode(
+  s: string,
+  i: number,
+  n: number,
+): ProcessResult {
+  const ch = s.charCodeAt(i)
+
+  if (ch === 42 && i + 1 < n && s.charCodeAt(i + 1) === 47) {
+    return { consumed: 2, output: '*/', shouldExitMode: true }
+  }
+
+  return { consumed: 1, output: s[i], shouldExitMode: false }
+}
+
+function processDollarMode(
+  s: string,
+  i: number,
+  dollarTag: string,
+): ProcessResult {
+  if (s.slice(i, i + dollarTag.length) === dollarTag) {
+    return {
+      consumed: dollarTag.length,
+      output: dollarTag,
+      shouldExitMode: true,
+    }
+  }
+
+  return { consumed: 1, output: s[i], shouldExitMode: false }
+}
+
+function processLineCommentMode(ch: number): { shouldExitMode: boolean } {
+  return { shouldExitMode: ch === 10 }
+}
+
+function processCharacter(
+  s: string,
+  i: number,
+  n: number,
+  state: ScanState,
+  replace: (oldIndex: number) => string,
+): ProcessResult {
+  const ch = s.charCodeAt(i)
+
+  switch (state.mode) {
+    case 'normal':
+      return processNormalMode(s, i, n, state, replace)
+    case 'single':
+      return processQuoteMode(s, i, n, 39)
+    case 'double':
+      return processQuoteMode(s, i, n, 34)
+    case 'lineComment': {
+      const result = processLineCommentMode(ch)
+      return {
+        consumed: 1,
+        output: s[i],
+        shouldExitMode: result.shouldExitMode,
+      }
+    }
+    case 'blockComment':
+      return processBlockCommentMode(s, i, n)
+    case 'dollar':
+      return state.dollarTag
+        ? processDollarMode(s, i, state.dollarTag)
+        : { consumed: 1, output: s[i], shouldExitMode: false }
+    default:
+      return { consumed: 1, output: s[i], shouldExitMode: false }
+  }
+}
+
+function updateStateAfterProcessing(
+  currentState: ScanState,
+  result: ProcessResult,
+): ScanState {
+  if (result.newState) {
+    return result.newState
+  }
+
+  if (result.shouldExitMode) {
+    return { mode: 'normal', dollarTag: null }
+  }
+
+  return currentState
+}
+
 function replacePgPlaceholders(
   sql: string,
   replace: (oldIndex: number) => string,
@@ -47,171 +298,14 @@ function replacePgPlaceholders(
   const s = String(sql)
   const n = s.length
   let i = 0
-  let mode: ScanMode = 'normal'
-  let dollarTag: string | null = null
+  let state: ScanState = { mode: 'normal', dollarTag: null }
   let out = ''
 
-  const startsWith = (pos: number, lit: string): boolean =>
-    s.slice(pos, pos + lit.length) === lit
-
-  const readDollarTag = (pos: number): string | null => {
-    if (s.charCodeAt(pos) !== 36) return null
-    let j = pos + 1
-    while (j < n) {
-      const c = s.charCodeAt(j)
-      if (
-        (c >= 48 && c <= 57) ||
-        (c >= 65 && c <= 90) ||
-        (c >= 97 && c <= 122) ||
-        c === 95
-      ) {
-        j++
-        continue
-      }
-      break
-    }
-    if (j < n && s.charCodeAt(j) === 36 && j > pos) {
-      return s.slice(pos, j + 1)
-    }
-    if (pos + 1 < n && s.charCodeAt(pos + 1) === 36) {
-      return '$$'
-    }
-    return null
-  }
-
   while (i < n) {
-    const ch = s.charCodeAt(i)
-
-    if (mode === 'normal') {
-      if (ch === 39) {
-        out += s[i]
-        mode = 'single'
-        i++
-        continue
-      }
-      if (ch === 34) {
-        out += s[i]
-        mode = 'double'
-        i++
-        continue
-      }
-      if (ch === 45 && i + 1 < n && s.charCodeAt(i + 1) === 45) {
-        out += '--'
-        mode = 'lineComment'
-        i += 2
-        continue
-      }
-      if (ch === 47 && i + 1 < n && s.charCodeAt(i + 1) === 42) {
-        out += '/*'
-        mode = 'blockComment'
-        i += 2
-        continue
-      }
-      if (ch === 36) {
-        const tag = readDollarTag(i)
-        if (tag) {
-          out += tag
-          mode = 'dollar'
-          dollarTag = tag
-          i += tag.length
-          continue
-        }
-        let j = i + 1
-        if (j < n) {
-          const c1 = s.charCodeAt(j)
-          if (c1 >= 48 && c1 <= 57) {
-            while (j < n) {
-              const cj = s.charCodeAt(j)
-              if (cj >= 48 && cj <= 57) {
-                j++
-                continue
-              }
-              break
-            }
-            const numStr = s.slice(i + 1, j)
-            const oldIndex = Number(numStr)
-            if (!Number.isInteger(oldIndex) || oldIndex < 1) {
-              throw new Error(`Invalid param placeholder: $${numStr}`)
-            }
-            out += replace(oldIndex)
-            i = j
-            continue
-          }
-        }
-      }
-      out += s[i]
-      i++
-      continue
-    }
-
-    if (mode === 'single') {
-      out += s[i]
-      if (ch === 39) {
-        if (i + 1 < n && s.charCodeAt(i + 1) === 39) {
-          out += s[i + 1]
-          i += 2
-          continue
-        }
-        mode = 'normal'
-        i++
-        continue
-      }
-      i++
-      continue
-    }
-
-    if (mode === 'double') {
-      out += s[i]
-      if (ch === 34) {
-        if (i + 1 < n && s.charCodeAt(i + 1) === 34) {
-          out += s[i + 1]
-          i += 2
-          continue
-        }
-        mode = 'normal'
-        i++
-        continue
-      }
-      i++
-      continue
-    }
-
-    if (mode === 'lineComment') {
-      out += s[i]
-      if (ch === 10) {
-        mode = 'normal'
-      }
-      i++
-      continue
-    }
-
-    if (mode === 'blockComment') {
-      if (ch === 42 && i + 1 < n && s.charCodeAt(i + 1) === 47) {
-        out += '*/'
-        i += 2
-        mode = 'normal'
-        continue
-      }
-      out += s[i]
-      i++
-      continue
-    }
-
-    if (mode === 'dollar') {
-      if (dollarTag && startsWith(i, dollarTag)) {
-        out += dollarTag
-        i += dollarTag.length
-        mode = 'normal'
-        dollarTag = null
-        continue
-      }
-      out += s[i]
-      i++
-      continue
-    }
-
-    out += s[i]
-    i++
+    const result = processCharacter(s, i, n, state, replace)
+    out += result.output
+    i += result.consumed
+    state = updateStateAfterProcessing(state, result)
   }
 
   return out
@@ -285,22 +379,89 @@ function isAllCountQueries(
   queries: Record<string, BatchQuery>,
   keys: string[],
 ) {
-  for (let i = 0; i < keys.length; i++) {
-    if (queries[keys[i]]?.method !== 'count') return false
+  for (const key of keys) {
+    if (queries[key]?.method !== 'count') return false
   }
   return true
 }
 
 function looksTooComplexForFilter(sql: string): boolean {
   const s = sql.toLowerCase()
-  if (s.includes(' group by ')) return true
-  if (s.includes(' having ')) return true
-  if (s.includes(' union ')) return true
-  if (s.includes(' intersect ')) return true
-  if (s.includes(' except ')) return true
-  if (s.includes(' window ')) return true
-  if (s.includes(' distinct ')) return true
-  return false
+  const complexKeywords = [
+    ' group by ',
+    ' having ',
+    ' union ',
+    ' intersect ',
+    ' except ',
+    ' window ',
+    ' distinct ',
+  ]
+  return complexKeywords.some((keyword) => s.includes(keyword))
+}
+
+function skipWhitespace(s: string, i: number): number {
+  while (i < s.length && /\s/.test(s[i])) {
+    i++
+  }
+  return i
+}
+
+function matchKeyword(s: string, i: number, keyword: string): number {
+  const lower = s.slice(i).toLowerCase()
+  if (!lower.startsWith(keyword)) return -1
+  const endPos = i + keyword.length
+  if (endPos < s.length && /[a-z0-9_]/i.test(s[endPos])) return -1
+  return endPos
+}
+
+function parseQuotedIdentifier(
+  s: string,
+  i: number,
+): { value: string; endPos: number } | null {
+  let j = i + 1
+  while (j < s.length) {
+    if (s[j] === '"') {
+      if (j + 1 < s.length && s[j + 1] === '"') {
+        j += 2
+        continue
+      }
+      return { value: s.slice(i, j + 1), endPos: j + 1 }
+    }
+    j++
+  }
+  return null
+}
+
+function parseUnquotedIdentifier(
+  s: string,
+  i: number,
+): { value: string; endPos: number } | null {
+  if (!/[a-z_]/i.test(s[i])) return null
+
+  let j = i
+  while (j < s.length && /[a-z0-9_.]/i.test(s[j])) {
+    j++
+  }
+  return { value: s.slice(i, j), endPos: j }
+}
+
+function parseIdentifier(
+  s: string,
+  i: number,
+): { value: string; endPos: number } | null {
+  if (i >= s.length) return null
+
+  if (s[i] === '"') {
+    return parseQuotedIdentifier(s, i)
+  }
+
+  return parseUnquotedIdentifier(s, i)
+}
+
+function findFromClauseEnd(s: string, fromStart: number): number {
+  const lower = s.slice(fromStart).toLowerCase()
+  const whereIdx = lower.indexOf(' where ')
+  return whereIdx === -1 ? s.length : fromStart + whereIdx
 }
 
 function parseSimpleCountSql(
@@ -313,17 +474,240 @@ function parseSimpleCountSql(
   if (!lower.includes('count(*)')) return null
   if (looksTooComplexForFilter(trimmed)) return null
 
-  const match = trimmed.match(
-    /^select\s+count\(\*\)(?:\s*::\s*[a-zA-Z0-9_\."]+)?\s+as\s+("[^"]+"|[a-zA-Z_][a-zA-Z0-9_\.]*)\s+from\s+([\s\S]+?)(?:\s+where\s+([\s\S]+))?$/i,
-  )
+  let pos = matchKeyword(trimmed, 0, 'select')
+  if (pos === -1) return null
 
-  if (!match) return null
+  pos = skipWhitespace(trimmed, pos)
 
-  const fromSql = match[2].trim()
-  const whereSql = match[3] ? match[3].trim() : null
+  const countMatch = trimmed.slice(pos).match(/^count\(\*\)/i)
+  if (!countMatch) return null
+  pos += countMatch[0].length
+
+  pos = skipWhitespace(trimmed, pos)
+
+  const castMatch = trimmed.slice(pos).match(/^::\s*\w+/)
+  if (castMatch) {
+    pos += castMatch[0].length
+    pos = skipWhitespace(trimmed, pos)
+  }
+
+  const asPos = matchKeyword(trimmed, pos, 'as')
+  if (asPos === -1) return null
+  pos = skipWhitespace(trimmed, asPos)
+
+  const ident = parseIdentifier(trimmed, pos)
+  if (!ident) return null
+  pos = skipWhitespace(trimmed, ident.endPos)
+
+  const fromPos = matchKeyword(trimmed, pos, 'from')
+  if (fromPos === -1) return null
+  pos = skipWhitespace(trimmed, fromPos)
+
+  const fromEnd = findFromClauseEnd(trimmed, pos)
+  const fromSql = trimmed.slice(pos, fromEnd).trim()
   if (!fromSql) return null
 
+  let whereSql: string | null = null
+  if (fromEnd < trimmed.length) {
+    const adjustedPos = skipWhitespace(trimmed, fromEnd)
+    const wherePos = matchKeyword(trimmed, adjustedPos, 'where')
+    if (wherePos !== -1) {
+      whereSql = trimmed.slice(skipWhitespace(trimmed, wherePos)).trim()
+    }
+  }
+
   return { fromSql, whereSql }
+}
+
+interface CountQueryItem {
+  key: string
+  alias: string
+  args: Record<string, unknown>
+}
+
+interface CountSubquery {
+  alias: string
+  sql: string
+  params: unknown[]
+  keys: string[]
+  aliases: string[]
+}
+
+function processCountQuery(
+  item: CountQueryItem,
+  model: Model,
+  models: Model[],
+  dialect: SqlDialect,
+  sharedFrom: string | null,
+  localParams: unknown[],
+): {
+  expression: string
+  reindexedParams: unknown[]
+  sharedFrom: string
+} | null {
+  const built = buildSQLWithCache(model, models, 'count', item.args, dialect)
+  const parsed = parseSimpleCountSql(built.sql)
+
+  if (!parsed) return null
+  if (containsPgPlaceholder(parsed.fromSql)) return null
+
+  const currentFrom = parsed.fromSql
+  if (sharedFrom !== null && sharedFrom !== currentFrom) return null
+
+  if (!parsed.whereSql) {
+    if (built.params.length > 0) return null
+    return {
+      expression: `count(*) AS ${quoteBatchIdent(item.alias)}`,
+      reindexedParams: [],
+      sharedFrom: currentFrom,
+    }
+  }
+
+  const re = reindexParams(parsed.whereSql, built.params, localParams.length)
+  return {
+    expression: `count(*) FILTER (WHERE ${re.sql}) AS ${quoteBatchIdent(item.alias)}`,
+    reindexedParams: re.params,
+    sharedFrom: currentFrom,
+  }
+}
+
+function buildCountSubqueriesForModel(
+  items: CountQueryItem[],
+  model: Model,
+  models: Model[],
+  dialect: SqlDialect,
+  aliasIndex: number,
+): CountSubquery | null {
+  let sharedFrom: string | null = null
+  const expressions: string[] = []
+  const localParams: unknown[] = []
+  const localKeys: string[] = []
+  const localAliases: string[] = []
+
+  for (const item of items) {
+    const result = processCountQuery(
+      item,
+      model,
+      models,
+      dialect,
+      sharedFrom,
+      localParams,
+    )
+
+    if (!result) return null
+
+    sharedFrom = result.sharedFrom
+    expressions.push(result.expression)
+    for (const param of result.reindexedParams) {
+      localParams.push(param)
+    }
+    localKeys.push(item.key)
+    localAliases.push(item.alias)
+  }
+
+  if (!sharedFrom) return null
+
+  const alias = `m_${aliasIndex}`
+  const subSql = `(SELECT ${expressions.join(', ')} FROM ${sharedFrom}) ${alias}`
+
+  return {
+    alias,
+    sql: subSql,
+    params: localParams,
+    keys: localKeys,
+    aliases: localAliases,
+  }
+}
+
+function groupQueriesByModel(
+  queries: Record<string, BatchQuery>,
+  keys: string[],
+  aliasesByKey: Map<string, string>,
+): Map<string, CountQueryItem[]> | null {
+  const modelGroups = new Map<string, CountQueryItem[]>()
+
+  for (const key of keys) {
+    const q = queries[key]
+    const alias = aliasesByKey.get(key)
+    if (!alias) return null
+
+    if (!modelGroups.has(q.model)) {
+      modelGroups.set(q.model, [])
+    }
+
+    const items = modelGroups.get(q.model)
+    if (items) {
+      items.push({
+        key,
+        alias,
+        args: q.args || {},
+      })
+    }
+  }
+
+  return modelGroups
+}
+
+function buildSubqueriesFromGroups(
+  modelGroups: Map<string, CountQueryItem[]>,
+  modelMap: Map<string, Model>,
+  models: Model[],
+  dialect: SqlDialect,
+): CountSubquery[] | null {
+  const subqueries: CountSubquery[] = []
+  let aliasIndex = 0
+
+  for (const [modelName, items] of modelGroups) {
+    const model = modelMap.get(modelName)
+    if (!model) return null
+
+    const subquery = buildCountSubqueriesForModel(
+      items,
+      model,
+      models,
+      dialect,
+      aliasIndex++,
+    )
+
+    if (!subquery) return null
+    subqueries.push(subquery)
+  }
+
+  return subqueries.length > 0 ? subqueries : null
+}
+
+function reindexSubqueries(subqueries: CountSubquery[]): {
+  sql: string[]
+  params: unknown[]
+} {
+  let offset = 0
+  const rewrittenSubs: string[] = []
+  const finalParams: unknown[] = []
+
+  for (const sq of subqueries) {
+    const re = reindexParams(sq.sql, sq.params, offset)
+    offset += re.params.length
+    rewrittenSubs.push(re.sql)
+    for (const p of re.params) {
+      finalParams.push(p)
+    }
+  }
+
+  return { sql: rewrittenSubs, params: finalParams }
+}
+
+function buildSelectParts(subqueries: CountSubquery[]): string[] {
+  const selectParts: string[] = []
+
+  for (const sq of subqueries) {
+    for (const outAlias of sq.aliases) {
+      selectParts.push(
+        `${sq.alias}.${quoteBatchIdent(outAlias)} AS ${quoteBatchIdent(outAlias)}`,
+      )
+    }
+  }
+
+  return selectParts
 }
 
 function buildMergedCountBatchSql(
@@ -334,142 +718,32 @@ function buildMergedCountBatchSql(
   models: Model[],
   dialect: SqlDialect,
 ): (BatchResult & { keys: string[]; aliases: string[] }) | null {
-  const modelGroups = new Map<
-    string,
-    Array<{ key: string; alias: string; args: Record<string, unknown> }>
-  >()
+  const modelGroups = groupQueriesByModel(queries, keys, aliasesByKey)
+  if (!modelGroups) return null
 
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i]
-    const q = queries[key]
-    const alias = aliasesByKey.get(key)
-    if (!alias) return null
-    if (!modelGroups.has(q.model)) modelGroups.set(q.model, [])
-    modelGroups
-      .get(q.model)!
-      .push({ key, alias, args: (q.args || {}) as Record<string, unknown> })
-  }
+  const subqueries = buildSubqueriesFromGroups(
+    modelGroups,
+    modelMap,
+    models,
+    dialect,
+  )
+  if (!subqueries) return null
 
-  const subqueries: Array<{
-    alias: string
-    sql: string
-    params: unknown[]
-    keys: string[]
-    aliases: string[]
-  }> = []
-
-  let aliasIndex = 0
-
-  for (const [modelName, items] of modelGroups) {
-    const model = modelMap.get(modelName)
-    if (!model) return null
-
-    let sharedFrom: string | null = null
-    const expressions: string[] = []
-    const localParams: unknown[] = []
-    const localKeys: string[] = []
-    const localAliases: string[] = []
-
-    for (let i = 0; i < items.length; i++) {
-      const { key, alias, args } = items[i]
-      const built = buildSQLWithCache(model, models, 'count', args, dialect)
-
-      const parsed = parseSimpleCountSql(built.sql)
-      if (!parsed) return null
-
-      if (containsPgPlaceholder(parsed.fromSql)) {
-        return null
-      }
-
-      if (!parsed.whereSql) {
-        if (built.params.length > 0) return null
-        if (sharedFrom === null) sharedFrom = parsed.fromSql
-        if (sharedFrom !== parsed.fromSql) return null
-
-        expressions.push(`count(*) AS ${quoteBatchIdent(alias)}`)
-        localKeys.push(key)
-        localAliases.push(alias)
-        continue
-      }
-
-      if (sharedFrom === null) sharedFrom = parsed.fromSql
-      if (sharedFrom !== parsed.fromSql) return null
-
-      const re = reindexParams(
-        parsed.whereSql,
-        built.params,
-        localParams.length,
-      )
-      for (let p = 0; p < re.params.length; p++) localParams.push(re.params[p])
-
-      expressions.push(
-        `count(*) FILTER (WHERE ${re.sql}) AS ${quoteBatchIdent(alias)}`,
-      )
-      localKeys.push(key)
-      localAliases.push(alias)
-    }
-
-    if (!sharedFrom) return null
-
-    const alias = `m_${aliasIndex++}`
-    const subSql = `(SELECT ${expressions.join(', ')} FROM ${sharedFrom}) ${alias}`
-    subqueries.push({
-      alias,
-      sql: subSql,
-      params: localParams,
-      keys: localKeys,
-      aliases: localAliases,
-    })
-  }
-
-  if (subqueries.length === 0) return null
-
-  let offset = 0
-  const rewrittenSubs: string[] = []
-  const finalParams: unknown[] = []
-
-  for (let i = 0; i < subqueries.length; i++) {
-    const sq = subqueries[i]
-    const re = reindexParams(sq.sql, sq.params, offset)
-    offset += re.params.length
-    rewrittenSubs.push(re.sql)
-    for (let p = 0; p < re.params.length; p++) finalParams.push(re.params[p])
-  }
-
-  const selectParts: string[] = []
-  for (let i = 0; i < subqueries.length; i++) {
-    const sq = subqueries[i]
-    for (let k = 0; k < sq.aliases.length; k++) {
-      const outAlias = sq.aliases[k]
-      selectParts.push(
-        `${sq.alias}.${quoteBatchIdent(outAlias)} AS ${quoteBatchIdent(outAlias)}`,
-      )
-    }
-  }
+  const { sql: rewrittenSubs, params: finalParams } =
+    reindexSubqueries(subqueries)
+  const selectParts = buildSelectParts(subqueries)
 
   const fromSql = rewrittenSubs.join(' CROSS JOIN ')
   const sql = `SELECT ${selectParts.join(', ')} FROM ${fromSql}`
-  const aliases = keys.map((k) => aliasesByKey.get(k)!)
+  const aliases = keys.map((k) => aliasesByKey.get(k) ?? '')
 
   return { sql, params: finalParams, keys, aliases }
 }
 
-export function buildBatchSql(
-  queries: Record<string, BatchQuery>,
-  modelMap: Map<string, Model>,
-  models: Model[],
-  dialect: SqlDialect,
-): BatchResult & { keys: string[]; aliases: string[] } {
-  const keys = Object.keys(queries)
-
-  if (keys.length === 0) {
-    throw new Error('buildBatchSql requires at least one query')
-  }
-
-  if (dialect !== 'postgres') {
-    throw new Error('Batch queries are only supported for postgres dialect')
-  }
-
+function buildAliasesForKeys(keys: string[]): {
+  aliases: string[]
+  aliasesByKey: Map<string, string>
+} {
   const aliases = new Array(keys.length)
   const aliasesByKey = new Map<string, string>()
 
@@ -479,18 +753,17 @@ export function buildBatchSql(
     aliasesByKey.set(keys[i], a)
   }
 
-  if (isAllCountQueries(queries, keys)) {
-    const merged = buildMergedCountBatchSql(
-      queries,
-      keys,
-      aliasesByKey,
-      modelMap,
-      models,
-      dialect,
-    )
-    if (merged) return merged
-  }
+  return { aliases, aliasesByKey }
+}
 
+function buildRegularBatchQueries(
+  queries: Record<string, BatchQuery>,
+  keys: string[],
+  aliases: string[],
+  modelMap: Map<string, Model>,
+  models: Model[],
+  dialect: SqlDialect,
+): { sql: string; params: unknown[] } {
   const ctes: string[] = new Array(keys.length)
   const selects: string[] = new Array(keys.length)
   const allParams: unknown[] = []
@@ -510,7 +783,7 @@ export function buildBatchSql(
       model,
       models,
       query.method,
-      (query.args || {}) as Record<string, unknown>,
+      query.args || {},
       dialect,
     )
 
@@ -520,8 +793,8 @@ export function buildBatchSql(
       allParams.length,
     )
 
-    for (let p = 0; p < reindexedParams.length; p++) {
-      allParams.push(reindexedParams[p])
+    for (const p of reindexedParams) {
+      allParams.push(p)
     }
 
     const cteName = `batch_${i}`
@@ -530,7 +803,49 @@ export function buildBatchSql(
   }
 
   const sql = `WITH ${ctes.join(', ')} SELECT ${selects.join(', ')}`
-  return { sql, params: allParams, keys, aliases }
+  return { sql, params: allParams }
+}
+
+export function buildBatchSql(
+  queries: Record<string, BatchQuery>,
+  modelMap: Map<string, Model>,
+  models: Model[],
+  dialect: SqlDialect,
+): BatchResult & { keys: string[]; aliases: string[] } {
+  const keys = Object.keys(queries)
+
+  if (keys.length === 0) {
+    throw new Error('buildBatchSql requires at least one query')
+  }
+
+  if (dialect !== 'postgres') {
+    throw new Error('Batch queries are only supported for postgres dialect')
+  }
+
+  const { aliases, aliasesByKey } = buildAliasesForKeys(keys)
+
+  if (isAllCountQueries(queries, keys)) {
+    const merged = buildMergedCountBatchSql(
+      queries,
+      keys,
+      aliasesByKey,
+      modelMap,
+      models,
+      dialect,
+    )
+    if (merged) return merged
+  }
+
+  const result = buildRegularBatchQueries(
+    queries,
+    keys,
+    aliases,
+    modelMap,
+    models,
+    dialect,
+  )
+
+  return { ...result, keys, aliases }
 }
 
 export function buildBatchCountSql(
@@ -577,8 +892,8 @@ export function buildBatchCountSql(
       allParams.length,
     )
 
-    for (let p = 0; p < reindexedParams.length; p++) {
-      allParams.push(reindexedParams[p])
+    for (const p of reindexedParams) {
+      allParams.push(p)
     }
 
     const cteName = `count_${i}`
@@ -612,38 +927,47 @@ function parseJsonValue(value: unknown): unknown {
   }
 }
 
-function parseCountValue(value: unknown): number {
-  if (value === null || value === undefined) return 0
+function findCountKey(obj: Record<string, unknown>): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(obj, 'count')) {
+    return 'count'
+  }
+  if (Object.prototype.hasOwnProperty.call(obj, '_count')) {
+    return '_count'
+  }
+  return Object.keys(obj).find((k) => k.endsWith('_count'))
+}
+
+function extractNumericValue(value: unknown): number {
   if (typeof value === 'number') return value
+
   if (typeof value === 'bigint') {
     const n = Number(value)
     return Number.isSafeInteger(n) ? n : 0
   }
+
   if (typeof value === 'string') {
     const n = Number.parseInt(value, 10)
     return Number.isFinite(n) ? n : 0
   }
+
+  return 0
+}
+
+function parseCountValue(value: unknown): number {
+  if (value === null || value === undefined) return 0
+  if (typeof value === 'number') return value
+  if (typeof value === 'bigint' || typeof value === 'string') {
+    return extractNumericValue(value)
+  }
+
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>
-    const countKey = Object.prototype.hasOwnProperty.call(obj, 'count')
-      ? 'count'
-      : Object.prototype.hasOwnProperty.call(obj, '_count')
-        ? '_count'
-        : Object.keys(obj).find((k) => k.endsWith('_count'))
-
+    const countKey = findCountKey(obj)
     if (countKey !== undefined) {
-      const v = obj[countKey]
-      if (typeof v === 'number') return v
-      if (typeof v === 'bigint') {
-        const n = Number(v)
-        return Number.isSafeInteger(n) ? n : 0
-      }
-      if (typeof v === 'string') {
-        const n = Number.parseInt(v, 10)
-        return Number.isFinite(n) ? n : 0
-      }
+      return extractNumericValue(obj[countKey])
     }
   }
+
   return 0
 }
 
@@ -670,6 +994,33 @@ function coerceDateTime(value: unknown): unknown {
   const d = new Date(value)
   if (Number.isFinite(d.getTime())) return d
   return value
+}
+
+function coerceFieldValue(
+  value: unknown,
+  field: {
+    name: string
+    type: string
+    isRelation?: boolean
+    relatedModel?: string
+  },
+  modelMap: Map<string, Model>,
+): { value: unknown; changed: boolean } {
+  if (field.isRelation && field.relatedModel) {
+    const relModel = modelMap.get(field.relatedModel)
+    if (relModel) {
+      const coerced = coerceBatchRowTypes(value, relModel, modelMap)
+      return { value: coerced, changed: coerced !== value }
+    }
+    return { value, changed: false }
+  }
+
+  if (isDateTimeFieldType(field.type)) {
+    const coerced = coerceDateTime(value)
+    return { value: coerced, changed: coerced !== value }
+  }
+
+  return { value, changed: false }
 }
 
 function coerceBatchRowTypes(
@@ -700,26 +1051,9 @@ function coerceBatchRowTypes(
       continue
     }
 
-    if (field.isRelation && field.relatedModel) {
-      const relModel = modelMap.get(field.relatedModel)
-      if (relModel) {
-        const coerced = coerceBatchRowTypes(val, relModel, modelMap)
-        result[key] = coerced
-        if (coerced !== val) changed = true
-        continue
-      }
-      result[key] = val
-      continue
-    }
-
-    if (isDateTimeFieldType(field.type)) {
-      const coerced = coerceDateTime(val)
-      result[key] = coerced
-      if (coerced !== val) changed = true
-      continue
-    }
-
-    result[key] = val
+    const coerced = coerceFieldValue(val, field, modelMap)
+    result[key] = coerced.value
+    if (coerced.changed) changed = true
   }
 
   return changed ? result : obj
@@ -731,8 +1065,7 @@ function coerceBatchValue(
   modelName: string,
   modelMap?: Map<string, Model>,
 ): unknown {
-  if (!modelMap) return value
-  if (method === 'count') return value
+  if (!modelMap || method === 'count') return value
 
   const model = modelMap.get(modelName)
   if (!model) return value
@@ -748,6 +1081,156 @@ function coerceBatchValue(
   return value
 }
 
+function coerceAggSubFields(
+  inner: Record<string, unknown>,
+  model: Model,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  let changed = false
+
+  for (const fieldName in inner) {
+    if (!Object.prototype.hasOwnProperty.call(inner, fieldName)) continue
+    const fieldVal = inner[fieldName]
+    const field = model.fields.find((f) => f.name === fieldName)
+
+    if (field && isDateTimeFieldType(field.type)) {
+      const coerced = coerceDateTime(fieldVal)
+      result[fieldName] = coerced
+      if (coerced !== fieldVal) changed = true
+    } else {
+      result[fieldName] = fieldVal
+    }
+  }
+
+  return changed ? result : inner
+}
+
+function coerceAggregateResult(
+  obj: unknown,
+  modelName: string,
+  modelMap?: Map<string, Model>,
+): unknown {
+  if (!modelMap || obj === null || obj === undefined || typeof obj !== 'object')
+    return obj
+
+  const model = modelMap.get(modelName)
+  if (!model) return obj
+
+  const record = obj as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+  let changed = false
+
+  for (const key in record) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+    const val = record[key]
+
+    if (
+      (key === '_min' || key === '_max') &&
+      val !== null &&
+      val !== undefined &&
+      typeof val === 'object'
+    ) {
+      const coerced = coerceAggSubFields(val as Record<string, unknown>, model)
+      result[key] = coerced
+      if (coerced !== val) changed = true
+    } else {
+      result[key] = val
+    }
+  }
+
+  return changed ? result : obj
+}
+
+function coerceGroupByResults(
+  arr: unknown,
+  modelName: string,
+  modelMap?: Map<string, Model>,
+): unknown {
+  if (!modelMap || !Array.isArray(arr)) return arr
+
+  const model = modelMap.get(modelName)
+  if (!model) return arr
+
+  return arr.map((item) => {
+    if (item === null || item === undefined || typeof item !== 'object')
+      return item
+
+    const record = item as Record<string, unknown>
+    const result: Record<string, unknown> = {}
+    let changed = false
+
+    for (const key in record) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+      const val = record[key]
+
+      if (
+        (key === '_min' || key === '_max') &&
+        val !== null &&
+        val !== undefined &&
+        typeof val === 'object'
+      ) {
+        const coerced = coerceAggSubFields(
+          val as Record<string, unknown>,
+          model,
+        )
+        result[key] = coerced
+        if (coerced !== val) changed = true
+      } else {
+        const field = model.fields.find((f) => f.name === key)
+        if (field && isDateTimeFieldType(field.type)) {
+          const coerced = coerceDateTime(val)
+          result[key] = coerced
+          if (coerced !== val) changed = true
+        } else {
+          result[key] = val
+        }
+      }
+    }
+
+    return changed ? result : item
+  })
+}
+
+function parseBatchValue(
+  rawValue: unknown,
+  method: PrismaMethod,
+  modelName: string,
+  modelMap?: Map<string, Model>,
+): unknown {
+  switch (method) {
+    case 'findMany': {
+      const parsed = parseJsonValue(rawValue)
+      const arr = Array.isArray(parsed) ? parsed : []
+      return coerceBatchValue(arr, 'findMany', modelName, modelMap)
+    }
+    case 'findFirst':
+    case 'findUnique': {
+      const parsed = parseJsonValue(rawValue)
+      const val = parsed ?? null
+      return val === null
+        ? null
+        : coerceBatchValue(val, method, modelName, modelMap)
+    }
+    case 'count': {
+      return parseCountValue(rawValue)
+    }
+    case 'aggregate': {
+      const parsed = parseJsonValue(rawValue)
+      const obj = (parsed ?? {}) as Record<string, unknown>
+      const transformed = transformQueryResults('aggregate', [obj])
+      return coerceAggregateResult(transformed, modelName, modelMap)
+    }
+    case 'groupBy': {
+      const parsed = parseJsonValue(rawValue)
+      const arr = Array.isArray(parsed) ? parsed : []
+      const transformed = transformQueryResults('groupBy', arr)
+      return coerceGroupByResults(transformed, modelName, modelMap)
+    }
+    default:
+      return rawValue
+  }
+}
+
 export function parseBatchResults(
   row: Record<string, unknown>,
   keys: string[],
@@ -759,46 +1242,16 @@ export function parseBatchResults(
 
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i]
-    const columnKey = aliases && aliases[i] ? aliases[i] : key
+    const columnKey = aliases?.[i] ?? key
     const rawValue = row[columnKey]
     const query = queries[key]
 
-    switch (query.method) {
-      case 'findMany': {
-        const parsed = parseJsonValue(rawValue)
-        const arr = Array.isArray(parsed) ? parsed : []
-        results[key] = coerceBatchValue(arr, 'findMany', query.model, modelMap)
-        break
-      }
-      case 'findFirst':
-      case 'findUnique': {
-        const parsed = parseJsonValue(rawValue)
-        const val = parsed ?? null
-        results[key] =
-          val === null
-            ? null
-            : coerceBatchValue(val, query.method, query.model, modelMap)
-        break
-      }
-      case 'count': {
-        results[key] = parseCountValue(rawValue)
-        break
-      }
-      case 'aggregate': {
-        const parsed = parseJsonValue(rawValue)
-        const obj = (parsed ?? {}) as Record<string, unknown>
-        results[key] = transformQueryResults('aggregate', [obj])
-        break
-      }
-      case 'groupBy': {
-        const parsed = parseJsonValue(rawValue)
-        const arr = Array.isArray(parsed) ? parsed : []
-        results[key] = transformQueryResults('groupBy', arr)
-        break
-      }
-      default:
-        results[key] = rawValue
-    }
+    results[key] = parseBatchValue(
+      rawValue,
+      query.method,
+      query.model,
+      modelMap,
+    )
   }
 
   return results

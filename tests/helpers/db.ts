@@ -116,7 +116,6 @@ async function generatePrismaClient(
 
 async function createPostgresDB(version?: number): Promise<TestDB> {
   await generatePrismaClient('postgres', version)
-  console.log('version || PRISMA_VERSION :>> ', version || PRISMA_VERSION)
   if ((version || PRISMA_VERSION) === 6) {
     const { PrismaClient } = await import('../generated/postgres/client')
     const prisma = new PrismaClient({

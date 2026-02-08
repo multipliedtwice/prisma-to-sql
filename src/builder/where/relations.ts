@@ -9,7 +9,6 @@ import { createError } from '../shared/errors'
 import {
   buildTableReference,
   normalizeKeyList,
-  quote,
   quoteColumn,
 } from '../shared/sql-utils'
 import { BuildContext, QueryResult } from '../shared/types'
@@ -98,6 +97,67 @@ function buildToOneNotExistsMatch(
   return `${SQL_TEMPLATES.NOT} EXISTS (${SQL_TEMPLATES.SELECT} 1 ${SQL_TEMPLATES.FROM} ${relTable} ${relAlias}${joins} ${SQL_TEMPLATES.WHERE} ${join} ${SQL_TEMPLATES.AND} ${sub.clause})`
 }
 
+function tryOptimizeNoneFilter(
+  noneValue: unknown,
+  ctx: BuildContext,
+  relModel: Model,
+  relTable: string,
+  relAlias: string,
+  join: string,
+  sub: QueryResult,
+): QueryResult | null {
+  const isEmptyFilter =
+    isPlainObject(noneValue) && Object.keys(noneValue).length === 0
+
+  const canOptimize =
+    !ctx.isSubquery &&
+    isEmptyFilter &&
+    sub.clause === DEFAULT_WHERE_CLAUSE &&
+    sub.joins.length === 0
+
+  if (!canOptimize) return null
+
+  const checkField =
+    relModel.fields.find(
+      (f) => !f.isRelation && f.isRequired && f.name !== 'id',
+    ) || relModel.fields.find((f) => !f.isRelation && f.name === 'id')
+
+  if (!checkField) return null
+
+  const leftJoinSql = `LEFT JOIN ${relTable} ${relAlias} ON ${join}`
+  const whereClause = `${relAlias}.${quoteColumn(relModel, checkField.name)} IS NULL`
+
+  return Object.freeze({
+    clause: whereClause,
+    joins: freezeJoins([leftJoinSql]),
+  })
+}
+
+function processRelationFilter(
+  key:
+    | typeof RelationFilters.SOME
+    | typeof RelationFilters.EVERY
+    | typeof RelationFilters.NONE,
+  wrap: (c: string, j: string) => string,
+  args: RelationFilterArgs,
+): string | null {
+  const { value, fieldName, ctx, relAlias, relModel, whereBuilder } = args
+  const raw = value[key]
+  if (raw === undefined || raw === null) return null
+
+  const sub = whereBuilder.build(raw as Record<string, unknown>, {
+    ...ctx,
+    alias: relAlias,
+    model: relModel,
+    path: [...ctx.path, fieldName, key],
+    isSubquery: true,
+    depth: ctx.depth + 1,
+  })
+
+  const j = sub.joins.length > 0 ? ` ${sub.joins.join(' ')}` : ''
+  return wrap(sub.clause, j)
+}
+
 function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
   const {
     fieldName,
@@ -122,31 +182,17 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
       depth: ctx.depth + 1,
     })
 
-    const isEmptyFilter =
-      isPlainObject(noneValue) &&
-      Object.keys(noneValue as Record<string, unknown>).length === 0
+    const optimized = tryOptimizeNoneFilter(
+      noneValue,
+      ctx,
+      relModel,
+      relTable,
+      relAlias,
+      join,
+      sub,
+    )
 
-    const canOptimize =
-      !ctx.isSubquery &&
-      isEmptyFilter &&
-      sub.clause === DEFAULT_WHERE_CLAUSE &&
-      sub.joins.length === 0
-
-    if (canOptimize) {
-      const checkField =
-        relModel.fields.find(
-          (f) => !f.isRelation && f.isRequired && f.name !== 'id',
-        ) || relModel.fields.find((f) => !f.isRelation && f.name === 'id')
-
-      if (checkField) {
-        const leftJoinSql = `LEFT JOIN ${relTable} ${relAlias} ON ${join}`
-        const whereClause = `${relAlias}.${quoteColumn(relModel, checkField.name)} IS NULL`
-        return Object.freeze({
-          clause: whereClause,
-          joins: freezeJoins([leftJoinSql]),
-        })
-      }
-    }
+    if (optimized) return optimized
   }
 
   const filters: Array<{
@@ -179,20 +225,8 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
   const clauses: string[] = []
 
   for (const { key, wrap } of filters) {
-    const raw = value[key]
-    if (raw === undefined || raw === null) continue
-
-    const sub = whereBuilder.build(raw as Record<string, unknown>, {
-      ...ctx,
-      alias: relAlias,
-      model: relModel,
-      path: [...ctx.path, fieldName, key],
-      isSubquery: true,
-      depth: ctx.depth + 1,
-    })
-
-    const j = sub.joins.length > 0 ? ` ${sub.joins.join(' ')}` : ''
-    clauses.push(wrap(sub.clause, j))
+    const clause = processRelationFilter(key, wrap, args)
+    if (clause) clauses.push(clause)
   }
 
   if (clauses.length === 0) {

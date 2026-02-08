@@ -331,13 +331,9 @@ function buildOperator(
     return buildJsonOperator(expr, op, val, ctx.params, ctx.dialect)
   }
 
-  return buildScalarOperator(
-    expr,
-    op,
-    val,
-    ctx.params,
+  return buildScalarOperator(expr, op, val, ctx.params, {
     mode,
     fieldType,
-    ctx.dialect,
-  )
+    dialect: ctx.dialect,
+  })
 }

@@ -1,130 +1,130 @@
 interface Node<K, V> {
-  key: K;
-  value: V;
-  freq: number;
-  queue: "small" | "main";
-  prev: Node<K, V> | null;
-  next: Node<K, V> | null;
+  key: K
+  value: V
+  freq: number
+  queue: 'small' | 'main'
+  prev: Node<K, V> | null
+  next: Node<K, V> | null
 }
 
 function withDispose<T>(it: IterableIterator<T>): MapIterator<T> {
-  const anyIt = it as any;
+  const anyIt = it as any
   if (anyIt[Symbol.dispose] === undefined) {
-    anyIt[Symbol.dispose] = () => {};
+    anyIt[Symbol.dispose] = () => {}
   }
-  return it as unknown as MapIterator<T>;
+  return it as unknown as MapIterator<T>
 }
 
-export class BoundedCache<K, V> implements Map<K, V> {
-  private map: Map<K, Node<K, V>> = new Map();
-  private ghost: Set<K> = new Set();
+class BoundedCache<K, V> implements Map<K, V> {
+  private map: Map<K, Node<K, V>> = new Map()
+  private ghost: Set<K> = new Set()
 
-  private smallHead: Node<K, V> | null = null;
-  private smallTail: Node<K, V> | null = null;
-  private smallSize = 0;
+  private smallHead: Node<K, V> | null = null
+  private smallTail: Node<K, V> | null = null
+  private smallSize = 0
 
-  private mainHead: Node<K, V> | null = null;
-  private mainTail: Node<K, V> | null = null;
-  private mainSize = 0;
+  private mainHead: Node<K, V> | null = null
+  private mainTail: Node<K, V> | null = null
+  private mainSize = 0
 
-  private readonly maxSize: number;
-  private readonly smallLimit: number;
-  private readonly mainLimit: number;
-  private readonly ghostLimit: number;
+  private readonly maxSize: number
+  private readonly smallLimit: number
+  private readonly mainLimit: number
+  private readonly ghostLimit: number
 
   constructor(maxSize: number) {
-    this.maxSize = maxSize;
-    this.smallLimit = Math.max(1, Math.floor(maxSize * 0.1));
-    this.mainLimit = maxSize - this.smallLimit;
-    this.ghostLimit = this.mainLimit;
+    this.maxSize = maxSize
+    this.smallLimit = Math.max(1, Math.floor(maxSize * 0.1))
+    this.mainLimit = maxSize - this.smallLimit
+    this.ghostLimit = this.mainLimit
   }
 
   get size(): number {
-    return this.map.size;
+    return this.map.size
   }
 
   get(key: K): V | undefined {
-    const node = this.map.get(key);
-    if (!node) return undefined;
+    const node = this.map.get(key)
+    if (!node) return undefined
 
-    node.freq = Math.min(node.freq + 1, 3);
-    return node.value;
+    node.freq = Math.min(node.freq + 1, 3)
+    return node.value
   }
 
   set(key: K, value: V): this {
-    const existing = this.map.get(key);
+    const existing = this.map.get(key)
 
     if (existing) {
-      existing.value = value;
-      return this;
+      existing.value = value
+      return this
     }
 
     if (this.ghost.has(key)) {
-      this.ghost.delete(key);
-      const node = this.createNode(key, value, "main");
-      this.map.set(key, node);
-      this.pushMain(node);
+      this.ghost.delete(key)
+      const node = this.createNode(key, value, 'main')
+      this.map.set(key, node)
+      this.pushMain(node)
 
-      if (this.mainSize > this.mainLimit) this.evictMain();
-      return this;
+      if (this.mainSize > this.mainLimit) this.evictMain()
+      return this
     }
 
-    const node = this.createNode(key, value, "small");
-    this.map.set(key, node);
-    this.pushSmall(node);
+    const node = this.createNode(key, value, 'small')
+    this.map.set(key, node)
+    this.pushSmall(node)
 
     if (this.size > this.maxSize) {
-      if (this.smallSize > this.smallLimit) this.evictSmall();
-      else this.evictMain();
+      if (this.smallSize > this.smallLimit) this.evictSmall()
+      else this.evictMain()
     }
 
-    return this;
+    return this
   }
 
   has(key: K): boolean {
-    return this.map.has(key);
+    return this.map.has(key)
   }
 
   delete(key: K): boolean {
-    const node = this.map.get(key);
-    if (!node) return false;
+    const node = this.map.get(key)
+    if (!node) return false
 
-    this.map.delete(key);
-    this.removeNode(node);
-    return true;
+    this.map.delete(key)
+    this.removeNode(node)
+    return true
   }
 
   clear(): void {
-    this.map.clear();
-    this.ghost.clear();
-    this.smallHead = this.smallTail = null;
-    this.mainHead = this.mainTail = null;
-    this.smallSize = this.mainSize = 0;
+    this.map.clear()
+    this.ghost.clear()
+    this.smallHead = this.smallTail = null
+    this.mainHead = this.mainTail = null
+    this.smallSize = this.mainSize = 0
   }
 
   keys(): MapIterator<K> {
     return withDispose(
       (function* (self: BoundedCache<K, V>) {
-        for (const key of self.map.keys()) yield key;
+        for (const key of self.map.keys()) yield key
       })(this),
-    );
+    )
   }
 
   values(): MapIterator<V> {
     return withDispose(
       (function* (self: BoundedCache<K, V>) {
-        for (const node of self.map.values()) yield node.value;
+        for (const node of self.map.values()) yield node.value
       })(this),
-    );
+    )
   }
 
   entries(): MapIterator<[K, V]> {
     return withDispose(
       (function* (self: BoundedCache<K, V>) {
         for (const [key, node] of self.map.entries())
-          yield [key, node.value] as [K, V];
+          yield [key, node.value] as [K, V]
       })(this),
-    );
+    )
   }
 
   forEach(
@@ -132,161 +132,161 @@ export class BoundedCache<K, V> implements Map<K, V> {
     thisArg?: any,
   ): void {
     for (const [key, node] of this.map.entries()) {
-      callbackfn.call(thisArg, node.value, key, this);
+      callbackfn.call(thisArg, node.value, key, this)
     }
   }
 
   [Symbol.iterator](): MapIterator<[K, V]> {
-    return this.entries();
+    return this.entries()
   }
 
   get [Symbol.toStringTag](): string {
-    return "BoundedCache";
+    return 'BoundedCache'
   }
 
-  private createNode(key: K, value: V, queue: "small" | "main"): Node<K, V> {
-    return { key, value, freq: 0, queue, prev: null, next: null };
+  private createNode(key: K, value: V, queue: 'small' | 'main'): Node<K, V> {
+    return { key, value, freq: 0, queue, prev: null, next: null }
   }
 
   private pushSmall(node: Node<K, V>): void {
-    node.next = this.smallHead;
-    node.prev = null;
+    node.next = this.smallHead
+    node.prev = null
 
-    if (this.smallHead) this.smallHead.prev = node;
-    else this.smallTail = node;
+    if (this.smallHead) this.smallHead.prev = node
+    else this.smallTail = node
 
-    this.smallHead = node;
-    this.smallSize++;
+    this.smallHead = node
+    this.smallSize++
   }
 
   private pushMain(node: Node<K, V>): void {
-    node.next = this.mainHead;
-    node.prev = null;
+    node.next = this.mainHead
+    node.prev = null
 
-    if (this.mainHead) this.mainHead.prev = node;
-    else this.mainTail = node;
+    if (this.mainHead) this.mainHead.prev = node
+    else this.mainTail = node
 
-    this.mainHead = node;
-    this.mainSize++;
+    this.mainHead = node
+    this.mainSize++
   }
 
   private popSmall(): Node<K, V> | null {
-    if (!this.smallTail) return null;
+    if (!this.smallTail) return null
 
-    const node = this.smallTail;
-    this.smallTail = node.prev;
+    const node = this.smallTail
+    this.smallTail = node.prev
 
-    if (this.smallTail) this.smallTail.next = null;
-    else this.smallHead = null;
+    if (this.smallTail) this.smallTail.next = null
+    else this.smallHead = null
 
-    node.prev = null;
-    node.next = null;
-    this.smallSize--;
-    return node;
+    node.prev = null
+    node.next = null
+    this.smallSize--
+    return node
   }
 
   private popMain(): Node<K, V> | null {
-    if (!this.mainTail) return null;
+    if (!this.mainTail) return null
 
-    const node = this.mainTail;
-    this.mainTail = node.prev;
+    const node = this.mainTail
+    this.mainTail = node.prev
 
-    if (this.mainTail) this.mainTail.next = null;
-    else this.mainHead = null;
+    if (this.mainTail) this.mainTail.next = null
+    else this.mainHead = null
 
-    node.prev = null;
-    node.next = null;
-    this.mainSize--;
-    return node;
+    node.prev = null
+    node.next = null
+    this.mainSize--
+    return node
   }
 
   private removeNode(node: Node<K, V>): void {
-    this.unlinkNode(node);
+    this.unlinkNode(node)
 
-    if (node.queue === "small") {
-      if (node === this.smallHead) this.smallHead = node.next;
-      if (node === this.smallTail) this.smallTail = node.prev;
-      this.smallSize--;
+    if (node.queue === 'small') {
+      if (node === this.smallHead) this.smallHead = node.next
+      if (node === this.smallTail) this.smallTail = node.prev
+      this.smallSize--
     } else {
-      if (node === this.mainHead) this.mainHead = node.next;
-      if (node === this.mainTail) this.mainTail = node.prev;
-      this.mainSize--;
+      if (node === this.mainHead) this.mainHead = node.next
+      if (node === this.mainTail) this.mainTail = node.prev
+      this.mainSize--
     }
 
-    node.prev = null;
-    node.next = null;
+    node.prev = null
+    node.next = null
   }
 
   private unlinkNode(node: Node<K, V>): void {
-    if (node.prev) node.prev.next = node.next;
-    if (node.next) node.next.prev = node.prev;
+    if (node.prev) node.prev.next = node.next
+    if (node.next) node.next.prev = node.prev
   }
 
   private shouldPromoteFromSmall(node: Node<K, V>): boolean {
-    return node.freq > 1;
+    return node.freq > 1
   }
 
   private shouldRetryInMain(node: Node<K, V>): boolean {
-    return node.freq >= 1;
+    return node.freq >= 1
   }
 
   private promoteToMain(node: Node<K, V>): void {
-    node.queue = "main";
-    this.pushMain(node);
+    node.queue = 'main'
+    this.pushMain(node)
   }
 
   private addToGhost(key: K): void {
-    this.ghost.add(key);
+    this.ghost.add(key)
 
-    if (this.ghost.size <= this.ghostLimit) return;
+    if (this.ghost.size <= this.ghostLimit) return
 
-    const firstGhost = this.ghost.values().next().value;
-    if (firstGhost !== undefined) this.ghost.delete(firstGhost);
+    const firstGhost = this.ghost.values().next().value
+    if (firstGhost !== undefined) this.ghost.delete(firstGhost)
   }
 
   private evictFromCache(node: Node<K, V>): void {
-    this.map.delete(node.key);
+    this.map.delete(node.key)
   }
 
   private evictSmall(): void {
     while (this.smallSize > 0) {
-      const node = this.popSmall();
-      if (!node) return;
+      const node = this.popSmall()
+      if (!node) return
 
       if (this.shouldPromoteFromSmall(node)) {
-        this.promoteToMain(node);
+        this.promoteToMain(node)
 
         if (this.mainSize > this.mainLimit) {
-          this.evictMain();
-          return;
+          this.evictMain()
+          return
         }
 
-        continue;
+        continue
       }
 
-      this.evictFromCache(node);
-      this.addToGhost(node.key);
-      return;
+      this.evictFromCache(node)
+      this.addToGhost(node.key)
+      return
     }
   }
 
   private evictMain(): void {
     while (this.mainSize > 0) {
-      const node = this.popMain();
-      if (!node) return;
+      const node = this.popMain()
+      if (!node) return
 
       if (this.shouldRetryInMain(node)) {
-        node.freq--;
-        this.pushMain(node);
-        continue;
+        node.freq--
+        this.pushMain(node)
+        continue
       }
 
-      this.evictFromCache(node);
-      return;
+      this.evictFromCache(node)
+      return
     }
   }
 }
 
 export function createBoundedCache<K, V>(maxSize: number): Map<K, V> {
-  return new BoundedCache<K, V>(maxSize);
+  return new BoundedCache<K, V>(maxSize)
 }

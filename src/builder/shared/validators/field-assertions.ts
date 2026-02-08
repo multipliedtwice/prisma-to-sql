@@ -4,7 +4,7 @@ import { getFieldInfo } from '../model-field-cache'
 
 const NUMERIC_TYPES = new Set(['Int', 'Float', 'Decimal', 'BigInt'])
 
-export interface FieldInfo {
+interface FieldInfo {
   name: string
   type: string
   dbName: string
@@ -56,25 +56,4 @@ export function assertNumericField(
   }
 
   return field
-}
-
-export function assertFieldType(
-  field: FieldInfo,
-  allowedTypes: Set<string>,
-  context: string,
-  modelName: string,
-): void {
-  const baseType = field.type.replace(/\[\]|\?/g, '')
-
-  if (!allowedTypes.has(baseType)) {
-    throw createError(`${context} does not support type '${field.type}'`, {
-      field: field.name,
-      modelName,
-    })
-  }
-}
-
-export function isNumericType(fieldType: string): boolean {
-  const baseType = fieldType.replace(/\[\]|\?/g, '')
-  return NUMERIC_TYPES.has(baseType)
 }

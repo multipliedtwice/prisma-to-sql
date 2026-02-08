@@ -17,12 +17,20 @@ import { jsonBuildObject } from '../../sql-builder-dialect'
 import { buildRelationCountSql } from './includes'
 import { joinNonEmpty } from '../shared/string-builder'
 import { getRelationFieldSet } from '../shared/model-field-cache'
+import { parseOrderByValue } from '../pagination'
+import { normalizeOrderByInput } from '../shared/order-by-utils'
 
 const ALIAS_CAPTURE = '([A-Za-z_][A-Za-z0-9_]*)'
 const COLUMN_PART = '(?:"([^"]+)"|([a-z_][a-z0-9_]*))'
 const AS_PART = `(?:\\s+AS\\s+${COLUMN_PART})?`
 const SIMPLE_COLUMN_PATTERN = `^${ALIAS_CAPTURE}\\.${COLUMN_PART}${AS_PART}$`
 const SIMPLE_COLUMN_RE = new RegExp(SIMPLE_COLUMN_PATTERN, 'i')
+
+type DistinctOrderEntry = {
+  field: string
+  direction: 'asc' | 'desc'
+  nulls?: 'first' | 'last'
+}
 
 function buildWhereSql(conditions: readonly string[]): string {
   if (!isNonEmptyArray(conditions)) return ''
@@ -73,140 +81,171 @@ function finalizeSql(
   }
 }
 
+function isIdent(s: string): boolean {
+  return /^[A-Za-z_]\w*$/.test(s)
+}
+
+function skipSpaces(s: string, i: number): number {
+  while (i < s.length) {
+    const c = s.charCodeAt(i)
+    if (c !== 32 && c !== 9) break
+    i++
+  }
+  return i
+}
+
+interface ReadResult {
+  text: string
+  next: number
+  quoted: boolean
+}
+
+function parseQuotedIdentifier(s: string, start: number): ReadResult {
+  const n = s.length
+  let i = start + 1
+  let out = ''
+  let saw = false
+
+  while (i < n) {
+    const c = s.charCodeAt(i)
+    if (c !== 34) {
+      out += s[i]
+      saw = true
+      i++
+      continue
+    }
+
+    const next = i + 1
+    if (next < n && s.charCodeAt(next) === 34) {
+      out += '"'
+      saw = true
+      i += 2
+      continue
+    }
+
+    if (!saw) {
+      throw new Error(
+        `sqlite distinct emulation: empty quoted identifier in: ${s}`,
+      )
+    }
+    return { text: out, next: i + 1, quoted: true }
+  }
+
+  throw new Error(
+    `sqlite distinct emulation: unterminated quoted identifier in: ${s}`,
+  )
+}
+
+function parseUnquotedIdentifier(s: string, start: number): ReadResult {
+  const n = s.length
+  let i = start
+
+  while (i < n) {
+    const c = s.charCodeAt(i)
+    if (c === 32 || c === 9 || c === 46) break
+    i++
+  }
+
+  return { text: s.slice(start, i), next: i, quoted: false }
+}
+
+function readIdentOrQuoted(s: string, start: number): ReadResult {
+  const n = s.length
+  if (start >= n) return { text: '', next: start, quoted: false }
+
+  if (s.charCodeAt(start) === 34) {
+    return parseQuotedIdentifier(s, start)
+  }
+
+  return parseUnquotedIdentifier(s, start)
+}
+
+function parseOutputAlias(p: string, i: number): string {
+  if (i >= p.length) return ''
+
+  const rest = p.slice(i).trim()
+  if (rest.length === 0) return ''
+
+  const m = rest.match(/^AS\s+/i)
+  if (!m) {
+    throw new Error(
+      `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
+    )
+  }
+
+  let j = i
+  j = skipSpaces(p, j)
+  if (!/^AS\b/i.test(p.slice(j))) {
+    throw new Error(`Failed to parse AS in: ${p}`)
+  }
+  j += 2
+  j = skipSpaces(p, j)
+  const out = readIdentOrQuoted(p, j)
+  const outAlias = out.text.trim()
+  if (outAlias.length === 0) {
+    throw new Error(`Failed to parse output alias from: ${p}`)
+  }
+  j = skipSpaces(p, out.next)
+  if (j !== p.length) {
+    throw new Error(
+      `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
+    )
+  }
+
+  return outAlias
+}
+
+function parseSelectField(p: string, fromAlias: string): string {
+  const fromLower = fromAlias.toLowerCase()
+
+  let i = 0
+  i = skipSpaces(p, i)
+
+  const a = readIdentOrQuoted(p, i)
+  const actualAlias = a.text.toLowerCase()
+  if (!isIdent(a.text)) {
+    throw new Error(
+      `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
+    )
+  }
+  if (actualAlias !== fromLower) {
+    throw new Error(`Expected alias '${fromAlias}', got '${a.text}' in: ${p}`)
+  }
+  i = a.next
+
+  if (i >= p.length || p.charCodeAt(i) !== 46) {
+    throw new Error(
+      `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
+    )
+  }
+  i++
+  i = skipSpaces(p, i)
+
+  const colPart = readIdentOrQuoted(p, i)
+  const columnName = colPart.text.trim()
+  if (columnName.length === 0) {
+    throw new Error(`Failed to parse selected column name from: ${p}`)
+  }
+  i = colPart.next
+
+  i = skipSpaces(p, i)
+
+  const outAlias = parseOutputAlias(p, i)
+
+  return outAlias.length > 0 ? outAlias : columnName
+}
+
 function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
   const raw = select.trim()
   if (raw.length === 0) return []
 
-  const fromLower = fromAlias.toLowerCase()
   const parts = raw.split(SQL_SEPARATORS.FIELD_LIST)
   const names: string[] = []
 
-  const isIdent = (s: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*$/.test(s)
-
-  const readIdentOrQuoted = (
-    s: string,
-    start: number,
-  ): { text: string; next: number; quoted: boolean } => {
-    const n = s.length
-    if (start >= n) return { text: '', next: start, quoted: false }
-
-    if (s.charCodeAt(start) === 34) {
-      let i = start + 1
-      let out = ''
-      let saw = false
-      while (i < n) {
-        const c = s.charCodeAt(i)
-        if (c === 34) {
-          const next = i + 1
-          if (next < n && s.charCodeAt(next) === 34) {
-            out += '"'
-            saw = true
-            i += 2
-            continue
-          }
-          if (!saw)
-            throw new Error(
-              `sqlite distinct emulation: empty quoted identifier in: ${s}`,
-            )
-          return { text: out, next: i + 1, quoted: true }
-        }
-        out += s[i]
-        saw = true
-        i++
-      }
-      throw new Error(
-        `sqlite distinct emulation: unterminated quoted identifier in: ${s}`,
-      )
-    }
-
-    let i = start
-    while (i < n) {
-      const c = s.charCodeAt(i)
-      if (c === 32 || c === 9) break
-      if (c === 46) break
-      i++
-    }
-    return { text: s.slice(start, i), next: i, quoted: false }
-  }
-
-  const skipSpaces = (s: string, i: number): number => {
-    while (i < s.length) {
-      const c = s.charCodeAt(i)
-      if (c !== 32 && c !== 9) break
-      i++
-    }
-    return i
-  }
-
-  for (let idx = 0; idx < parts.length; idx++) {
-    const p = parts[idx].trim()
-    if (p.length === 0) continue
-
-    let i = 0
-    i = skipSpaces(p, i)
-
-    const a = readIdentOrQuoted(p, i)
-    const actualAlias = a.text.toLowerCase()
-    if (!isIdent(a.text)) {
-      throw new Error(
-        `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
-      )
-    }
-    if (actualAlias !== fromLower) {
-      throw new Error(`Expected alias '${fromAlias}', got '${a.text}' in: ${p}`)
-    }
-    i = a.next
-
-    if (i >= p.length || p.charCodeAt(i) !== 46) {
-      throw new Error(
-        `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
-      )
-    }
-    i++
-    i = skipSpaces(p, i)
-
-    const colPart = readIdentOrQuoted(p, i)
-    const columnName = colPart.text.trim()
-    if (columnName.length === 0) {
-      throw new Error(`Failed to parse selected column name from: ${p}`)
-    }
-    i = colPart.next
-
-    i = skipSpaces(p, i)
-
-    let outAlias = ''
-    if (i < p.length) {
-      const rest = p.slice(i).trim()
-      if (rest.length > 0) {
-        const m = rest.match(/^AS\s+/i)
-        if (!m) {
-          throw new Error(
-            `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
-          )
-        }
-        let j = i
-        j = skipSpaces(p, j)
-        if (!/^AS\b/i.test(p.slice(j))) {
-          throw new Error(`Failed to parse AS in: ${p}`)
-        }
-        j += 2
-        j = skipSpaces(p, j)
-        const out = readIdentOrQuoted(p, j)
-        outAlias = out.text.trim()
-        if (outAlias.length === 0) {
-          throw new Error(`Failed to parse output alias from: ${p}`)
-        }
-        j = skipSpaces(p, out.next)
-        if (j !== p.length) {
-          throw new Error(
-            `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
-          )
-        }
-      }
-    }
-
-    const name = outAlias.length > 0 ? outAlias : columnName
-    names.push(name)
+  for (const p of parts) {
+    const trimmed = p.trim()
+    if (trimmed.length === 0) continue
+    names.push(parseSelectField(trimmed, fromAlias))
   }
 
   return names
@@ -278,6 +317,68 @@ function buildWindowOrder(args: {
   return baseOrder + idTiebreaker
 }
 
+function extractDistinctOrderEntries(
+  spec: SelectQuerySpec,
+): DistinctOrderEntry[] {
+  if (isNotNullish(spec.args.orderBy)) {
+    const normalized = normalizeOrderByInput(
+      spec.args.orderBy,
+      parseOrderByValue,
+    )
+    const entries: DistinctOrderEntry[] = []
+    for (const item of normalized) {
+      for (const field in item) {
+        if (!Object.prototype.hasOwnProperty.call(item, field)) continue
+        const value = item[field]
+        if (typeof value === 'string') {
+          entries.push({ field, direction: value as 'asc' | 'desc' })
+        } else {
+          const obj = value as {
+            sort: 'asc' | 'desc'
+            nulls?: 'first' | 'last'
+          }
+          entries.push({ field, direction: obj.sort, nulls: obj.nulls })
+        }
+      }
+    }
+    if (entries.length > 0) return entries
+  }
+
+  if (isNotNullish(spec.distinct) && isNonEmptyArray(spec.distinct)) {
+    return [...spec.distinct].map((f) => ({
+      field: f,
+      direction: 'asc' as const,
+    }))
+  }
+
+  return []
+}
+
+function buildFieldNameOrderBy(
+  entries: DistinctOrderEntry[],
+  alias: string,
+): string {
+  if (entries.length === 0) return ''
+
+  const out: string[] = []
+  for (const e of entries) {
+    const dir = e.direction.toUpperCase()
+    const c = `${alias}.${quote(e.field)}`
+
+    if (isNotNullish(e.nulls)) {
+      const isNullExpr = `(${c} IS NULL)`
+      const nullRankDir = e.nulls === 'first' ? 'DESC' : 'ASC'
+      out.push(isNullExpr + ' ' + nullRankDir)
+      out.push(c + ' ' + dir)
+      continue
+    }
+
+    out.push(c + ' ' + dir)
+  }
+
+  return out.join(SQL_SEPARATORS.ORDER_BY)
+}
+
 function buildSqliteDistinctQuery(
   spec: SelectQuerySpec,
   selectWithIncludes: string,
@@ -316,9 +417,8 @@ function buildSqliteDistinctQuery(
     model,
   })
 
-  const outerOrder = isNonEmptyString(orderBy)
-    ? replaceOrderByAlias(orderBy, from.alias, '"__tp_distinct"')
-    : replaceOrderByAlias(fallbackOrder, from.alias, '"__tp_distinct"')
+  const outerEntries = extractDistinctOrderEntries(spec)
+  const outerOrder = buildFieldNameOrderBy(outerEntries, '"__tp_distinct"')
 
   const joins = buildJoinsSql(whereJoins, countJoins)
 

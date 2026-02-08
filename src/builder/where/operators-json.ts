@@ -15,10 +15,16 @@ const MAX_PATH_SEGMENT_LENGTH = 255
 const MAX_PATH_SEGMENTS = 100
 
 function sanitizeForError(s: string): string {
-  return s.replace(
-    /[\x00-\x1F\x7F]/g,
-    (ch) => `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}`,
-  )
+  let result = ''
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i)
+    if ((code >= 0 && code <= 31) || code === 127) {
+      result += `\\x${code.toString(16).padStart(2, '0')}`
+    } else {
+      result += s[i]
+    }
+  }
+  return result
 }
 
 function validateJsonPathSegments(segments: string[]): void {

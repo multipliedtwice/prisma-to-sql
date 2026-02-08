@@ -14,6 +14,15 @@ import { isNotNullish, isPlainObject } from '../shared/validators/type-guards'
 
 const MAX_NOT_DEPTH = 50
 
+interface ScalarOperatorOptions {
+  mode?: ModeType
+  fieldType?: string
+  dialect?: SqlDialect
+  depth?: number
+}
+
+type ModeType = 'insensitive' | 'default' | undefined
+
 export function buildNotComposite(
   expr: string,
   val: Record<string, unknown>,
@@ -44,16 +53,79 @@ export function buildNotComposite(
   return `${SQL_TEMPLATES.NOT} (${clauses.join(separator)})`
 }
 
+function validateOperatorRequirements(
+  op: string,
+  mode: ModeType,
+  dialect: SqlDialect | undefined,
+): void {
+  const STRING_LIKE_OPS = new Set([
+    Ops.CONTAINS,
+    Ops.STARTS_WITH,
+    Ops.ENDS_WITH,
+  ])
+
+  if (STRING_LIKE_OPS.has(op as any) && !isNotNullish(dialect)) {
+    throw createError(`Like operators require a SQL dialect`, { operator: op })
+  }
+
+  if ((op === Ops.IN || op === Ops.NOT_IN) && !isNotNullish(dialect)) {
+    throw createError(`IN operators require a SQL dialect`, { operator: op })
+  }
+
+  if (
+    op === Ops.EQUALS &&
+    mode === Modes.INSENSITIVE &&
+    !isNotNullish(dialect)
+  ) {
+    throw createError(`Insensitive equals requires a SQL dialect`, {
+      operator: op,
+    })
+  }
+}
+
+function routeOperatorHandler(
+  expr: string,
+  op: string,
+  val: unknown,
+  params: ParamStore,
+  mode: ModeType,
+  dialect: SqlDialect | undefined,
+): string | null {
+  const STRING_LIKE_OPS = new Set([
+    Ops.CONTAINS,
+    Ops.STARTS_WITH,
+    Ops.ENDS_WITH,
+  ])
+
+  if (STRING_LIKE_OPS.has(op as any)) {
+    return handleLikeOperator(expr, op, val, params, mode, dialect!)
+  }
+
+  if (op === Ops.IN || op === Ops.NOT_IN) {
+    return handleInOperator(expr, op, val, params, dialect!)
+  }
+
+  if (
+    op === Ops.EQUALS &&
+    mode === Modes.INSENSITIVE &&
+    isNotNullish(dialect)
+  ) {
+    const placeholder = params.addAuto(val)
+    return caseInsensitiveEquals(expr, placeholder, dialect)
+  }
+
+  return null
+}
+
 export function buildScalarOperator(
   expr: string,
   op: string,
   val: unknown,
   params: ParamStore,
-  mode?: 'insensitive' | 'default',
-  fieldType?: string,
-  dialect?: SqlDialect,
-  depth: number = 0,
+  options: ScalarOperatorOptions = {},
 ): string {
+  const { mode, fieldType, dialect, depth = 0 } = options
+
   if (val === undefined) return ''
 
   if (depth > MAX_NOT_DEPTH) {
@@ -75,45 +147,18 @@ export function buildScalarOperator(
     return `${expr} <> ${placeholder}`
   }
 
-  if (
-    op === Ops.EQUALS &&
-    mode === Modes.INSENSITIVE &&
-    isNotNullish(dialect)
-  ) {
-    const placeholder = params.addAuto(val)
-    return caseInsensitiveEquals(expr, placeholder, dialect)
-  }
+  validateOperatorRequirements(op, mode, dialect)
 
-  const STRING_LIKE_OPS = new Set([
-    Ops.CONTAINS,
-    Ops.STARTS_WITH,
-    Ops.ENDS_WITH,
-  ])
-
-  if (STRING_LIKE_OPS.has(op as any)) {
-    if (!isNotNullish(dialect)) {
-      throw createError(`Like operators require a SQL dialect`, {
-        operator: op,
-      })
-    }
-    return handleLikeOperator(expr, op, val, params, mode, dialect)
-  }
-
-  if (op === Ops.IN || op === Ops.NOT_IN) {
-    if (!isNotNullish(dialect)) {
-      throw createError(`IN operators require a SQL dialect`, { operator: op })
-    }
-    return handleInOperator(expr, op, val, params, dialect)
-  }
-
-  if (
-    op === Ops.EQUALS &&
-    mode === Modes.INSENSITIVE &&
-    !isNotNullish(dialect)
-  ) {
-    throw createError(`Insensitive equals requires a SQL dialect`, {
-      operator: op,
-    })
+  const specialHandler = routeOperatorHandler(
+    expr,
+    op,
+    val,
+    params,
+    mode,
+    dialect,
+  )
+  if (specialHandler !== null) {
+    return specialHandler
   }
 
   return handleComparisonOperator(expr, op, val, params)
@@ -125,7 +170,7 @@ function handleNullValue(expr: string, op: string): string {
   throw createError(`Operator '${op}' doesn't support null`, { operator: op })
 }
 
-function normalizeMode(v: unknown): 'insensitive' | 'default' | undefined {
+function normalizeMode(v: unknown): ModeType {
   if (v === Modes.INSENSITIVE) return Modes.INSENSITIVE
   if (v === Modes.DEFAULT) return Modes.DEFAULT
   return undefined
@@ -135,7 +180,7 @@ function handleNotOperator(
   expr: string,
   val: Record<string, unknown>,
   params: ParamStore,
-  outerMode?: 'insensitive' | 'default',
+  outerMode?: ModeType,
   fieldType?: string,
   dialect?: SqlDialect,
   depth: number = 0,
@@ -151,41 +196,35 @@ function handleNotOperator(
   if (!isNotNullish(dialect)) {
     const clauses: string[] = []
     for (const [subOp, subVal] of entries) {
-      const sub = buildScalarOperator(
-        expr,
-        subOp,
-        subVal,
-        params,
-        effectiveMode,
+      const sub = buildScalarOperator(expr, subOp, subVal, params, {
+        mode: effectiveMode,
         fieldType,
-        undefined,
-        depth + 1,
-      )
+        dialect: undefined,
+        depth: depth + 1,
+      })
       if (sub && sub.trim().length > 0) clauses.push(`(${sub})`)
     }
 
     if (clauses.length === 0) return ''
     if (clauses.length === 1) return `${SQL_TEMPLATES.NOT} ${clauses[0]}`
-    return `${SQL_TEMPLATES.NOT} (${clauses.join(` ${SQL_TEMPLATES.AND} `)})`
+    const separator = ` ${SQL_TEMPLATES.AND} `
+    return `${SQL_TEMPLATES.NOT} (${clauses.join(separator)})`
   }
 
+  const separator = ` ${SQL_TEMPLATES.AND} `
   return buildNotComposite(
     expr,
     val,
     params,
     dialect,
     (e, subOp, subVal, p, d) =>
-      buildScalarOperator(
-        e,
-        subOp,
-        subVal,
-        p,
-        effectiveMode,
+      buildScalarOperator(e, subOp, subVal, p, {
+        mode: effectiveMode,
         fieldType,
-        d,
-        depth + 1,
-      ),
-    ` ${SQL_TEMPLATES.AND} `,
+        dialect: d,
+        depth: depth + 1,
+      }),
+    separator,
   )
 }
 
@@ -207,7 +246,7 @@ function handleLikeOperator(
   op: string,
   val: unknown,
   params: ParamStore,
-  mode: 'insensitive' | 'default' | undefined,
+  mode: ModeType,
   dialect: SqlDialect,
 ): string {
   if (val === undefined) return ''

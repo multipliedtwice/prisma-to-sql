@@ -223,7 +223,7 @@ function readOrderByInput(relArgs: unknown): {
   if (!('orderBy' in relArgs)) return { hasOrderBy: false, orderBy: undefined }
   return {
     hasOrderBy: true,
-    orderBy: (relArgs as Record<string, unknown>).orderBy,
+    orderBy: relArgs.orderBy,
   }
 }
 
@@ -297,20 +297,12 @@ function buildSelectWithNestedIncludes(
   let relSelect = buildRelationSelect(relArgs, relModel, relAlias)
 
   const nestedIncludes = isPlainObject(relArgs)
-    ? buildIncludeSqlInternal(
-        relArgs as PrismaQueryArgs,
-        relModel,
-        ctx.schemas,
-        ctx.schemaByName,
-        relAlias,
-        ctx.aliasGen,
-        ctx.params,
-        ctx.dialect,
-        ctx.includePath,
-        ctx.visitPath || [],
-        (ctx.depth || 0) + 1,
-        ctx.stats,
-      )
+    ? buildIncludeSqlInternal(relArgs as PrismaQueryArgs, {
+        ...ctx,
+        model: relModel,
+        parentAlias: relAlias,
+        depth: (ctx.depth || 0) + 1,
+      })
     : []
 
   if (isNonEmptyArray(nestedIncludes)) {
@@ -605,19 +597,15 @@ function buildSingleInclude(
 
 function buildIncludeSqlInternal(
   args: IncludeSelectArgs,
-  model: Model,
-  schemas: Model[],
-  schemaByName: Map<string, Model>,
-  parentAlias: string,
-  aliasGen: AliasGenerator,
-  params: ParamStore,
-  dialect: SqlDialect,
-  includePath: string[],
-  visitPath: string[] = [],
-  depth: number = 0,
-  stats?: IncludeComplexityStats,
+  ctx: IncludeBuildContext,
 ): IncludeSpec[] {
-  if (!stats) stats = { totalIncludes: 0, totalSubqueries: 0, maxDepth: 0 }
+  const stats = ctx.stats || {
+    totalIncludes: 0,
+    totalSubqueries: 0,
+    maxDepth: 0,
+  }
+  const depth = ctx.depth || 0
+  const visitPath = ctx.visitPath || []
 
   if (depth > MAX_INCLUDE_DEPTH) {
     throw new Error(
@@ -630,7 +618,7 @@ function buildIncludeSqlInternal(
   stats.maxDepth = Math.max(stats.maxDepth, depth)
 
   const includes: IncludeSpec[] = []
-  const entries = relationEntriesFromArgs(args, model)
+  const entries = relationEntriesFromArgs(args, ctx.model)
 
   for (const [relName, relArgs] of entries) {
     if (relArgs === false) continue
@@ -657,9 +645,13 @@ function buildIncludeSqlInternal(
       )
     }
 
-    const resolved = resolveRelationOrThrow(model, schemaByName, relName)
+    const resolved = resolveRelationOrThrow(
+      ctx.model,
+      ctx.schemaByName,
+      relName,
+    )
 
-    const relationPath = `${model.name}.${relName}`
+    const relationPath = `${ctx.model.name}.${relName}`
     const currentPath = [...visitPath, relationPath]
 
     if (visitPath.includes(relationPath)) {
@@ -678,17 +670,11 @@ function buildIncludeSqlInternal(
       )
     }
 
-    const nextIncludePath = [...includePath, relName]
+    const nextIncludePath = [...ctx.includePath, relName]
 
     includes.push(
       buildSingleInclude(relName, relArgs, resolved.field, resolved.relModel, {
-        model,
-        schemas,
-        schemaByName,
-        parentAlias,
-        aliasGen,
-        dialect,
-        params,
+        ...ctx,
         includePath: nextIncludePath,
         visitPath: currentPath,
         depth: depth + 1,
@@ -718,8 +704,7 @@ export function buildIncludeSql(
   const schemaByName = new Map<string, Model>()
   for (const m of schemas) schemaByName.set(m.name, m)
 
-  return buildIncludeSqlInternal(
-    args,
+  return buildIncludeSqlInternal(args, {
     model,
     schemas,
     schemaByName,
@@ -727,11 +712,11 @@ export function buildIncludeSql(
     aliasGen,
     params,
     dialect,
-    [],
-    [],
-    0,
+    includePath: [],
+    visitPath: [],
+    depth: 0,
     stats,
-  )
+  })
 }
 
 interface RelationCountBuild {

@@ -1,9 +1,10 @@
 // tests/sql-injection/string-operators.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Prisma, PrismaClient } from '../generated/client'
-import { createToSQL, convertDMMFToModels } from '../../src'
+import { createToSQL } from '../../src'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
 import { DMMF } from '@prisma/generator-helper'
+import { convertDMMFToModels } from '@dee-wan/schema-parser'
 
 describe('SQL Injection - String Operators', () => {
   let prisma: PrismaClient

@@ -368,7 +368,7 @@ function buildHavingForAggregateFirstShape(
   }
 
   const out: string[] = []
-  const targetObj = target as Record<string, unknown>
+  const targetObj = target
 
   for (const field in targetObj) {
     if (!Object.prototype.hasOwnProperty.call(targetObj, field)) continue
@@ -378,7 +378,7 @@ function buildHavingForAggregateFirstShape(
     const filter = targetObj[field]
     if (!isPlainObject(filter)) continue
 
-    const filterObj = filter as Record<string, unknown>
+    const filterObj = filter
     if (!hasAnyOwnKey(filterObj)) continue
 
     const expr = aggExprForField(aggKey, field, alias, model)
@@ -403,13 +403,13 @@ function buildHavingForFieldFirstShape(
   assertScalarField(model, fieldName, 'HAVING')
 
   const out: string[] = []
-  const obj = target as Record<string, unknown>
+  const obj = target
 
   for (const aggKey of HAVING_FIELD_FIRST_AGG_KEYS) {
     const aggFilter = obj[aggKey]
     if (!isPlainObject(aggFilter)) continue
 
-    const aggFilterObj = aggFilter as Record<string, unknown>
+    const aggFilterObj = aggFilter
     if (!hasAnyOwnKey(aggFilterObj)) continue
 
     if (aggKey === '_sum' || aggKey === '_avg') {
@@ -549,8 +549,8 @@ function getAggregateSelectionObject(
   args: PrismaQueryArgs,
   agg: AggregateKey,
 ): Record<string, unknown> | undefined {
-  const obj = (args as Record<string, unknown>)[agg]
-  return isPlainObject(obj) ? (obj as Record<string, unknown>) : undefined
+  const obj = args[agg]
+  return isPlainObject(obj) ? obj : undefined
 }
 
 function assertAggregatableScalarField(
@@ -771,6 +771,37 @@ export function buildGroupBySql(
   }
 }
 
+function isPositiveInteger(value: number): boolean {
+  return Number.isFinite(value) && Number.isInteger(value) && value > 0
+}
+
+function parseSkipValue(skip: number | string): number {
+  return typeof skip === 'string' ? Number(skip.trim()) : skip
+}
+
+function validateSkipParameter(skip: number | string | undefined): void {
+  if (skip === undefined || skip === null) {
+    return
+  }
+
+  if (isDynamicParameter(skip)) {
+    throw new Error(
+      'count() with skip is not supported because it produces nondeterministic results. ' +
+        'Dynamic skip cannot be validated at build time. ' +
+        'Use findMany().length or add explicit orderBy + cursor/skip logic in a deterministic query.',
+    )
+  }
+
+  const skipValue = parseSkipValue(skip)
+
+  if (isPositiveInteger(skipValue)) {
+    throw new Error(
+      'count() with skip is not supported because it produces nondeterministic results. ' +
+        'Use findMany().length or add explicit orderBy to ensure deterministic behavior.',
+    )
+  }
+}
+
 export function buildCountSql(
   whereResult: WhereClauseResult,
   tableName: string,
@@ -781,40 +812,7 @@ export function buildCountSql(
   assertSafeAlias(alias)
   assertSafeTableRef(tableName)
 
-  if (skip !== undefined && skip !== null) {
-    if (isDynamicParameter(skip)) {
-      throw new Error(
-        'count() with skip is not supported because it produces nondeterministic results. ' +
-          'Dynamic skip cannot be validated at build time. ' +
-          'Use findMany().length or add explicit orderBy + cursor/skip logic in a deterministic query.',
-      )
-    }
-
-    if (typeof skip === 'string') {
-      const s = skip.trim()
-      if (s.length > 0) {
-        const n = Number(s)
-        if (Number.isFinite(n) && Number.isInteger(n) && n > 0) {
-          throw new Error(
-            'count() with skip is not supported because it produces nondeterministic results. ' +
-              'Use findMany().length or add explicit orderBy to ensure deterministic behavior.',
-          )
-        }
-      }
-    }
-
-    if (
-      typeof skip === 'number' &&
-      Number.isFinite(skip) &&
-      Number.isInteger(skip) &&
-      skip > 0
-    ) {
-      throw new Error(
-        'count() with skip is not supported because it produces nondeterministic results. ' +
-          'Use findMany().length or add explicit orderBy to ensure deterministic behavior.',
-      )
-    }
-  }
+  validateSkipParameter(skip)
 
   const whereClause = isValidWhereClause(whereResult.clause)
     ? SQL_TEMPLATES.WHERE + ' ' + whereResult.clause

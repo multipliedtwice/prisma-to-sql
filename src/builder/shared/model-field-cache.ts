@@ -24,10 +24,13 @@ function quoteIdent(id: string): string {
   if (typeof id !== 'string' || id.trim().length === 0) {
     throw new Error('quoteIdent: identifier is required and cannot be empty')
   }
-  if (/[\u0000-\u001F\u007F]/.test(id)) {
-    throw new Error(
-      `quoteIdent: identifier contains invalid characters: ${JSON.stringify(id)}`,
-    )
+  for (let i = 0; i < id.length; i++) {
+    const code = id.charCodeAt(i)
+    if ((code >= 0x00 && code <= 0x1f) || code === 0x7f) {
+      throw new Error(
+        `quoteIdent: identifier contains invalid characters: ${JSON.stringify(id)}`,
+      )
+    }
   }
   if (needsQuoting(id)) {
     return `"${id.replace(/"/g, '""')}"`
@@ -98,13 +101,6 @@ export function getRelationFieldSet(model: Model): Set<string> {
 
 export function getColumnMap(model: Model): Map<string, string> {
   return ensureFullCache(model).columnMap
-}
-
-export function getFieldByName(
-  model: Model,
-  fieldName: string,
-): Field | undefined {
-  return ensureFullCache(model).fieldByName.get(fieldName)
 }
 
 export function getQuotedColumn(

@@ -108,6 +108,38 @@ function validateState(
   assertNextIndexMatches(mappings.length, index)
 }
 
+function buildDynamicNameIndex(
+  mappings: readonly ParamMap[],
+): Map<string, number> {
+  const dynamicNameToIndex = new Map<string, number>()
+  for (const m of mappings) {
+    if (typeof m.dynamicName === 'string') {
+      dynamicNameToIndex.set(m.dynamicName.trim(), m.index)
+    }
+  }
+  return dynamicNameToIndex
+}
+
+function assertCanAddParam(currentIndex: number): void {
+  if (currentIndex > MAX_PARAM_INDEX) {
+    throw new Error(
+      `CRITICAL: Cannot add param - would overflow MAX_SAFE_INTEGER. Current index: ${currentIndex}`,
+    )
+  }
+}
+
+function formatPosition(position: number): string {
+  return `$${position}`
+}
+
+function validateDynamicName(dynamicName: string): string {
+  const dn = dynamicName.trim()
+  if (dn.length === 0) {
+    throw new Error('CRITICAL: dynamicName cannot be empty')
+  }
+  return dn
+}
+
 function createStoreInternal(
   startIndex: number,
   initialParams: unknown[] = [],
@@ -119,44 +151,15 @@ function createStoreInternal(
   const mappings: ParamMap[] =
     initialMappings.length > 0 ? initialMappings.slice() : []
 
-  const dynamicNameToIndex = new Map<string, number>()
-  for (let i = 0; i < mappings.length; i++) {
-    const m = mappings[i]
-    if (typeof m.dynamicName === 'string') {
-      dynamicNameToIndex.set(m.dynamicName.trim(), m.index)
-    }
-  }
+  const dynamicNameToIndex = buildDynamicNameIndex(mappings)
 
   let dirty = true
   let cachedSnapshot: ParamSnapshot | null = null
 
-  let frozenParams: readonly unknown[] | null = null
-  let frozenMappings: readonly ParamMap[] | null = null
-
-  function assertCanAdd(): void {
-    if (index > MAX_PARAM_INDEX) {
-      throw new Error(
-        `CRITICAL: Cannot add param - would overflow MAX_SAFE_INTEGER. Current index: ${index}`,
-      )
-    }
-  }
-
-  function format(position: number): string {
-    return `$${position}`
-  }
-
-  function normalizeDynamicName(dynamicName: string): string {
-    const dn = dynamicName.trim()
-    if (dn.length === 0) {
-      throw new Error('CRITICAL: dynamicName cannot be empty')
-    }
-    return dn
-  }
-
   function addDynamic(dynamicName: string): string {
-    const dn = normalizeDynamicName(dynamicName)
+    const dn = validateDynamicName(dynamicName)
     const existing = dynamicNameToIndex.get(dn)
-    if (existing !== undefined) return format(existing)
+    if (existing !== undefined) return formatPosition(existing)
 
     const position = index
     dynamicNameToIndex.set(dn, position)
@@ -164,7 +167,7 @@ function createStoreInternal(
     mappings.push({ index: position, dynamicName: dn })
     index++
     dirty = true
-    return format(position)
+    return formatPosition(position)
   }
 
   function addStatic(value: unknown): string {
@@ -174,11 +177,11 @@ function createStoreInternal(
     mappings.push({ index: position, value: normalizedValue })
     index++
     dirty = true
-    return format(position)
+    return formatPosition(position)
   }
 
   function add(value: unknown, dynamicName?: string): string {
-    assertCanAdd()
+    assertCanAddParam(index)
     return dynamicName === undefined
       ? addStatic(value)
       : addDynamic(dynamicName)
@@ -238,7 +241,7 @@ export function createParamStoreFrom(
   validateState(existingParams, existingMappings, nextIndex)
   return createStoreInternal(
     nextIndex,
-    existingParams.slice() as unknown[],
-    existingMappings.slice() as ParamMap[],
+    existingParams.slice(),
+    existingMappings.slice(),
   )
 }

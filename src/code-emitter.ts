@@ -51,6 +51,85 @@ function extractEnumMappings(datamodel: DMMF.Datamodel): EnumInfo {
   return { mappings, fieldTypes }
 }
 
+interface ProcessDirectiveResult {
+  queries: Map<string, Map<string, Map<string, any>>>
+  skippedCount: number
+}
+
+function processModelDirectives(
+  modelName: string,
+  result: any,
+  config: GenerateConfig,
+): { modelQueries: Map<string, Map<string, any>>; skipped: number } {
+  const modelQueries = new Map<string, Map<string, any>>()
+  let skipped = 0
+
+  for (const directive of result.directives) {
+    try {
+      const method = directive.method
+      const sqlDirective = generateSQL(directive)
+
+      if (!modelQueries.has(method)) {
+        modelQueries.set(method, new Map())
+      }
+
+      const methodQueriesMap = modelQueries.get(method)!
+      const queryKey = createQueryKey(directive.query.processed)
+
+      methodQueriesMap.set(queryKey, {
+        sql: sqlDirective.sql,
+        params: sqlDirective.staticParams,
+        dynamicKeys: sqlDirective.dynamicKeys,
+        paramMappings: sqlDirective.paramMappings,
+      })
+    } catch (error) {
+      if (!config.skipInvalid) throw error
+      skipped++
+      const errMsg = error instanceof Error ? error.message : String(error)
+      console.warn(`  ⚠ Skipped ${modelName}.${directive.method}: ${errMsg}`)
+    }
+  }
+
+  return { modelQueries, skipped }
+}
+
+function processAllModelDirectives(
+  directiveResults: Map<string, any>,
+  config: GenerateConfig,
+): ProcessDirectiveResult {
+  const queries = new Map<string, Map<string, Map<string, any>>>()
+  let skippedCount = 0
+
+  for (const [modelName, result] of directiveResults) {
+    if (result.directives.length === 0) continue
+
+    const { modelQueries, skipped } = processModelDirectives(
+      modelName,
+      result,
+      config,
+    )
+
+    queries.set(modelName, modelQueries)
+    skippedCount += skipped
+  }
+
+  return { queries, skippedCount }
+}
+
+function countTotalQueries(
+  queries: Map<string, Map<string, Map<string, any>>>,
+): number {
+  return Array.from(queries.values()).reduce(
+    (sum, methodMap) =>
+      sum +
+      Array.from(methodMap.values()).reduce(
+        (s, queryMap) => s + queryMap.size,
+        0,
+      ),
+    0,
+  )
+}
+
 export async function generateClient(options: GenerateClientOptions) {
   const { datamodel, outputDir, config } = options
 
@@ -66,44 +145,10 @@ export async function generateClient(options: GenerateClientOptions) {
     },
   )
 
-  const queries = new Map<string, Map<string, Map<string, any>>>()
-  let skippedCount = 0
-
-  for (const [modelName, result] of directiveResults) {
-    if (result.directives.length === 0) continue
-
-    if (!queries.has(modelName)) {
-      queries.set(modelName, new Map())
-    }
-
-    const modelQueries = queries.get(modelName)!
-
-    for (const directive of result.directives) {
-      try {
-        const method = directive.method
-        const sqlDirective = generateSQL(directive)
-
-        if (!modelQueries.has(method)) {
-          modelQueries.set(method, new Map())
-        }
-
-        const methodQueriesMap = modelQueries.get(method)!
-        const queryKey = createQueryKey(directive.query.processed)
-
-        methodQueriesMap.set(queryKey, {
-          sql: sqlDirective.sql,
-          params: sqlDirective.staticParams,
-          dynamicKeys: sqlDirective.dynamicKeys,
-          paramMappings: sqlDirective.paramMappings,
-        })
-      } catch (error) {
-        if (!config.skipInvalid) throw error
-        skippedCount++
-        const errMsg = error instanceof Error ? error.message : String(error)
-        console.warn(`  ⚠ Skipped ${modelName}.${directive.method}: ${errMsg}`)
-      }
-    }
-  }
+  const { queries, skippedCount } = processAllModelDirectives(
+    directiveResults,
+    config,
+  )
 
   const absoluteOutputDir = resolve(process.cwd(), outputDir)
   await mkdir(absoluteOutputDir, { recursive: true })
@@ -112,15 +157,7 @@ export async function generateClient(options: GenerateClientOptions) {
   const outputPath = join(absoluteOutputDir, 'index.ts')
   await writeFile(outputPath, code)
 
-  const totalQueries = Array.from(queries.values()).reduce(
-    (sum, methodMap) =>
-      sum +
-      Array.from(methodMap.values()).reduce(
-        (s, queryMap) => s + queryMap.size,
-        0,
-      ),
-    0,
-  )
+  const totalQueries = countTotalQueries(queries)
 
   console.log(
     `✓ Generated ${queries.size} models, ${totalQueries} prebaked queries`,
@@ -327,8 +364,14 @@ const MODEL_MAP = new Map(MODELS.map(m => [m.name, m]))`
 function generateTransformLogic(): string {
   return `function isDynamicKeyForQueryKey(path: string[], key: string): boolean {
   if (key !== 'skip' && key !== 'take' && key !== 'cursor') return false
+  const parent = path.length > 0 ? path[path.length - 1] : null
+  if (!parent) return true
+  if (parent === 'include' || parent === 'select') return false
   if (path.includes('where')) return false
   if (path.includes('data')) return false
+  if (path.includes('orderBy')) return false
+  if (path.includes('having')) return false
+  if (path.includes('by')) return false
   return true
 }
 
@@ -353,6 +396,14 @@ function transformEnumInValue(value: unknown, enumType: string | undefined): unk
 
   if (typeof value === 'string' && mapping[value] !== undefined) {
     return mapping[value]
+  }
+
+  if (typeof value === 'object' && !(value instanceof Date)) {
+    const result: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      result[k] = transformEnumInValue(v, enumType)
+    }
+    return result
   }
 
   return value
@@ -444,21 +495,7 @@ function normalizeQuery(args: any): string {
 
   const withMarkers = replaceDynamicParams(normalized)
 
-  function removeEmptyObjects(obj: any): any {
-    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj
-    const result: any = {}
-    for (const [key, value] of Object.entries(obj)) {
-      if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) {
-        continue
-      }
-      result[key] = removeEmptyObjects(value)
-    }
-    return result
-  }
-
-  const cleaned = removeEmptyObjects(withMarkers)
-
-  return JSON.stringify(cleaned, (key, value) => {
+  return JSON.stringify(withMarkers, (key, value) => {
     if (typeof value === 'bigint') return '__bigint__' + value.toString()
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const sorted: Record<string, unknown> = {}

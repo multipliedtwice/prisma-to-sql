@@ -66,7 +66,7 @@ export function createToSQL(
 ) => SqlResult {
   const models = Array.isArray(modelsOrDmmf)
     ? modelsOrDmmf
-    : convertDMMFToModels((modelsOrDmmf as DMMF.Document).datamodel)
+    : convertDMMFToModels(modelsOrDmmf.datamodel)
 
   return createToSQLFunction(models, dialect)
 }

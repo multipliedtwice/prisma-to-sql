@@ -6,7 +6,13 @@ import { getColumnMap, getQuotedColumn } from './model-field-cache'
 import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
 function containsControlChars(s: string): boolean {
-  return /[\u0000-\u001F\u007F]/.test(s)
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i)
+    if ((code >= 0 && code <= 31) || code === 127) {
+      return true
+    }
+  }
+  return false
 }
 
 function assertNoControlChars(label: string, s: string): void {
@@ -99,22 +105,7 @@ function parseUnquotedPart(input: string, start: number): number {
   return i
 }
 
-function assertSafeQualifiedName(input: string): void {
-  const raw = String(input)
-  const trimmed = raw.trim()
-
-  if (trimmed.length === 0) {
-    throw new Error('tableName/tableRef is required and cannot be empty')
-  }
-
-  if (raw !== trimmed) {
-    throw new Error(
-      `tableName/tableRef must not contain leading/trailing whitespace: ${JSON.stringify(raw)}`,
-    )
-  }
-
-  assertNoControlChars('tableName/tableRef', trimmed)
-
+function validateQualifiedNameFormat(trimmed: string): void {
   for (let i = 0; i < trimmed.length; i++) {
     const c = trimmed.charCodeAt(i)
     if (c === 9 || c === 11 || c === 12 || c === 32) {
@@ -133,7 +124,9 @@ function assertSafeQualifiedName(input: string): void {
       )
     }
   }
+}
 
+function parseQualifiedNameParts(trimmed: string): void {
   let i = 0
   const n = trimmed.length
   let parts = 0
@@ -176,6 +169,25 @@ function assertSafeQualifiedName(input: string): void {
   }
 }
 
+function assertSafeQualifiedName(input: string): void {
+  const raw = String(input)
+  const trimmed = raw.trim()
+
+  if (trimmed.length === 0) {
+    throw new Error('tableName/tableRef is required and cannot be empty')
+  }
+
+  if (raw !== trimmed) {
+    throw new Error(
+      `tableName/tableRef must not contain leading/trailing whitespace: ${JSON.stringify(raw)}`,
+    )
+  }
+
+  assertNoControlChars('tableName/tableRef', trimmed)
+  validateQualifiedNameFormat(trimmed)
+  parseQualifiedNameParts(trimmed)
+}
+
 export function quote(id: string): string {
   if (isEmptyString(id)) {
     throw new Error('quote: identifier is required and cannot be empty')
@@ -194,14 +206,7 @@ export function quote(id: string): string {
   return id
 }
 
-function quoteQualified(tableRef: string): string {
-  assertSafeQualifiedName(tableRef)
-  const parts = tableRef.split('.')
-  if (parts.length === 1) return quote(parts[0])
-  return `${quote(parts[0])}.${quote(parts[1])}`
-}
-
-export function resolveColumnName(
+function resolveColumnName(
   model: Model | undefined,
   fieldName: string,
 ): string {
@@ -316,7 +321,7 @@ export function assertSafeAlias(alias: string): void {
     throw new Error('Invalid alias: leading/trailing whitespace')
   }
 
-  if (/[\u0000-\u001F\u007F]/.test(a)) {
+  if (containsControlChars(a)) {
     throw new Error(
       'Invalid alias: contains unsafe characters (control characters)',
     )
@@ -342,7 +347,7 @@ export function assertSafeAlias(alias: string): void {
     )
   }
 
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(a)) {
+  if (!/^[A-Za-z_]\w*$/.test(a)) {
     throw new Error(
       `Invalid alias: must be a simple identifier (alphanumeric with underscores): "${alias}"`,
     )
@@ -388,5 +393,3 @@ export function normalizeKeyList(input: unknown): string[] {
   const s = String(input).trim()
   return s.length > 0 ? [s] : []
 }
-
-export { quoteQualified }

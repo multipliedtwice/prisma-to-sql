@@ -1,5 +1,5 @@
 import { PrismaQueryArgs, Model } from '../types'
-import { SQL_SEPARATORS, SQL_TEMPLATES } from './shared/constants'
+import { SQL_SEPARATORS } from './shared/constants'
 import {
   col,
   quoteColumn,
@@ -149,7 +149,7 @@ export function readSkipTake(relArgs: unknown): {
     }
   }
 
-  const obj = relArgs as Record<string, unknown>
+  const obj = relArgs
 
   const skipVal = hasSkip
     ? normalizeNonNegativeInt('skip', obj.skip)
@@ -211,13 +211,11 @@ function ensureCursorFieldsInOrder(
   if (cursorEntries.length === 0) return orderEntries
 
   const existing = new Set<string>()
-  for (let i = 0; i < orderEntries.length; i++)
-    existing.add(orderEntries[i].field)
+  for (const entry of orderEntries) existing.add(entry.field)
 
   let out: OrderByEntry[] | null = null
 
-  for (let i = 0; i < cursorEntries.length; i++) {
-    const field = cursorEntries[i][0]
+  for (const [field] of cursorEntries) {
     if (!existing.has(field)) {
       if (!out) out = orderEntries.slice()
       out.push({ field, direction: 'asc' })

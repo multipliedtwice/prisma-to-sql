@@ -3,18 +3,18 @@ import type { SqlDialect } from './sql-builder-dialect'
 import { buildSQLWithCache } from './query-cache'
 import { transformQueryResults } from './result-transformers'
 
-export interface TransactionQuery {
+interface TransactionQuery {
   model: string
   method: PrismaMethod
   args?: Record<string, unknown>
 }
 
-export interface TransactionOptions {
+interface TransactionOptions {
   isolationLevel?: 'ReadCommitted' | 'RepeatableRead' | 'Serializable'
   timeout?: number
 }
 
-export interface TransactionExecutor {
+interface TransactionExecutor {
   execute(
     queries: TransactionQuery[],
     options?: TransactionOptions,
@@ -58,7 +58,7 @@ export function createTransactionExecutor(deps: {
   executeRaw: (sql: string, params?: unknown[]) => Promise<unknown[]>
   postgresClient?: any
 }): TransactionExecutor {
-  const { modelMap, allModels, dialect, executeRaw, postgresClient } = deps
+  const { modelMap, allModels, dialect, postgresClient } = deps
 
   return {
     async execute(
@@ -107,7 +107,7 @@ export function createTransactionExecutor(deps: {
             model,
             allModels,
             q.method,
-            (q.args || {}) as Record<string, unknown>,
+            q.args || {},
             dialect,
           )
 

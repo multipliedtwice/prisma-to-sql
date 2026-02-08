@@ -10,6 +10,7 @@ import {
 import { buildTableReference } from './builder/shared/sql-utils'
 import { SQL_TEMPLATES, SQL_RESERVED_WORDS } from './builder/shared/constants'
 import { createBoundedCache } from './utils/s3-fifo'
+import { tryFastPath } from './fast-path'
 
 interface SqlResult {
   sql: string
@@ -48,11 +49,11 @@ class QueryCacheStats {
   }
 }
 
-const queryCache = createBoundedCache<string, SqlResult>(1000)
+export const queryCache = createBoundedCache<string, SqlResult>(1000)
 
 export const queryCacheStats = new QueryCacheStats()
 
-function makeAlias(name: string): string {
+export function makeAlias(name: string): string {
   const base = name
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, '_')
@@ -63,91 +64,152 @@ function makeAlias(name: string): string {
 
 type SqliteScanMode = 'normal' | 'single' | 'double'
 
-function toSqliteParams(sql: string, params: readonly unknown[]): SqlResult {
-  const reorderedParams: unknown[] = []
+interface ScanState {
+  mode: SqliteScanMode
+  position: number
+  output: string
+  reorderedParams: unknown[]
+}
+
+function handleSingleQuote(sql: string, state: ScanState): ScanState {
   const n = sql.length
-  let i = 0
-  let out = ''
-  let mode: SqliteScanMode = 'normal'
+  let i = state.position
+  let out = state.output + sql[i]
+  i++
 
   while (i < n) {
-    const ch = sql.charCodeAt(i)
-
-    if (mode === 'normal') {
-      if (ch === 39) {
-        out += sql[i]
-        mode = 'single'
-        i++
-        continue
-      }
-
-      if (ch === 34) {
-        out += sql[i]
-        mode = 'double'
-        i++
-        continue
-      }
-
-      if (ch === 36) {
-        let j = i + 1
-        let num = 0
-        let hasDigit = false
-        while (j < n) {
-          const d = sql.charCodeAt(j)
-          if (d >= 48 && d <= 57) {
-            num = num * 10 + (d - 48)
-            hasDigit = true
-            j++
-          } else {
-            break
-          }
-        }
-        if (hasDigit && num >= 1) {
-          out += '?'
-          reorderedParams.push(params[num - 1])
-          i = j
-          continue
-        }
-      }
-
-      out += sql[i]
-      i++
-      continue
-    }
-
-    if (mode === 'single') {
-      out += sql[i]
-      if (ch === 39) {
-        if (i + 1 < n && sql.charCodeAt(i + 1) === 39) {
-          out += sql[i + 1]
-          i += 2
-          continue
-        }
-        mode = 'normal'
-      }
-      i++
-      continue
-    }
-
-    if (mode === 'double') {
-      out += sql[i]
-      if (ch === 34) {
-        if (i + 1 < n && sql.charCodeAt(i + 1) === 34) {
-          out += sql[i + 1]
-          i += 2
-          continue
-        }
-        mode = 'normal'
-      }
-      i++
-      continue
-    }
-
     out += sql[i]
+    if (sql.charCodeAt(i) === 39) {
+      if (i + 1 < n && sql.charCodeAt(i + 1) === 39) {
+        out += sql[i + 1]
+        i += 2
+        continue
+      }
+      return { ...state, mode: 'normal', position: i + 1, output: out }
+    }
     i++
   }
 
-  return { sql: out, params: reorderedParams }
+  return { ...state, position: i, output: out }
+}
+
+function handleDoubleQuote(sql: string, state: ScanState): ScanState {
+  const n = sql.length
+  let i = state.position
+  let out = state.output + sql[i]
+  i++
+
+  while (i < n) {
+    out += sql[i]
+    if (sql.charCodeAt(i) === 34) {
+      if (i + 1 < n && sql.charCodeAt(i + 1) === 34) {
+        out += sql[i + 1]
+        i += 2
+        continue
+      }
+      return { ...state, mode: 'normal', position: i + 1, output: out }
+    }
+    i++
+  }
+
+  return { ...state, position: i, output: out }
+}
+
+function extractParameterNumber(
+  sql: string,
+  startPos: number,
+): { num: number; nextPos: number } | null {
+  const n = sql.length
+  let j = startPos + 1
+  let num = 0
+  let hasDigit = false
+
+  while (j < n) {
+    const d = sql.charCodeAt(j)
+    if (d >= 48 && d <= 57) {
+      num = num * 10 + (d - 48)
+      hasDigit = true
+      j++
+    } else {
+      break
+    }
+  }
+
+  if (hasDigit && num >= 1) {
+    return { num, nextPos: j }
+  }
+
+  return null
+}
+
+function handleParameterSubstitution(
+  sql: string,
+  params: readonly unknown[],
+  state: ScanState,
+): ScanState {
+  const result = extractParameterNumber(sql, state.position)
+
+  if (result) {
+    return {
+      ...state,
+      position: result.nextPos,
+      output: state.output + '?',
+      reorderedParams: [...state.reorderedParams, params[result.num - 1]],
+    }
+  }
+
+  return {
+    ...state,
+    position: state.position + 1,
+    output: state.output + sql[state.position],
+  }
+}
+
+function toSqliteParams(sql: string, params: readonly unknown[]): SqlResult {
+  const n = sql.length
+  let state: ScanState = {
+    mode: 'normal',
+    position: 0,
+    output: '',
+    reorderedParams: [],
+  }
+
+  while (state.position < n) {
+    const ch = sql.charCodeAt(state.position)
+
+    if (state.mode === 'single') {
+      state = handleSingleQuote(sql, state)
+      continue
+    }
+
+    if (state.mode === 'double') {
+      state = handleDoubleQuote(sql, state)
+      continue
+    }
+
+    if (ch === 39) {
+      state = { ...state, mode: 'single' }
+      continue
+    }
+
+    if (ch === 34) {
+      state = { ...state, mode: 'double' }
+      continue
+    }
+
+    if (ch === 36) {
+      state = handleParameterSubstitution(sql, params, state)
+      continue
+    }
+
+    state = {
+      ...state,
+      position: state.position + 1,
+      output: state.output + sql[state.position],
+    }
+  }
+
+  return { sql: state.output, params: state.reorderedParams }
 }
 
 function canonicalizeReplacer(key: string, value: unknown): unknown {
@@ -156,16 +218,7 @@ function canonicalizeReplacer(key: string, value: unknown): unknown {
     const obj = value as Record<string, unknown>
     const sorted: Record<string, unknown> = {}
     for (const k of Object.keys(obj).sort()) {
-      const v = obj[k]
-      if (
-        v &&
-        typeof v === 'object' &&
-        !Array.isArray(v) &&
-        Object.keys(v).length === 0
-      ) {
-        continue
-      }
-      sorted[k] = v
+      sorted[k] = obj[k]
     }
     return sorted
   }
@@ -275,11 +328,18 @@ export function buildSQLWithCache(
 
   queryCacheStats.miss()
 
+  const fastResult = tryFastPath(model, method, args, dialect)
+  if (fastResult) {
+    queryCache.set(cacheKey, {
+      sql: fastResult.sql,
+      params: [...fastResult.params],
+    })
+    return fastResult
+  }
+
   const result = buildSQLFull(model, models, method, args, dialect)
 
   queryCache.set(cacheKey, { sql: result.sql, params: [...result.params] })
 
   return result
 }
-
-export { queryCache }
