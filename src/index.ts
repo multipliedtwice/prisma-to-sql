@@ -192,3 +192,4 @@ export {
 export { transformQueryResults }
 
 export type { Model, PrismaMethod, PrismaSQLConfig, PrismaSQLResult, SqlResult }
+export { normalizeValue } from './utils/normalize-value'
