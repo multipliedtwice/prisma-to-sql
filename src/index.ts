@@ -6,7 +6,20 @@ import {
   SQLDirective,
 } from './sql-generator'
 import { buildSQLWithCache } from './query-cache'
-import { buildBatchSql, type BatchQuery } from './batch'
+import {
+  buildBatchSql,
+  parseBatchResults,
+  buildBatchCountSql,
+  parseBatchCountResults,
+  type BatchQuery,
+  type BatchCountQuery,
+} from './batch'
+import {
+  createTransactionExecutor,
+  type TransactionQuery,
+  type TransactionOptions,
+} from './transaction'
+import { transformQueryResults } from './result-transformers'
 import {
   Model,
   PrismaMethod,
@@ -160,3 +173,22 @@ export function generateSQLByModel(
 
   return byModel
 }
+
+export {
+  buildBatchSql,
+  parseBatchResults,
+  buildBatchCountSql,
+  parseBatchCountResults,
+  type BatchQuery,
+  type BatchCountQuery,
+}
+
+export {
+  createTransactionExecutor,
+  type TransactionQuery,
+  type TransactionOptions,
+}
+
+export { transformQueryResults }
+
+export type { Model, PrismaMethod, PrismaSQLConfig, PrismaSQLResult, SqlResult }
