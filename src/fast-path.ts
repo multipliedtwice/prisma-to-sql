@@ -55,6 +55,10 @@ function norm(value: unknown): unknown {
   return normalizeValue(value)
 }
 
+function isScalar(value: unknown): boolean {
+  return value !== null && typeof value !== 'object'
+}
+
 export function tryFastPath(
   model: Model,
   method: string,
@@ -68,6 +72,7 @@ export function tryFastPath(
     isPlainObject(where) &&
     Object.keys(where).length === 1 &&
     'id' in where &&
+    isScalar(where.id) &&
     !args.select &&
     !args.include
   ) {
@@ -91,6 +96,7 @@ export function tryFastPath(
     isPlainObject(where) &&
     Object.keys(where).length === 1 &&
     'id' in where &&
+    isScalar(where.id) &&
     !args.select &&
     !args.include &&
     !args.orderBy &&
@@ -132,7 +138,8 @@ export function tryFastPath(
     !args.skip &&
     !args.distinct &&
     !args.cursor &&
-    typeof args.take === 'number'
+    typeof args.take === 'number' &&
+    args.take > 0
   ) {
     const tableName = buildTableReference(
       SQL_TEMPLATES.PUBLIC_SCHEMA,

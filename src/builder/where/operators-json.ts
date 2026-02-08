@@ -12,27 +12,42 @@ import { isNotNullish, isPlainObject } from '../shared/validators/type-guards'
 
 const SAFE_JSON_PATH_SEGMENT = /^[a-zA-Z_]\w*$/
 const MAX_PATH_SEGMENT_LENGTH = 255
+const MAX_PATH_SEGMENTS = 100
+
+function sanitizeForError(s: string): string {
+  return s.replace(
+    /[\x00-\x1F\x7F]/g,
+    (ch) => `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}`,
+  )
+}
 
 function validateJsonPathSegments(segments: string[]): void {
-  for (const segment of segments) {
+  if (segments.length > MAX_PATH_SEGMENTS) {
+    throw createError(`JSON path too long: max ${MAX_PATH_SEGMENTS} segments`, {
+      operator: Ops.PATH,
+    })
+  }
+
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i]
+
     if (typeof segment !== 'string') {
-      throw createError('JSON path segments must be strings', {
+      throw createError(`JSON path segment at index ${i} must be string`, {
         operator: Ops.PATH,
-        value: segment,
       })
     }
 
     if (segment.length > MAX_PATH_SEGMENT_LENGTH) {
       throw createError(
-        `JSON path segment too long: max ${MAX_PATH_SEGMENT_LENGTH} characters`,
-        { operator: Ops.PATH, value: `[${segment.length} chars]` },
+        `JSON path segment at index ${i} too long: max ${MAX_PATH_SEGMENT_LENGTH} characters`,
+        { operator: Ops.PATH },
       )
     }
 
     if (!SAFE_JSON_PATH_SEGMENT.test(segment)) {
       throw createError(
-        `Invalid JSON path segment: '${segment}'. Must be alphanumeric with underscores, starting with letter or underscore.`,
-        { operator: Ops.PATH, value: segment },
+        `Invalid JSON path segment at index ${i}: '${sanitizeForError(segment)}'`,
+        { operator: Ops.PATH },
       )
     }
   }

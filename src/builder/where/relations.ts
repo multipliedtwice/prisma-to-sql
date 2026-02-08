@@ -140,7 +140,7 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
 
       if (checkField) {
         const leftJoinSql = `LEFT JOIN ${relTable} ${relAlias} ON ${join}`
-        const whereClause = `${relAlias}.${quote(checkField.name)} IS NULL`
+        const whereClause = `${relAlias}.${quoteColumn(relModel, checkField.name)} IS NULL`
         return Object.freeze({
           clause: whereClause,
           joins: freezeJoins([leftJoinSql]),

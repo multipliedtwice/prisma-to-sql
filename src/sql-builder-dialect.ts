@@ -21,7 +21,14 @@ export function withDialect<T>(dialect: SqlDialect, fn: () => T): T {
   const prev = globalDialect
   globalDialect = dialect
   try {
-    return fn()
+    const result = fn()
+    if (result instanceof Promise) {
+      throw new Error(
+        'withDialect cannot be used with async functions. ' +
+          'Pass dialect explicitly to buildSQL() instead of relying on global state.',
+      )
+    }
+    return result
   } finally {
     globalDialect = prev
   }
@@ -258,5 +265,5 @@ export function prepareArrayParam(
   if (dialect === 'postgres') {
     return value.map((v) => normalizeValue(v))
   }
-  return JSON.stringify(value)
+  return JSON.stringify(value.map((v) => normalizeValue(v)))
 }

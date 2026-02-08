@@ -27,7 +27,7 @@ function transformGroupByResults(results: unknown[]): unknown[] {
 
 function transformCountResults(results: unknown[]): number {
   const result = results[0] as any
-  const count = result?.['_count._all'] || result?.count || 0
+  const count = result?.['_count._all'] ?? result?.count ?? 0
   return typeof count === 'string' ? parseInt(count, 10) : count
 }
 

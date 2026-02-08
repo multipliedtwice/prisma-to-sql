@@ -660,11 +660,100 @@ export function parseBatchCountResults(
   return results
 }
 
+function isDateTimeFieldType(type: string): boolean {
+  const base = type.replace(/\[\]|\?/g, '')
+  return base === 'DateTime'
+}
+
+function coerceDateTime(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  const d = new Date(value)
+  if (Number.isFinite(d.getTime())) return d
+  return value
+}
+
+function coerceBatchRowTypes(
+  obj: unknown,
+  model: Model | undefined,
+  modelMap: Map<string, Model>,
+): unknown {
+  if (!model || obj === null || obj === undefined) return obj
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => coerceBatchRowTypes(item, model, modelMap))
+  }
+
+  if (typeof obj !== 'object') return obj
+
+  const record = obj as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+  let changed = false
+
+  for (const key in record) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+
+    const val = record[key]
+    const field = model.fields.find((f) => f.name === key)
+
+    if (!field) {
+      result[key] = val
+      continue
+    }
+
+    if (field.isRelation && field.relatedModel) {
+      const relModel = modelMap.get(field.relatedModel)
+      if (relModel) {
+        const coerced = coerceBatchRowTypes(val, relModel, modelMap)
+        result[key] = coerced
+        if (coerced !== val) changed = true
+        continue
+      }
+      result[key] = val
+      continue
+    }
+
+    if (isDateTimeFieldType(field.type)) {
+      const coerced = coerceDateTime(val)
+      result[key] = coerced
+      if (coerced !== val) changed = true
+      continue
+    }
+
+    result[key] = val
+  }
+
+  return changed ? result : obj
+}
+
+function coerceBatchValue(
+  value: unknown,
+  method: PrismaMethod,
+  modelName: string,
+  modelMap?: Map<string, Model>,
+): unknown {
+  if (!modelMap) return value
+  if (method === 'count') return value
+
+  const model = modelMap.get(modelName)
+  if (!model) return value
+
+  if (Array.isArray(value)) {
+    return value.map((item) => coerceBatchRowTypes(item, model, modelMap))
+  }
+
+  if (value !== null && typeof value === 'object') {
+    return coerceBatchRowTypes(value, model, modelMap)
+  }
+
+  return value
+}
+
 export function parseBatchResults(
   row: Record<string, unknown>,
   keys: string[],
   queries: Record<string, BatchQuery>,
   aliases?: string[],
+  modelMap?: Map<string, Model>,
 ): Record<string, unknown> {
   const results: Record<string, unknown> = {}
 
@@ -677,13 +766,18 @@ export function parseBatchResults(
     switch (query.method) {
       case 'findMany': {
         const parsed = parseJsonValue(rawValue)
-        results[key] = Array.isArray(parsed) ? parsed : []
+        const arr = Array.isArray(parsed) ? parsed : []
+        results[key] = coerceBatchValue(arr, 'findMany', query.model, modelMap)
         break
       }
       case 'findFirst':
       case 'findUnique': {
         const parsed = parseJsonValue(rawValue)
-        results[key] = parsed ?? null
+        const val = parsed ?? null
+        results[key] =
+          val === null
+            ? null
+            : coerceBatchValue(val, query.method, query.model, modelMap)
         break
       }
       case 'count': {

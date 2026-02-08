@@ -13,22 +13,35 @@ export type ParsedOrderByValue = {
 
 type ParseOrderByValue = (v: unknown, field?: string) => ParsedOrderByValue
 
-function modelHasScalarId(model?: Model): boolean {
-  if (!model) return false
-  return getScalarFieldSet(model).has('id')
+function findTiebreakerField(model?: Model): string | null {
+  if (!model) return null
+
+  const scalarSet = getScalarFieldSet(model)
+
+  for (const f of model.fields) {
+    if (f.isId && !f.isRelation && scalarSet.has(f.name)) return f.name
+  }
+
+  if (scalarSet.has('id')) return 'id'
+
+  return null
 }
 
-function hasIdTiebreaker(orderBy: unknown, parse: ParseOrderByValue): boolean {
+function hasTiebreaker(
+  orderBy: unknown,
+  parse: ParseOrderByValue,
+  field: string,
+): boolean {
   if (!isNotNullish(orderBy)) return false
   const normalized = normalizeOrderByInput(orderBy, parse)
   return normalized.some((obj) =>
-    Object.prototype.hasOwnProperty.call(obj, 'id'),
+    Object.prototype.hasOwnProperty.call(obj, field),
   )
 }
 
-function addIdTiebreaker(orderBy: unknown): unknown {
-  if (Array.isArray(orderBy)) return [...orderBy, { id: 'asc' }]
-  return [orderBy, { id: 'asc' }]
+function addTiebreaker(orderBy: unknown, field: string): unknown {
+  if (Array.isArray(orderBy)) return [...orderBy, { [field]: 'asc' }]
+  return [orderBy, { [field]: 'asc' }]
 }
 
 export function ensureDeterministicOrderByInput(args: {
@@ -38,12 +51,13 @@ export function ensureDeterministicOrderByInput(args: {
 }): unknown {
   const { orderBy, model, parseValue } = args
 
-  if (!modelHasScalarId(model)) return orderBy
+  const tiebreaker = findTiebreakerField(model)
+  if (!tiebreaker) return orderBy
 
   if (!isNotNullish(orderBy)) {
-    return { id: 'asc' }
+    return { [tiebreaker]: 'asc' }
   }
 
-  if (hasIdTiebreaker(orderBy, parseValue)) return orderBy
-  return addIdTiebreaker(orderBy)
+  if (hasTiebreaker(orderBy, parseValue, tiebreaker)) return orderBy
+  return addTiebreaker(orderBy, tiebreaker)
 }

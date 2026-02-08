@@ -57,9 +57,22 @@ interface IncludeBuildContext {
   aliasGen: AliasGenerator
   dialect: SqlDialect
   params: ParamStore
+  includePath: string[]
   visitPath?: string[]
   depth?: number
   stats?: IncludeComplexityStats
+}
+
+function buildIncludeScope(includePath: readonly string[]): string {
+  if (includePath.length === 0) return 'include'
+  let scope = 'include'
+  for (let i = 0; i < includePath.length; i++) {
+    scope += `.${includePath[i]}`
+    if (i < includePath.length - 1) {
+      scope += '.include'
+    }
+  }
+  return scope
 }
 
 function getRelationTableReference(
@@ -293,6 +306,7 @@ function buildSelectWithNestedIncludes(
         ctx.aliasGen,
         ctx.params,
         ctx.dialect,
+        ctx.includePath,
         ctx.visitPath || [],
         (ctx.depth || 0) + 1,
         ctx.stats,
@@ -415,6 +429,8 @@ function buildOneToOneIncludeSql(args: {
 
   if (args.orderBySql) sql += ` ${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}`
 
+  const scopeBase = buildIncludeScope(args.ctx.includePath)
+
   if (isNotNullish(args.takeVal)) {
     return appendLimitOffset(
       sql,
@@ -422,16 +438,11 @@ function buildOneToOneIncludeSql(args: {
       args.ctx.params,
       args.takeVal,
       args.skipVal,
-      `include.${args.relName}`,
+      scopeBase,
     )
   }
 
-  return limitOneSql(
-    sql,
-    args.ctx.params,
-    args.skipVal,
-    `include.${args.relName}`,
-  )
+  return limitOneSql(sql, args.ctx.params, args.skipVal, scopeBase)
 }
 
 function buildListIncludeSpec(args: {
@@ -481,13 +492,15 @@ function buildListIncludeSpec(args: {
 
   if (args.orderBySql) base += ` ${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}`
 
+  const scopeBase = buildIncludeScope(args.ctx.includePath)
+
   base = appendLimitOffset(
     base,
     args.ctx.dialect,
     args.ctx.params,
     args.takeVal,
     args.skipVal,
-    `include.${args.relName}`,
+    scopeBase,
   )
 
   const selectExpr = jsonAgg('row', args.ctx.dialect)
@@ -599,6 +612,7 @@ function buildIncludeSqlInternal(
   aliasGen: AliasGenerator,
   params: ParamStore,
   dialect: SqlDialect,
+  includePath: string[],
   visitPath: string[] = [],
   depth: number = 0,
   stats?: IncludeComplexityStats,
@@ -664,6 +678,8 @@ function buildIncludeSqlInternal(
       )
     }
 
+    const nextIncludePath = [...includePath, relName]
+
     includes.push(
       buildSingleInclude(relName, relArgs, resolved.field, resolved.relModel, {
         model,
@@ -673,6 +689,7 @@ function buildIncludeSqlInternal(
         aliasGen,
         dialect,
         params,
+        includePath: nextIncludePath,
         visitPath: currentPath,
         depth: depth + 1,
         stats,
@@ -710,6 +727,7 @@ export function buildIncludeSql(
     aliasGen,
     params,
     dialect,
+    [],
     [],
     0,
     stats,
@@ -777,13 +795,12 @@ function resolveCountKeyPairs(field: Field): {
   relKeyFields: string[]
   parentKeyFields: string[]
 } {
-  const fkFields = normalizeKeyList((field as any).foreignKey)
+  const fkFields = normalizeKeyList(field.foreignKey)
   if (fkFields.length === 0) {
     throw new Error('Relation count requires foreignKey')
   }
 
-  const refsRaw = (field as any).references
-  const refs = normalizeKeyList(refsRaw)
+  const refs = normalizeKeyList(field.references)
   const refFields =
     refs.length > 0 ? refs : defaultReferencesForCount(fkFields.length)
 

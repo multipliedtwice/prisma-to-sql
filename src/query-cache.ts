@@ -22,9 +22,35 @@ interface CacheStats {
   size: number
 }
 
+class QueryCacheStats {
+  #hits = 0
+  #misses = 0
+
+  hit(): void {
+    this.#hits++
+  }
+
+  miss(): void {
+    this.#misses++
+  }
+
+  reset(): void {
+    this.#hits = 0
+    this.#misses = 0
+  }
+
+  get snapshot(): CacheStats {
+    return Object.freeze({
+      hits: this.#hits,
+      misses: this.#misses,
+      size: queryCache.size,
+    })
+  }
+}
+
 const queryCache = createBoundedCache<string, SqlResult>(1000)
 
-export const queryCacheStats: CacheStats = { hits: 0, misses: 0, size: 0 }
+export const queryCacheStats = new QueryCacheStats()
 
 function makeAlias(name: string): string {
   const base = name
@@ -243,16 +269,15 @@ export function buildSQLWithCache(
 
   const cached = queryCache.get(cacheKey)
   if (cached) {
-    queryCacheStats.hits++
+    queryCacheStats.hit()
     return { sql: cached.sql, params: [...cached.params] }
   }
 
-  queryCacheStats.misses++
+  queryCacheStats.miss()
 
   const result = buildSQLFull(model, models, method, args, dialect)
 
-  queryCache.set(cacheKey, result)
-  queryCacheStats.size = queryCache.size
+  queryCache.set(cacheKey, { sql: result.sql, params: [...result.params] })
 
   return result
 }

@@ -67,10 +67,7 @@ function compareIssue(a: CompactIssue, b: CompactIssue): number {
   return pathCollator.compare(a.message, b.message)
 }
 
-async function fetchAndLogSonarIssues(
-  token: string,
-  projectKey: string = 'prisma-sql',
-) {
+async function fetchAndLogSonarIssues(token: string, projectKey: string = 'b') {
   const url = `http://localhost:9000/api/issues/search?componentKeys=${encodeURIComponent(projectKey)}&ps=500`
   const auth = btoa(`${token}:`)
 
@@ -102,7 +99,7 @@ async function fetchAndLogSonarIssues(
   }
 }
 
-const token = process.env.SONAR_TOKEN
+const token = 'sqp_0d5fbc16a275fceb6458d193a8aa8a975956edc1'
 if (!token) {
   console.error('SONAR_TOKEN environment variable is required')
   process.exit(1)

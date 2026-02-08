@@ -23,11 +23,10 @@ export function isValidRelationField(field: Field | undefined): field is Field {
   )
     return false
 
-  const fk = normalizeKeyList((field as any).foreignKey)
+  const fk = normalizeKeyList(field.foreignKey)
   if (fk.length === 0) return false
 
-  const refsRaw = (field as any).references
-  const refs = normalizeKeyList(refsRaw)
+  const refs = normalizeKeyList(field.references)
 
   if (refs.length === 0) {
     return fk.length === 1
@@ -42,8 +41,7 @@ function getReferenceFieldNames(
   field: Field,
   foreignKeyCount: number,
 ): string[] {
-  const refsRaw = (field as any).references
-  const refs = normalizeKeyList(refsRaw)
+  const refs = normalizeKeyList(field.references)
 
   if (refs.length === 0) {
     if (foreignKeyCount === 1) return [SPECIAL_FIELDS.ID]
@@ -64,7 +62,7 @@ export function joinCondition(
   assertSafeAlias(parentAlias)
   assertSafeAlias(childAlias)
 
-  const fkFields = normalizeKeyList((field as any).foreignKey)
+  const fkFields = normalizeKeyList(field.foreignKey)
 
   if (fkFields.length === 0) {
     throw createError(

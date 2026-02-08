@@ -16,6 +16,7 @@ import { addAutoScoped } from '../shared/dynamic-params'
 import { jsonBuildObject } from '../../sql-builder-dialect'
 import { buildRelationCountSql } from './includes'
 import { joinNonEmpty } from '../shared/string-builder'
+import { getRelationFieldSet } from '../shared/model-field-cache'
 
 const ALIAS_CAPTURE = '([A-Za-z_][A-Za-z0-9_]*)'
 const COLUMN_PART = '(?:"([^"]+)"|([a-z_][a-z0-9_]*))'
@@ -362,6 +363,27 @@ function buildSqliteDistinctQuery(
   return outerParts.join(' ')
 }
 
+function resolveCountSelect(
+  countSelectRaw: unknown,
+  model: SelectQuerySpec['model'],
+): Record<string, boolean> | null {
+  if (countSelectRaw === true) {
+    const relationSet = getRelationFieldSet(model)
+    if (relationSet.size === 0) return null
+    const allRelations: Record<string, boolean> = {}
+    for (const name of relationSet) {
+      allRelations[name] = true
+    }
+    return allRelations
+  }
+
+  if (isPlainObject(countSelectRaw) && 'select' in countSelectRaw) {
+    return (countSelectRaw as { select: Record<string, boolean> }).select
+  }
+
+  return null
+}
+
 function buildIncludeColumns(spec: SelectQuerySpec): {
   includeCols: string
   selectWithIncludes: string
@@ -373,11 +395,13 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
   let countCols = ''
   let countJoins: string[] = []
 
-  const countSelect = spec.args?.select?._count
-  if (countSelect) {
-    if (isPlainObject(countSelect) && 'select' in countSelect) {
+  const countSelectRaw = spec.args?.select?._count
+  if (countSelectRaw) {
+    const resolvedCountSelect = resolveCountSelect(countSelectRaw, model)
+
+    if (resolvedCountSelect && Object.keys(resolvedCountSelect).length > 0) {
       const countBuild = buildRelationCountSql(
-        (countSelect as any).select,
+        resolvedCountSelect,
         model,
         schemas,
         from.alias,

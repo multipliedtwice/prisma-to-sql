@@ -1,4 +1,7 @@
+import { DMMF } from '@prisma/generator-helper'
 import { OrderByType } from './builder/shared/order-by-utils'
+import { SqlDialect } from './sql-builder-dialect'
+import { BatchQuery } from './batch'
 
 export interface Field {
   name: string
@@ -6,10 +9,11 @@ export interface Field {
   type: string
   isRequired: boolean
   isRelation: boolean
+  isId?: boolean
   relatedModel?: string
   relationName?: string
-  foreignKey?: string
-  references?: string
+  foreignKey?: string | string[]
+  references?: string | string[]
   isForeignKeyLocal?: boolean
 }
 
@@ -48,3 +52,35 @@ export type PrismaMethod =
   | 'count'
   | 'aggregate'
   | 'groupBy'
+
+export interface PrismaSQLConfig<TClient> {
+  client: TClient
+  models?: Model[]
+  dmmf?: DMMF.Document
+  dialect: SqlDialect
+  execute: (
+    client: TClient,
+    sql: string,
+    params: unknown[],
+  ) => Promise<unknown[]>
+}
+
+export interface SqlResult {
+  sql: string
+  params: unknown[]
+}
+
+export interface PrismaSQLResult<TClient> {
+  toSQL: (
+    model: string,
+    method: PrismaMethod,
+    args?: Record<string, unknown>,
+  ) => SqlResult
+  query: <T = unknown[]>(
+    model: string,
+    method: PrismaMethod,
+    args?: Record<string, unknown>,
+  ) => Promise<T>
+  batchSql: (queries: Record<string, BatchQuery>) => SqlResult
+  client: TClient
+}
