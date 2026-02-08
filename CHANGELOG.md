@@ -1,3 +1,10 @@
+# [1.62.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.61.0...v1.62.0) (2026-02-08)
+
+
+### Features
+
+* **code-emitter.ts:** simplify import statements by consolidating imports from 'prisma-sql' to improve readability ([a92cb9b](https://github.com/multipliedtwice/prisma-to-sql/commit/a92cb9b86f45348cb9fa46483c17fc536dc01fd7))
+
 # [1.61.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.60.0...v1.61.0) (2026-02-08)
 
 
