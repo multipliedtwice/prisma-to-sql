@@ -3,13 +3,13 @@ import type { SqlDialect } from './sql-builder-dialect'
 import { buildSQLWithCache } from './query-cache'
 import { transformQueryResults } from './result-transformers'
 
-interface TransactionQuery {
+export interface TransactionQuery {
   model: string
   method: PrismaMethod
   args?: Record<string, unknown>
 }
 
-interface TransactionOptions {
+export interface TransactionOptions {
   isolationLevel?: 'ReadCommitted' | 'RepeatableRead' | 'Serializable'
   timeout?: number
 }
