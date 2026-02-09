@@ -1155,7 +1155,7 @@ Compare with Prisma's query log:
 new PrismaClient({ log: ['query'] })
 ```
 
-File an issue if results differ: https://github.com/multipliedtwice/prisma-sql/issues
+File an issue if results differ: https://github.com/multipliedtwice/prisma-to-sql/issues
 
 ### "Connection pool exhausted"
 
@@ -1235,7 +1235,7 @@ A: Not yet. `$batch` is currently PostgreSQL only. SQLite support coming soon.
 To run examples locally:
 
 ```bash
-git clone https://github.com/multipliedtwice/prisma-sql
+git clone https://github.com/multipliedtwice/prisma-to-sql
 cd prisma-sql
 npm install
 npm test
