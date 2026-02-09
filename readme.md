@@ -1287,7 +1287,7 @@ PRs welcome! Priority areas:
 Setup:
 
 ```bash
-git clone https://github.com/multipliedtwice/prisma-sql
+git clone https://github.com/multipliedtwice/prisma-to-sql
 cd prisma-sql
 npm install
 npm run build
@@ -1347,8 +1347,8 @@ MIT
 ## Links
 
 - [NPM Package](https://www.npmjs.com/package/prisma-sql)
-- [GitHub Repository](https://github.com/multipliedtwice/prisma-sql)
-- [Issue Tracker](https://github.com/multipliedtwice/prisma-sql/issues)
+- [GitHub Repository](https://github.com/multipliedtwice/prisma-to-sql)
+- [Issue Tracker](https://github.com/multipliedtwice/prisma-to-sql/issues)
 
 ---
 
