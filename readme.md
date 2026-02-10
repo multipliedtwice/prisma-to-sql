@@ -2,7 +2,7 @@
 
 <img width="250" height="170" alt="image" src="https://github.com/user-attachments/assets/3f9233f2-5d5c-41e3-b1cd-ced7ce0b54c2" />
 
-Speed up Prisma reads **2-7x** by executing queries via postgres.js or better-sqlite3 instead of Prisma's query engine.
+Prerender Prisma SQL and run via postgres.js or better-sqlite3.
 
 **Same API. Same types. Just faster.**
 
