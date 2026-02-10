@@ -1,3 +1,15 @@
+# [1.65.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.64.0...v1.65.0) (2026-02-10)
+
+
+### Bug Fixes
+
+* improve benchmark logic ([5a7cc82](https://github.com/multipliedtwice/prisma-to-sql/commit/5a7cc8264909a5a68838228dad81e34c3fd2737c))
+
+
+### Features
+
+* major refactor of benchmark logic and nested includes ([f2a0516](https://github.com/multipliedtwice/prisma-to-sql/commit/f2a051660e7dbcae6b6065fb41f609f497689411))
+
 # [1.64.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.63.0...v1.64.0) (2026-02-09)
 
 # [1.63.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.62.0...v1.63.0) (2026-02-09)
