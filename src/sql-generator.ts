@@ -16,6 +16,8 @@ import {
   convertDMMFToModels,
 } from '@dee-wan/schema-parser'
 import { PrismaMethod } from './types'
+import { isPlainObject } from './builder/shared/validators/type-guards'
+import { SqlResult } from './builder/shared/types'
 
 export interface SQLDirective {
   method: PrismaMethod
@@ -24,6 +26,8 @@ export interface SQLDirective {
   dynamicKeys: string[]
   paramOrder: string
   paramMappings: readonly ParamMap[]
+  requiresReduction: boolean
+  includeSpec: Record<string, any>
   originalDirective: DirectiveProps
 }
 
@@ -52,9 +56,11 @@ function isPrismaMethod(v: unknown): v is PrismaMethod {
   )
 }
 
-function getMethodFromProcessed(processed: Record<string, any>): PrismaMethod {
-  const maybe = processed?.method
-  if (isPrismaMethod(maybe)) return maybe
+function resolveMethod(directive: DirectiveProps): PrismaMethod {
+  const m = (directive as any)?.method
+  if (isPrismaMethod(m)) return m
+  const pm = (directive as any)?.query?.processed?.method
+  if (isPrismaMethod(pm)) return pm
   return 'findMany'
 }
 
@@ -67,7 +73,7 @@ function buildSqlResult(args: {
   modelDef: any
   schemaModels: any
   dialect: SqlDialect
-}): { sql: string; paramMappings: readonly ParamMap[] } {
+}): SqlResult {
   const {
     method,
     processed,
@@ -99,8 +105,10 @@ function buildSqlResult(args: {
       whereResult,
       tableName,
       alias,
-      processed.skip as number,
+      processed,
       dialect,
+      modelDef,
+      schemaModels,
     )
   }
 
@@ -226,6 +234,54 @@ function buildMainWhere(args: {
   })
 }
 
+function extractIncludeSpec(
+  processed: Record<string, any>,
+  modelDef: any,
+): Record<string, any> {
+  const includeSpec: Record<string, any> = {}
+  const relationSet = new Set<string>(
+    Array.isArray(modelDef?.fields)
+      ? modelDef.fields
+          .filter((f: any) => f && f.isRelation && typeof f.name === 'string')
+          .map((f: any) => f.name)
+      : [],
+  )
+
+  if (processed.include && isPlainObject(processed.include)) {
+    for (const [key, value] of Object.entries(processed.include)) {
+      if (!relationSet.has(key)) continue
+      if (value !== false) {
+        includeSpec[key] = value
+      }
+    }
+  }
+
+  if (processed.select && isPlainObject(processed.select)) {
+    for (const [key, value] of Object.entries(processed.select)) {
+      if (!relationSet.has(key)) continue
+      if (value === false) continue
+
+      if (value === true) {
+        includeSpec[key] = true
+        continue
+      }
+
+      if (isPlainObject(value)) {
+        const selectVal = value as Record<string, any>
+        if (selectVal.include || selectVal.select) {
+          includeSpec[key] = value
+        } else {
+          includeSpec[key] = true
+        }
+      } else {
+        includeSpec[key] = true
+      }
+    }
+  }
+
+  return includeSpec
+}
+
 function buildAndNormalizeSql(args: {
   method: PrismaMethod
   processed: Record<string, any>
@@ -235,7 +291,12 @@ function buildAndNormalizeSql(args: {
   modelDef: any
   schemaModels: any
   dialect: SqlDialect
-}): { sql: string; paramMappings: readonly ParamMap[] } {
+}): {
+  sql: string
+  paramMappings: readonly ParamMap[]
+  requiresReduction: boolean
+  includeSpec: Record<string, any>
+} {
   const {
     method,
     processed,
@@ -258,20 +319,45 @@ function buildAndNormalizeSql(args: {
     dialect,
   })
 
-  return normalizeSqlAndMappingsForDialect(
+  const normalized = normalizeSqlAndMappingsForDialect(
     sqlResult.sql,
     sqlResult.paramMappings,
     dialect,
   )
+
+  const includeSpec =
+    (sqlResult.includeSpec && isPlainObject(sqlResult.includeSpec)
+      ? (sqlResult.includeSpec as Record<string, any>)
+      : null) ?? extractIncludeSpec(processed, modelDef)
+
+  const requiresReduction = sqlResult.requiresReduction === true
+
+  return {
+    sql: normalized.sql,
+    paramMappings: normalized.paramMappings,
+    requiresReduction,
+    includeSpec,
+  }
 }
 
 function finalizeDirective(args: {
   directive: DirectiveProps
+  method: PrismaMethod
   normalizedSql: string
   normalizedMappings: readonly ParamMap[]
   dialect: SqlDialect
+  requiresReduction: boolean
+  includeSpec: Record<string, any>
 }): SQLDirective {
-  const { directive, normalizedSql, normalizedMappings, dialect } = args
+  const {
+    directive,
+    method,
+    normalizedSql,
+    normalizedMappings,
+    dialect,
+    requiresReduction,
+    includeSpec,
+  } = args
 
   const params = normalizedMappings.map((m) => m.value ?? undefined)
   validateParamConsistencyByDialect(normalizedSql, params, dialect)
@@ -280,12 +366,14 @@ function finalizeDirective(args: {
     buildParamsFromMappings(normalizedMappings)
 
   return {
-    method: directive.method as PrismaMethod,
+    method,
     sql: normalizedSql,
     staticParams,
     dynamicKeys,
     paramOrder,
     paramMappings: normalizedMappings,
+    requiresReduction,
+    includeSpec,
     originalDirective: directive,
   }
 }
@@ -307,9 +395,9 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
     dialect,
   })
 
-  const method = directive.method as PrismaMethod
+  const method = resolveMethod(directive)
 
-  const normalized = buildAndNormalizeSql({
+  const built = buildAndNormalizeSql({
     method,
     processed: query.processed,
     whereResult,
@@ -322,8 +410,11 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
 
   return finalizeDirective({
     directive,
-    normalizedSql: normalized.sql,
-    normalizedMappings: normalized.paramMappings,
+    method,
+    normalizedSql: built.sql,
+    normalizedMappings: built.paramMappings,
     dialect,
+    requiresReduction: built.requiresReduction,
+    includeSpec: built.includeSpec,
   })
 }

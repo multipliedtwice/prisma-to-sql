@@ -31,16 +31,12 @@ export function normalizeValue(value: unknown): unknown {
 
     if (/^-?\d+$/.test(value)) {
       const num = parseInt(value, 10)
-      if (!isNaN(num)) {
-        return num
-      }
+      if (!isNaN(num)) return num
     }
 
     if (/^-?\d+\.\d+$/.test(value)) {
       const num = parseFloat(value)
-      if (!isNaN(num)) {
-        return parseFloat(num.toFixed(10))
-      }
+      if (!isNaN(num)) return parseFloat(num.toFixed(10))
     }
 
     try {
@@ -57,9 +53,7 @@ export function normalizeValue(value: unknown): unknown {
     return value
   }
 
-  if (Array.isArray(value)) {
-    return value.map(normalizeValue)
-  }
+  if (Array.isArray(value)) return value.map(normalizeValue)
 
   if (typeof value === 'object' && value !== null) {
     const sorted: Record<string, unknown> = {}
@@ -77,6 +71,32 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(normalizeValue(a)) === JSON.stringify(normalizeValue(b))
 }
 
+export function stableStringify(value: unknown): string {
+  return JSON.stringify(normalizeValue(value), null, 2)
+}
+
+export function typeSignature(value: unknown): unknown {
+  const v = normalizeValue(value)
+
+  if (v === null) return 'null'
+  if (v === undefined) return 'undefined'
+
+  if (Array.isArray(v)) {
+    const head = v.slice(0, 3).map(typeSignature)
+    return ['array', v.length, head]
+  }
+
+  if (typeof v === 'object') {
+    const obj = v as Record<string, unknown>
+    const keys = Object.keys(obj).sort()
+    const out: Record<string, unknown> = {}
+    for (const k of keys) out[k] = typeSignature(obj[k])
+    return out
+  }
+
+  return typeof v
+}
+
 export function diffResults(expected: unknown[], actual: unknown[]): string[] {
   const diffs: string[] = []
 
@@ -90,29 +110,59 @@ export function diffResults(expected: unknown[], actual: unknown[]): string[] {
   for (let i = 0; i < Math.min(maxLen, 5); i++) {
     if (!deepEqual(normalizeValue(expected[i]), normalizeValue(actual[i]))) {
       diffs.push(
-        `Row ${i}:\n  Expected: ${JSON.stringify(normalizeValue(expected[i]), null, 2)}\n  Actual: ${JSON.stringify(normalizeValue(actual[i]), null, 2)}`,
+        `Row ${i}:\nExpected:\n${JSON.stringify(normalizeValue(expected[i]), null, 2)}\nActual:\n${JSON.stringify(normalizeValue(actual[i]), null, 2)}`,
       )
     }
   }
 
   if (maxLen > 5) {
     const remaining = maxLen - 5
-    if (remaining > 0) {
-      diffs.push(`... and ${remaining} more rows not checked`)
-    }
+    if (remaining > 0) diffs.push(`... and ${remaining} more rows not checked`)
   }
 
   return diffs
 }
 
+export function diffAny(expected: unknown, actual: unknown): string[] {
+  const expArr = Array.isArray(expected)
+    ? expected
+    : expected == null
+      ? []
+      : [expected]
+  const actArr = Array.isArray(actual) ? actual : actual == null ? [] : [actual]
+  return diffResults(expArr, actArr)
+}
+
 export function sortByField<T>(arr: T[], field: keyof T): T[] {
-  return [...arr].sort((a, b) => {
-    const aVal = a[field]
-    const bVal = b[field]
-    if (aVal === null || aVal === undefined) return 1
-    if (bVal === null || bVal === undefined) return -1
-    if (aVal < bVal) return -1
-    if (aVal > bVal) return 1
-    return 0
+  const list: T[] = Array.isArray(arr)
+    ? arr
+    : arr == null
+      ? []
+      : [arr as unknown as T]
+
+  return [...list].sort((a, b) => {
+    const aVal = (a as any)?.[field]
+    const bVal = (b as any)?.[field]
+
+    if (aVal === bVal) return 0
+    if (aVal == null) return 1
+    if (bVal == null) return -1
+
+    if (typeof aVal === 'bigint' && typeof bVal === 'bigint')
+      return aVal < bVal ? -1 : 1
+    if (aVal instanceof Date && bVal instanceof Date)
+      return aVal.getTime() - bVal.getTime()
+
+    if (typeof aVal === 'number' && typeof bVal === 'number') return aVal - bVal
+    if (typeof aVal === 'string' && typeof bVal === 'string')
+      return aVal.localeCompare(bVal)
+
+    const aNum = typeof aVal === 'string' ? Number(aVal) : NaN
+    const bNum = typeof bVal === 'string' ? Number(bVal) : NaN
+    if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) return aNum - bNum
+
+    const aStr = String(aVal)
+    const bStr = String(bVal)
+    return aStr.localeCompare(bStr)
   })
 }

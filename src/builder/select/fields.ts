@@ -14,6 +14,8 @@ import {
 
 type SelectEntry = readonly [string, unknown]
 
+const DEFAULT_SELECT_CACHE = new WeakMap<Model, Map<string, string>>()
+
 function toSelectEntries(select: Record<string, unknown>): SelectEntry[] {
   const out: SelectEntry[] = []
   for (const [k, v] of Object.entries(select)) {
@@ -82,6 +84,22 @@ function buildDefaultScalarFields(model: Model, alias: string): string[] {
   return out
 }
 
+function getDefaultSelectCached(
+  model: Model,
+  alias: string,
+): string | undefined {
+  return DEFAULT_SELECT_CACHE.get(model)?.get(alias)
+}
+
+function cacheDefaultSelect(model: Model, alias: string, sql: string): void {
+  let cache = DEFAULT_SELECT_CACHE.get(model)
+  if (!cache) {
+    cache = new Map()
+    DEFAULT_SELECT_CACHE.set(model, cache)
+  }
+  cache.set(alias, sql)
+}
+
 export function buildSelectFields(
   args: { select?: Record<string, boolean | unknown> },
   model: Model,
@@ -91,9 +109,14 @@ export function buildSelectFields(
   const relationSet = getRelationFieldSet(model)
 
   if (!isNotNullish(args.select)) {
-    return buildDefaultScalarFields(model, alias).join(
+    const cached = getDefaultSelectCached(model, alias)
+    if (cached) return cached
+
+    const result = buildDefaultScalarFields(model, alias).join(
       SQL_SEPARATORS.FIELD_LIST,
     )
+    cacheDefaultSelect(model, alias, result)
+    return result
   }
 
   const entries = toSelectEntries(args.select)

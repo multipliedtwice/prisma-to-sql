@@ -1,5 +1,6 @@
 import { drizzle as drizzlePg } from 'drizzle-orm/postgres-js'
 import { drizzle as drizzleSqlite } from 'drizzle-orm/better-sqlite3'
+import type { Logger } from 'drizzle-orm/logger'
 import {
   eq,
   and,
@@ -20,6 +21,7 @@ import {
 import postgres from 'postgres'
 import Database from 'better-sqlite3'
 import * as schemaAll from '../drizzle/schema'
+import { CaptureDrizzleLogger } from './query-capture'
 
 export type PostgresDrizzleDB = {
   db: ReturnType<typeof drizzlePg>
@@ -44,6 +46,8 @@ function pickSchema(prefix: 'pg' | 'sqlite') {
 const pgSchema = pickSchema('pg')
 const sqliteSchema = pickSchema('sqlite')
 
+const logger: Logger = new CaptureDrizzleLogger()
+
 export function createDrizzleDB(
   dialect: 'postgres',
   connectionString?: string,
@@ -61,13 +65,13 @@ export function createDrizzleDB(
       connectionString ||
         'postgresql://postgres:postgres@localhost:5433/prisma_test',
     )
-    const db = drizzlePg(client, { schema: pgSchema as any })
+    const db = drizzlePg(client, { schema: pgSchema as any, logger })
     return { db, client, dialect: 'postgres' }
   }
 
   const dbPath = connectionString || './tests/prisma/db.sqlite'
   const client = new Database(dbPath)
-  const db = drizzleSqlite(client, { schema: sqliteSchema as any })
+  const db = drizzleSqlite(client, { schema: sqliteSchema as any, logger })
   return { db, client, dialect: 'sqlite' }
 }
 

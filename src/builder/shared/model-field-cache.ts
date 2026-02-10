@@ -1,111 +1,86 @@
 import { Model, Field } from '../../types'
-import { needsQuoting } from './validators/sql-validators'
+import { quote } from './sql-utils'
 
-interface FieldInfo {
-  name: string
-  dbName: string
-  type: string
-  isRelation: boolean
-  isRequired: boolean
-}
+const SCALAR_FIELD_CACHE = new WeakMap<Model, Set<string>>()
+const RELATION_FIELD_CACHE = new WeakMap<Model, Set<string>>()
+const COLUMN_MAP_CACHE = new WeakMap<Model, Map<string, string>>()
+const QUOTED_COLUMN_CACHE = new WeakMap<Model, Map<string, string>>()
+const FIELD_BY_NAME_CACHE = new WeakMap<Model, Map<string, Field>>()
 
-interface CachedModelInfo {
-  fieldInfo: Map<string, FieldInfo>
-  scalarFields: Set<string>
-  relationFields: Set<string>
-  columnMap: Map<string, string>
-  fieldByName: Map<string, Field>
-  quotedColumns: Map<string, string>
-}
+export function getScalarFieldSet(model: Model): ReadonlySet<string> {
+  let cached = SCALAR_FIELD_CACHE.get(model)
+  if (cached) return cached
 
-const MODEL_CACHE = new WeakMap<Model, CachedModelInfo>()
-
-function quoteIdent(id: string): string {
-  if (typeof id !== 'string' || id.trim().length === 0) {
-    throw new Error('quoteIdent: identifier is required and cannot be empty')
+  const set = new Set<string>()
+  for (const f of model.fields) {
+    if (!f.isRelation) set.add(f.name)
   }
-  for (let i = 0; i < id.length; i++) {
-    const code = id.charCodeAt(i)
-    if ((code >= 0x00 && code <= 0x1f) || code === 0x7f) {
-      throw new Error(
-        `quoteIdent: identifier contains invalid characters: ${JSON.stringify(id)}`,
-      )
+
+  SCALAR_FIELD_CACHE.set(model, set)
+  return set
+}
+
+export function getRelationFieldSet(model: Model): ReadonlySet<string> {
+  let cached = RELATION_FIELD_CACHE.get(model)
+  if (cached) return cached
+
+  const set = new Set<string>()
+  for (const f of model.fields) {
+    if (f.isRelation) set.add(f.name)
+  }
+
+  RELATION_FIELD_CACHE.set(model, set)
+  return set
+}
+
+export function getColumnMap(model: Model): ReadonlyMap<string, string> {
+  let cached = COLUMN_MAP_CACHE.get(model)
+  if (cached) return cached
+
+  const map = new Map<string, string>()
+  for (const f of model.fields) {
+    if (f.dbName && f.dbName !== f.name) {
+      map.set(f.name, f.dbName)
     }
   }
-  if (needsQuoting(id)) {
-    return `"${id.replace(/"/g, '""')}"`
-  }
-  return id
-}
 
-function ensureFullCache(model: Model): CachedModelInfo {
-  let cache = MODEL_CACHE.get(model)
-
-  if (!cache) {
-    const fieldInfo = new Map<string, FieldInfo>()
-    const scalarFields = new Set<string>()
-    const relationFields = new Set<string>()
-    const columnMap = new Map<string, string>()
-    const fieldByName = new Map<string, Field>()
-    const quotedColumns = new Map<string, string>()
-
-    for (const f of model.fields) {
-      const info: FieldInfo = {
-        name: f.name,
-        dbName: f.dbName || f.name,
-        type: f.type,
-        isRelation: !!f.isRelation,
-        isRequired: !!f.isRequired,
-      }
-      fieldInfo.set(f.name, info)
-      fieldByName.set(f.name, f)
-
-      if (info.isRelation) {
-        relationFields.add(f.name)
-      } else {
-        scalarFields.add(f.name)
-        const dbName = info.dbName
-        columnMap.set(f.name, dbName)
-        quotedColumns.set(f.name, quoteIdent(dbName))
-      }
-    }
-
-    cache = {
-      fieldInfo,
-      scalarFields,
-      relationFields,
-      columnMap,
-      fieldByName,
-      quotedColumns,
-    }
-    MODEL_CACHE.set(model, cache)
-  }
-
-  return cache
-}
-
-export function getFieldInfo(
-  model: Model,
-  fieldName: string,
-): FieldInfo | undefined {
-  return ensureFullCache(model).fieldInfo.get(fieldName)
-}
-
-export function getScalarFieldSet(model: Model): Set<string> {
-  return ensureFullCache(model).scalarFields
-}
-
-export function getRelationFieldSet(model: Model): Set<string> {
-  return ensureFullCache(model).relationFields
-}
-
-export function getColumnMap(model: Model): Map<string, string> {
-  return ensureFullCache(model).columnMap
+  COLUMN_MAP_CACHE.set(model, map)
+  return map
 }
 
 export function getQuotedColumn(
   model: Model,
   fieldName: string,
 ): string | undefined {
-  return ensureFullCache(model).quotedColumns.get(fieldName)
+  let cache = QUOTED_COLUMN_CACHE.get(model)
+  if (!cache) {
+    cache = new Map()
+    QUOTED_COLUMN_CACHE.set(model, cache)
+  }
+
+  const cached = cache.get(fieldName)
+  if (cached !== undefined) return cached
+
+  const columnMap = getColumnMap(model)
+  const columnName = columnMap.get(fieldName) || fieldName
+  const quoted = quote(columnName)
+
+  cache.set(fieldName, quoted)
+  return quoted
+}
+
+export function getFieldByName(
+  model: Model,
+  fieldName: string,
+): Field | undefined {
+  let cache = FIELD_BY_NAME_CACHE.get(model)
+  if (!cache) {
+    cache = new Map()
+    for (const field of model.fields) {
+      cache.set(field.name, field)
+    }
+    FIELD_BY_NAME_CACHE.set(model, cache)
+  }
+
+  return cache.get(fieldName)
 }

@@ -40,6 +40,8 @@ import {
   assertNumericField,
 } from './shared/validators/field-assertions'
 import { buildComparisons } from './shared/comparison-builder'
+import { buildOrderBy } from './pagination'
+import { buildSelectSql } from './select'
 
 type AggregateKey = '_count' | '_sum' | '_avg' | '_min' | '_max'
 type LogicalKey = 'AND' | 'OR' | 'NOT'
@@ -648,6 +650,12 @@ export function buildAggregateSql(
   }
 
   const selectClause = aggFields.join(SQL_SEPARATORS.FIELD_LIST)
+
+  const joinsPart =
+    whereResult.joins && whereResult.joins.length > 0
+      ? whereResult.joins.join(' ')
+      : ''
+
   const whereClause = isValidWhereClause(whereResult.clause)
     ? SQL_TEMPLATES.WHERE + ' ' + whereResult.clause
     : ''
@@ -659,6 +667,7 @@ export function buildAggregateSql(
     tableName,
     alias,
   ]
+  if (joinsPart) parts.push(joinsPart)
   if (whereClause) parts.push(whereClause)
 
   const sql = parts.join(' ').trim()
@@ -748,8 +757,17 @@ export function buildGroupBySql(
   )
   const havingClause = buildGroupByHaving(args, alias, params, model, d)
 
+  const joinsPart =
+    whereResult.joins && whereResult.joins.length > 0
+      ? whereResult.joins.join(' ')
+      : ''
+
   const whereClause = isValidWhereClause(whereResult.clause)
     ? SQL_TEMPLATES.WHERE + ' ' + whereResult.clause
+    : ''
+
+  const orderBySql = isNotNullish(args.orderBy)
+    ? buildOrderBy(args.orderBy, alias, d, model)
     : ''
 
   const parts: string[] = [
@@ -759,9 +777,24 @@ export function buildGroupBySql(
     tableName,
     alias,
   ]
+  if (joinsPart) parts.push(joinsPart)
   if (whereClause) parts.push(whereClause)
   parts.push(SQL_TEMPLATES.GROUP_BY, groupFields)
   if (havingClause) parts.push(havingClause)
+
+  if (orderBySql) {
+    parts.push(SQL_TEMPLATES.ORDER_BY, orderBySql)
+  }
+
+  if (isNotNullish(args.take)) {
+    const ph = addAutoScoped(params, args.take, 'groupBy.take')
+    parts.push(SQL_TEMPLATES.LIMIT, ph)
+  }
+
+  if (isNotNullish(args.skip)) {
+    const ph = addAutoScoped(params, args.skip, 'groupBy.skip')
+    parts.push(SQL_TEMPLATES.OFFSET, ph)
+  }
 
   const sql = parts.join(' ').trim()
 
@@ -780,48 +813,37 @@ export function buildGroupBySql(
   }
 }
 
-function isPositiveInteger(value: number): boolean {
-  return Number.isFinite(value) && Number.isInteger(value) && value > 0
+function findPrimaryKeyFields(model: Model): string[] {
+  const pkFields = model.fields.filter((f) => f.isId && !f.isRelation)
+  if (pkFields.length > 0) return pkFields.map((f) => f.name)
+
+  const defaultId = model.fields.find((f) => f.name === 'id' && !f.isRelation)
+  if (defaultId) return ['id']
+
+  return []
 }
 
-function parseSkipValue(skip: number | string): number {
-  return typeof skip === 'string' ? Number(skip.trim()) : skip
+function normalizeCountArgs(argsOrSkip: unknown): PrismaQueryArgs {
+  if (isPlainObject(argsOrSkip)) return argsOrSkip as PrismaQueryArgs
+  if (argsOrSkip === undefined || argsOrSkip === null) return {}
+  return { skip: argsOrSkip as any }
 }
 
-function validateSkipParameter(skip: number | string | undefined): void {
-  if (skip === undefined || skip === null) {
-    return
-  }
-
-  if (isDynamicParameter(skip)) {
-    throw new Error(
-      'count() with skip is not supported because it produces nondeterministic results. ' +
-        'Dynamic skip cannot be validated at build time. ' +
-        'Use findMany().length or add explicit orderBy + cursor/skip logic in a deterministic query.',
-    )
-  }
-
-  const skipValue = parseSkipValue(skip)
-
-  if (isPositiveInteger(skipValue)) {
-    throw new Error(
-      'count() with skip is not supported because it produces nondeterministic results. ' +
-        'Use findMany().length or add explicit orderBy to ensure deterministic behavior.',
-    )
+function assertNoNegativeTake(args: PrismaQueryArgs): void {
+  if (typeof (args as any).take === 'number' && (args as any).take < 0) {
+    throw new Error('Negative take is not supported for count()')
   }
 }
 
-export function buildCountSql(
+function buildSimpleCountSql(
   whereResult: WhereClauseResult,
   tableName: string,
   alias: string,
-  skip?: number | string,
-  _dialect?: SqlDialect,
 ): SqlResult {
-  assertSafeAlias(alias)
-  assertSafeTableRef(tableName)
-
-  validateSkipParameter(skip)
+  const joinsPart =
+    whereResult.joins && whereResult.joins.length > 0
+      ? whereResult.joins.join(' ')
+      : ''
 
   const whereClause = isValidWhereClause(whereResult.clause)
     ? SQL_TEMPLATES.WHERE + ' ' + whereResult.clause
@@ -836,6 +858,7 @@ export function buildCountSql(
     tableName,
     alias,
   ]
+  if (joinsPart) parts.push(joinsPart)
   if (whereClause) parts.push(whereClause)
 
   const sql = parts.join(' ').trim()
@@ -847,5 +870,74 @@ export function buildCountSql(
     sql,
     params: whereResult.params,
     paramMappings: whereResult.paramMappings,
+  }
+}
+
+export function buildCountSql(
+  whereResult: WhereClauseResult,
+  tableName: string,
+  alias: string,
+  argsOrSkip?: PrismaQueryArgs | number | string,
+  dialect?: SqlDialect,
+  model?: Model,
+  schemas?: Model[],
+): SqlResult {
+  assertSafeAlias(alias)
+  assertSafeTableRef(tableName)
+
+  const args = normalizeCountArgs(argsOrSkip)
+  assertNoNegativeTake(args)
+
+  if (!model) {
+    return buildSimpleCountSql(whereResult, tableName, alias)
+  }
+
+  const pkFields = findPrimaryKeyFields(model)
+  const distinctFields = isNonEmptyArray((args as any).distinct)
+    ? (args as any).distinct.map((x: any) => String(x)).filter((x: string) => x)
+    : []
+
+  const selectFields = distinctFields.length > 0 ? distinctFields : pkFields
+  if (selectFields.length === 0) {
+    return buildSimpleCountSql(whereResult, tableName, alias)
+  }
+
+  const select: Record<string, boolean> = {}
+  for (const f of selectFields) select[f] = true
+
+  const subArgs: PrismaQueryArgs = {
+    ...(args as any),
+    include: undefined,
+    select,
+  }
+
+  const d = dialect ?? getGlobalDialect()
+  const subSchemas =
+    Array.isArray(schemas) && schemas.length > 0 ? schemas : [model]
+
+  const sub = buildSelectSql({
+    method: 'findMany',
+    args: subArgs,
+    model,
+    schemas: subSchemas,
+    from: { tableName, alias },
+    whereResult,
+    dialect: d,
+  })
+
+  const countAlias = quote('__count_sub')
+  const sql =
+    `${SQL_TEMPLATES.SELECT} ${SQL_TEMPLATES.COUNT_ALL} ${SQL_TEMPLATES.AS} ${quote(
+      '_count._all',
+    )} ` +
+    `${SQL_TEMPLATES.FROM} (${sub.sql}) ${SQL_TEMPLATES.AS} ${countAlias}`
+
+  validateSelectQuery(sql)
+  validateParamConsistency(sql, sub.params)
+
+  return {
+    sql,
+    params: sub.params,
+    paramMappings: sub.paramMappings,
   }
 }

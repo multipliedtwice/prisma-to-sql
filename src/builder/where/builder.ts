@@ -1,3 +1,4 @@
+// src/builder/where/builder.ts
 import { isRelationField } from '../joins'
 import { buildScalarOperator } from './operators-scalar'
 import { buildArrayOperator } from './operators-array'
@@ -20,7 +21,7 @@ import { BuildContext, QueryResult } from '../shared/types'
 import {
   assertFieldExists,
   assertValidOperator,
-} from '../shared/validators/field-validators'
+} from '../shared/validators/field-assertions'
 import {
   isEmptyWhere,
   isValidWhereClause,
@@ -110,6 +111,32 @@ function buildRelationFilter(
   return buildTopLevelRelation(fieldName, value, ctx2, builder)
 }
 
+function buildSimpleEquality(
+  expr: string,
+  value: unknown,
+  ctx: BuildContext,
+): string {
+  if (value === null) return `${expr} ${SQL_TEMPLATES.IS_NULL}`
+  const placeholder = ctx.params.addAuto(value)
+  return `${expr} = ${placeholder}`
+}
+
+function isSimpleWhere(where: Record<string, unknown>): boolean {
+  const keys = Object.keys(where)
+  if (keys.length !== 1) return false
+
+  const key = keys[0]
+  const value = where[key]
+
+  if (value === null) return true
+  if (value === undefined) return false
+  if (typeof value === 'string') return true
+  if (typeof value === 'number') return true
+  if (typeof value === 'boolean') return true
+
+  return false
+}
+
 function buildWhereEntry(
   key: string,
   value: unknown,
@@ -148,6 +175,15 @@ function buildWhereInternal(
 
   if (isEmptyWhere(where)) {
     return freezeResult(DEFAULT_WHERE_CLAUSE, EMPTY_JOINS)
+  }
+
+  if (isSimpleWhere(where)) {
+    const key = Object.keys(where)[0]
+    const value = where[key]
+    const field = assertFieldExists(key, ctx.model, ctx.path)
+    const expr = col(ctx.alias, key, ctx.model)
+    const clause = buildSimpleEquality(expr, value, ctx)
+    return freezeResult(clause, EMPTY_JOINS)
   }
 
   const allJoins: string[] = []

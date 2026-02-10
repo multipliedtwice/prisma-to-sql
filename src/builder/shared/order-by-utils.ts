@@ -12,9 +12,15 @@ export type OrderByType =
 
 type OrderByDirection = 'asc' | 'desc'
 type OrderByNulls = 'first' | 'last'
-type OrderBySortObject = { sort: OrderByDirection; nulls?: OrderByNulls }
+
+export type OrderBySortObject = {
+  direction: OrderByDirection
+  nulls?: OrderByNulls
+}
+
 type NormalizedOrderByValue = OrderByDirection | OrderBySortObject
 type NormalizedOrderBy = Array<Record<string, NormalizedOrderByValue>>
+
 type ParseOrderByValue = (
   v: unknown,
   field?: string,
@@ -37,7 +43,6 @@ const flipSortString = (v: unknown): unknown => {
 
 const getNextSort = (sortRaw: unknown): unknown => {
   if (typeof sortRaw !== 'string') return sortRaw
-
   const s = sortRaw.toLowerCase()
   if (s === 'asc') return 'desc'
   if (s === 'desc') return 'asc'
@@ -47,12 +52,21 @@ const getNextSort = (sortRaw: unknown): unknown => {
 const flipObjectSort = (
   obj: Record<string, unknown>,
 ): Record<string, unknown> => {
-  const sortRaw = obj.sort
-  const out: Record<string, unknown> = { ...obj, sort: getNextSort(sortRaw) }
+  const out: Record<string, unknown> = { ...obj }
 
-  const nullsRaw = obj.nulls
-  if (typeof nullsRaw === 'string') {
-    out.nulls = flipNulls(nullsRaw)
+  const hasSort = Object.prototype.hasOwnProperty.call(obj, 'sort')
+  const hasDirection = Object.prototype.hasOwnProperty.call(obj, 'direction')
+
+  if (hasSort) {
+    out.sort = getNextSort(obj.sort)
+  } else if (hasDirection) {
+    out.direction = getNextSort(obj.direction)
+  } else {
+    out.sort = getNextSort(obj.sort)
+  }
+
+  if (typeof obj.nulls === 'string') {
+    out.nulls = flipNulls(obj.nulls)
   }
 
   return out
@@ -117,7 +131,7 @@ const normalizePairs = (
     return {
       [field]:
         parsed.nulls !== undefined
-          ? { sort: parsed.direction, nulls: parsed.nulls }
+          ? { direction: parsed.direction, nulls: parsed.nulls }
           : parsed.direction,
     }
   })

@@ -63,6 +63,8 @@ export interface SqlResult {
   readonly sql: string
   readonly params: readonly unknown[]
   readonly paramMappings: readonly ParamMap[]
+  readonly requiresReduction?: boolean
+  readonly includeSpec?: Record<string, any>
 }
 
 export interface ErrorContext {

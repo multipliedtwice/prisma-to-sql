@@ -1,3 +1,4 @@
+// src/builder/select.ts
 import { SqlDialect, getGlobalDialect } from '../sql-builder-dialect'
 import { PrismaQueryArgs, Model } from '../types'
 import {

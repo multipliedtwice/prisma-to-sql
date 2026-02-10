@@ -20,6 +20,7 @@ import {
   type TransactionOptions,
 } from './transaction'
 import { transformQueryResults } from './result-transformers'
+import { buildReducerConfig, reduceFlatRows } from './builder/select/reducer'
 import {
   Model,
   PrismaMethod,
@@ -111,8 +112,22 @@ export function createPrismaSQL<TClient>(
     method: PrismaMethod,
     args: Record<string, unknown> = {},
   ): Promise<T> {
-    const { sql, params } = toSQL(model, method, args)
-    return execute(client, sql, params) as Promise<T>
+    const sqlResult = toSQL(model, method, args)
+    let results = await execute(client, sqlResult.sql, [...sqlResult.params])
+
+    if (sqlResult.requiresReduction && sqlResult.includeSpec) {
+      const modelDef = modelMap.get(model)
+      if (modelDef) {
+        const config = buildReducerConfig(
+          modelDef,
+          sqlResult.includeSpec,
+          models,
+        )
+        results = reduceFlatRows(results as any[], config)
+      }
+    }
+
+    return transformQueryResults(method, results) as T
   }
 
   function batchSql(queries: Record<string, BatchQuery>): SqlResult {
@@ -190,6 +205,8 @@ export {
 }
 
 export { transformQueryResults }
+export { buildReducerConfig, reduceFlatRows } from './builder/select/reducer'
+export type { ReducerConfig } from './builder/select/reducer'
 
 export type { Model, PrismaMethod, PrismaSQLConfig, PrismaSQLResult, SqlResult }
 export { normalizeValue } from './utils/normalize-value'

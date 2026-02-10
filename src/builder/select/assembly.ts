@@ -1,4 +1,4 @@
-import { isDynamicParameter } from '@dee-wan/schema-parser'
+import type { PrismaQueryArgs } from '../../types'
 import { SQL_TEMPLATES, SQL_SEPARATORS } from '../shared/constants'
 import { col, quote } from '../shared/sql-utils'
 import { SelectQuerySpec, SqlResult } from '../shared/types'
@@ -18,13 +18,12 @@ import { buildRelationCountSql } from './includes'
 import { joinNonEmpty } from '../shared/string-builder'
 import { getRelationFieldSet } from '../shared/model-field-cache'
 import { parseOrderByValue } from '../pagination'
-import { normalizeOrderByInput } from '../shared/order-by-utils'
-
-const ALIAS_CAPTURE = '([A-Za-z_][A-Za-z0-9_]*)'
-const COLUMN_PART = '(?:"([^"]+)"|([a-z_][a-z0-9_]*))'
-const AS_PART = `(?:\\s+AS\\s+${COLUMN_PART})?`
-const SIMPLE_COLUMN_PATTERN = `^${ALIAS_CAPTURE}\\.${COLUMN_PART}${AS_PART}$`
-const SIMPLE_COLUMN_RE = new RegExp(SIMPLE_COLUMN_PATTERN, 'i')
+import {
+  normalizeOrderByInput,
+  OrderBySortObject,
+} from '../shared/order-by-utils'
+import { buildFlatJoinSql, canUseFlatJoinForAll } from './flat-join'
+import { isDynamicParameter } from '@dee-wan/schema-parser'
 
 type DistinctOrderEntry = {
   field: string
@@ -79,10 +78,6 @@ function finalizeSql(
     params: snapshot.params,
     paramMappings: snapshot.mappings,
   }
-}
-
-function isIdent(s: string): boolean {
-  return /^[A-Za-z_]\w*$/.test(s)
 }
 
 function skipSpaces(s: string, i: number): number {
@@ -203,11 +198,6 @@ function parseSelectField(p: string, fromAlias: string): string {
 
   const a = readIdentOrQuoted(p, i)
   const actualAlias = a.text.toLowerCase()
-  if (!isIdent(a.text)) {
-    throw new Error(
-      `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
-    )
-  }
   if (actualAlias !== fromLower) {
     throw new Error(`Expected alias '${fromAlias}', got '${a.text}' in: ${p}`)
   }
@@ -249,18 +239,6 @@ function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
   }
 
   return names
-}
-
-function replaceOrderByAlias(
-  orderBy: string,
-  fromAlias: string,
-  outerAlias: string,
-): string {
-  const src = String(fromAlias)
-  if (src.length === 0) return orderBy
-  const escaped = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const re = new RegExp(`\\b${escaped}\\.`, 'gi')
-  return orderBy.replace(re, outerAlias + '.')
 }
 
 function buildDistinctColumns(
@@ -325,20 +303,20 @@ function extractDistinctOrderEntries(
       spec.args.orderBy,
       parseOrderByValue,
     )
+
     const entries: DistinctOrderEntry[] = []
     for (const item of normalized) {
       for (const field in item) {
         if (!Object.prototype.hasOwnProperty.call(item, field)) continue
         const value = item[field]
+
         if (typeof value === 'string') {
           entries.push({ field, direction: value as 'asc' | 'desc' })
-        } else {
-          const obj = value as {
-            sort: 'asc' | 'desc'
-            nulls?: 'first' | 'last'
-          }
-          entries.push({ field, direction: obj.sort, nulls: obj.nulls })
+          continue
         }
+
+        const obj = value as OrderBySortObject
+        entries.push({ field, direction: obj.direction, nulls: obj.nulls })
       }
     }
     if (entries.length > 0) return entries
@@ -572,7 +550,7 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
   }
 }
 
-function appendPagination(sql: string, spec: SelectQuerySpec): string {
+export function appendPagination(sql: string, spec: SelectQuerySpec): string {
   const { method, pagination, params } = spec
   const isFindUniqueOrFirst = method === 'findUnique' || method === 'findFirst'
 
@@ -619,8 +597,13 @@ function appendPagination(sql: string, spec: SelectQuerySpec): string {
 }
 
 function hasWindowDistinct(spec: SelectQuerySpec): boolean {
+  if (spec.dialect !== 'sqlite') return false
   const d = spec.distinct
   return isNotNullish(d) && isNonEmptyArray(d)
+}
+
+function hasAnyDistinct(spec: SelectQuerySpec): boolean {
+  return isNotNullish(spec.distinct) && isNonEmptyArray(spec.distinct)
 }
 
 function assertDistinctAllowed(
@@ -631,12 +614,6 @@ function assertDistinctAllowed(
     throw new Error(
       'distinct is only supported for findMany in this SQL builder',
     )
-  }
-}
-
-function assertHasSelectFields(baseSelect: string, includeCols: string): void {
-  if (!isNonEmptyString(baseSelect) && !isNonEmptyString(includeCols)) {
-    throw new Error('SELECT requires at least one selected field or include')
   }
 }
 
@@ -686,6 +663,94 @@ function pushWhere(parts: string[], conditions: string[]): void {
   parts.push(SQL_TEMPLATES.WHERE, conditions.join(SQL_SEPARATORS.CONDITION_AND))
 }
 
+function extractIncludeSpec(args: PrismaQueryArgs): Record<string, any> {
+  const includeSpec: Record<string, any> = {}
+
+  if (args.include && isPlainObject(args.include)) {
+    for (const [key, value] of Object.entries(args.include)) {
+      if (value !== false) {
+        includeSpec[key] = value
+      }
+    }
+  }
+
+  if (args.select && isPlainObject(args.select)) {
+    for (const [key, value] of Object.entries(args.select)) {
+      if (value !== false && value !== true && isPlainObject(value)) {
+        const selectVal = value as Record<string, any>
+        if (selectVal.include || selectVal.select) {
+          includeSpec[key] = value
+        }
+      }
+    }
+  }
+
+  return includeSpec
+}
+
+function hasNestedIncludes(includeSpec: Record<string, any>): boolean {
+  return Object.keys(includeSpec).length > 0
+}
+
+function splitOrderByTerms(orderBy: string): string[] {
+  const raw = orderBy.trim()
+  if (raw.length === 0) return []
+  return raw
+    .split(SQL_SEPARATORS.ORDER_BY)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+}
+
+function hasIdInOrderBy(orderBy: string, fromAlias: string): boolean {
+  const aliasLower = String(fromAlias).toLowerCase()
+  const terms = splitOrderByTerms(orderBy).map((t) => t.toLowerCase())
+  return terms.some(
+    (t) =>
+      t.startsWith(aliasLower + '.id ') ||
+      t.startsWith(aliasLower + '."id" ') ||
+      t === aliasLower + '.id' ||
+      t === aliasLower + '."id"',
+  )
+}
+
+function ensureIdTiebreakerOrderBy(
+  orderBy: string,
+  fromAlias: string,
+  model: any,
+): string {
+  const idField = model?.fields?.find?.(
+    (f: any) => f.name === 'id' && !f.isRelation,
+  )
+  if (!idField) return orderBy
+  if (hasIdInOrderBy(orderBy, fromAlias)) return orderBy
+  const t = col(fromAlias, 'id', model) + ' ASC'
+  return isNonEmptyString(orderBy) ? orderBy + ', ' + t : t
+}
+
+function ensurePostgresDistinctOrderBy(args: {
+  orderBy: string
+  distinct: readonly string[]
+  fromAlias: string
+  model: any
+}): string {
+  const { orderBy, distinct, fromAlias, model } = args
+
+  const distinctTerms = distinct.map((f) => col(fromAlias, f, model) + ' ASC')
+
+  const existing = splitOrderByTerms(orderBy)
+  const canKeepAsIs =
+    existing.length >= distinctTerms.length &&
+    distinctTerms.every((term, i) =>
+      existing[i].toLowerCase().startsWith(term.split(' ASC')[0].toLowerCase()),
+    )
+
+  const merged = canKeepAsIs
+    ? orderBy
+    : [...distinctTerms, ...existing].join(SQL_SEPARATORS.ORDER_BY)
+
+  return ensureIdTiebreakerOrderBy(merged, fromAlias, model)
+}
+
 export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const {
     select,
@@ -700,18 +765,44 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
     params,
     dialect,
     model,
+    includes,
+    schemas,
+    pagination,
+    args,
   } = spec
 
   const useWindowDistinct = hasWindowDistinct(spec)
   assertDistinctAllowed(method, useWindowDistinct)
 
+  const hasDistinct = hasAnyDistinct(spec)
+  assertDistinctAllowed(method, hasDistinct)
+
+  const includeSpec = extractIncludeSpec(args)
+  const hasIncludes = hasNestedIncludes(includeSpec)
+
+  const shouldUseFlatJoin =
+    dialect === 'postgres' && hasIncludes && canUseFlatJoinForAll(includeSpec)
+
+  if (shouldUseFlatJoin) {
+    const flatResult = buildFlatJoinSql(spec)
+
+    if (flatResult.sql) {
+      const baseSqlResult = finalizeSql(flatResult.sql, params, dialect)
+
+      return {
+        sql: baseSqlResult.sql,
+        params: baseSqlResult.params,
+        paramMappings: baseSqlResult.paramMappings,
+        requiresReduction: true,
+        includeSpec: flatResult.includeSpec,
+      }
+    }
+  }
+
   const { includeCols, selectWithIncludes, countJoins, includeJoins } =
     buildIncludeColumns(spec)
 
   if (useWindowDistinct) {
-    const baseSelect = (select ?? '').trim()
-    assertHasSelectFields(baseSelect, includeCols)
-
     const allExtraJoins = [...countJoins, ...includeJoins]
     const spec2 = withCountJoins(spec, allExtraJoins, whereJoins)
     let sql = buildSqliteDistinctQuery(spec2, selectWithIncludes).trim()
@@ -753,7 +844,18 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const conditions = buildConditions(whereClause, cursorClause)
   pushWhere(parts, conditions)
 
-  if (isNonEmptyString(orderBy)) parts.push(SQL_TEMPLATES.ORDER_BY, orderBy)
+  let finalOrderBy = orderBy
+  if (dialect === 'postgres' && isNonEmptyArray(distinct)) {
+    finalOrderBy = ensurePostgresDistinctOrderBy({
+      orderBy: orderBy || '',
+      distinct: [...distinct],
+      fromAlias: from.alias,
+      model,
+    })
+  }
+
+  if (isNonEmptyString(finalOrderBy))
+    parts.push(SQL_TEMPLATES.ORDER_BY, finalOrderBy)
 
   let sql = parts.join(' ').trim()
   sql = appendPagination(sql, spec)

@@ -4,11 +4,14 @@ import { promisify } from 'util'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
+import { registerPrismaQueryCapture } from './query-capture'
+import { generateClient } from '../../src/code-emitter'
 
 const execAsync = promisify(exec)
 
 export interface TestDB {
   prisma: any
+  extended: any
   dialect: 'postgres' | 'sqlite'
   execute: (sql: string, params: unknown[]) => Promise<unknown[]>
   measureServerMs: (sql: string, params: unknown[]) => Promise<number>
@@ -116,6 +119,49 @@ async function generatePrismaClient(
   }
 }
 
+async function getDatamodelForDialect(
+  dialect: 'postgres' | 'sqlite',
+  version: number,
+): Promise<any> {
+  if (version === 6) {
+    const clientPath =
+      dialect === 'postgres'
+        ? '../generated/postgres/client'
+        : '../generated/sqlite/client'
+
+    const { Prisma } = await import(clientPath)
+    return Prisma.dmmf.datamodel
+  }
+
+  const schemaPath = await mergeSchema(dialect, version)
+  const schema = await fs.readFile(schemaPath, 'utf-8')
+
+  const { getDMMF } = await import('@prisma/internals')
+  const dmmf = await getDMMF({ datamodel: schema } as any)
+  return dmmf.datamodel
+}
+
+async function generateSpeedExtension(
+  dialect: 'postgres' | 'sqlite',
+  version: number,
+): Promise<void> {
+  const datamodel = await getDatamodelForDialect(dialect, version)
+
+  const outputDir = path.join(
+    process.cwd(),
+    'tests',
+    'generated',
+    `extension-${dialect}-v${version}`,
+  )
+
+  await generateClient({
+    datamodel,
+    outputDir,
+    config: { dialect, skipInvalid: false },
+    runtimeImportPath: '../../../src/index',
+  })
+}
+
 function extractExplainAnalyzeMs(rows: unknown[]): number {
   const row = (rows as any[])[0]
   if (!row) return 0
@@ -140,15 +186,38 @@ function extractExplainAnalyzeMs(rows: unknown[]): number {
 
 async function createPostgresDB(version?: number): Promise<TestDB> {
   await generatePrismaClient('postgres', version)
-  if ((version || PRISMA_VERSION) === 6) {
+
+  const prismaVersion = version ?? PRISMA_VERSION
+  await generateSpeedExtension('postgres', prismaVersion)
+
+  const pgClient = postgres(PG_URL)
+
+  if (prismaVersion === 6) {
     const { PrismaClient } = await import('../generated/postgres/client')
     const prisma = new PrismaClient({
       datasources: { db: { url: PG_URL } },
+      log: [{ emit: 'event', level: 'query' }],
     })
-    const pgClient = postgres(PG_URL)
+    registerPrismaQueryCapture(prisma)
+
+    const extensionPath = path.join(
+      process.cwd(),
+      'tests',
+      'generated',
+      'extension-postgres-v6',
+      'index.js',
+    )
+    const { speedExtension } = await import(extensionPath)
+    const extended = prisma.$extends(
+      speedExtension({
+        postgres: pgClient,
+        debug: false,
+      }),
+    )
 
     return {
       prisma,
+      extended,
       dialect: 'postgres',
       execute: async (sql: string, params: unknown[]) => {
         return (await pgClient.unsafe(sql, params as any[])) as unknown[]
@@ -171,11 +240,30 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
     const { PrismaPg } = await import('@prisma/adapter-pg')
 
     const adapter = new PrismaPg({ connectionString: PG_URL })
-    const prisma = new PrismaClient({ adapter })
-    const pgClient = postgres(PG_URL)
+    const prisma = new PrismaClient({
+      adapter,
+      log: [{ emit: 'event', level: 'query' }],
+    })
+    registerPrismaQueryCapture(prisma)
+
+    const extensionPath = path.join(
+      process.cwd(),
+      'tests',
+      'generated',
+      'extension-postgres-v7',
+      'index.js',
+    )
+    const { speedExtension } = await import(extensionPath)
+    const extended = prisma.$extends(
+      speedExtension({
+        postgres: pgClient,
+        debug: false,
+      }),
+    )
 
     return {
       prisma,
+      extended,
       dialect: 'postgres',
       execute: async (sql: string, params: unknown[]) => {
         return (await pgClient.unsafe(sql, params as any[])) as unknown[]
@@ -202,12 +290,34 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
 
   await generatePrismaClient('sqlite', version)
 
-  if ((version || PRISMA_VERSION) === 6) {
+  const prismaVersion = version ?? PRISMA_VERSION
+  await generateSpeedExtension('sqlite', prismaVersion)
+
+  const sqliteClient = new Database(SQLITE_DB_PATH)
+
+  if (prismaVersion === 6) {
     const { PrismaClient } = await import('../generated/sqlite/client')
     const prisma = new PrismaClient({
       datasources: { db: { url: SQLITE_URL } },
+      log: [{ emit: 'event', level: 'query' }],
     })
-    const sqliteClient = new Database(SQLITE_DB_PATH)
+    registerPrismaQueryCapture(prisma)
+
+    const extensionPath = path.join(
+      process.cwd(),
+      'tests',
+      'generated',
+      'extension-sqlite-v6',
+      'index.js',
+    )
+    const { speedExtension } = await import(extensionPath)
+    const extended = prisma.$extends(
+      speedExtension({
+        sqlite: sqliteClient,
+        debug: false,
+      }),
+    )
+
     const stmtCache = new Map<string, Database.Statement>()
 
     const getStmt = (sql: string) => {
@@ -220,6 +330,7 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
 
     return {
       prisma,
+      extended,
       dialect: 'sqlite',
       execute: async (sql: string, params: unknown[]) => {
         const stmt = sqliteClient.prepare(sql)
@@ -245,8 +356,27 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
     )
 
     const adapter = new PrismaBetterSqlite3({ url: SQLITE_URL })
-    const prisma = new PrismaClient({ adapter })
-    const sqliteClient = new Database(SQLITE_DB_PATH)
+    const prisma = new PrismaClient({
+      adapter,
+      log: [{ emit: 'event', level: 'query' }],
+    })
+    registerPrismaQueryCapture(prisma)
+
+    const extensionPath = path.join(
+      process.cwd(),
+      'tests',
+      'generated',
+      'extension-sqlite-v7',
+      'index.js',
+    )
+    const { speedExtension } = await import(extensionPath)
+    const extended = prisma.$extends(
+      speedExtension({
+        sqlite: sqliteClient,
+        debug: false,
+      }),
+    )
+
     const stmtCache = new Map<string, Database.Statement>()
 
     const getStmt = (sql: string) => {
@@ -259,6 +389,7 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
 
     return {
       prisma,
+      extended,
       dialect: 'sqlite',
       execute: async (sql: string, params: unknown[]) => {
         const stmt = sqliteClient.prepare(sql)

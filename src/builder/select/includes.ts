@@ -66,6 +66,38 @@ interface IncludeBuildContext {
   outerHasLimit?: boolean
 }
 
+interface FlatJoinEligibility {
+  canUse: boolean
+  reason?: string
+}
+
+export function canUseFlatJoinForInclude(
+  relationName: string,
+  relArgs: unknown,
+  relModel: Model,
+  depth: number,
+  outerHasLimit: boolean,
+): FlatJoinEligibility {
+  if (depth > 0) {
+    return { canUse: false, reason: 'nested_depth' }
+  }
+
+  const { hasSkip, hasTake } = readSkipTake(relArgs)
+  if (hasSkip || hasTake) {
+    return { canUse: false, reason: 'child_pagination' }
+  }
+
+  if (hasNestedRelationInArgs(relArgs, relModel)) {
+    return { canUse: false, reason: 'nested_includes' }
+  }
+
+  if (!outerHasLimit) {
+    return { canUse: false, reason: 'no_outer_limit' }
+  }
+
+  return { canUse: true }
+}
+
 function buildIncludeScope(includePath: readonly string[]): string {
   if (includePath.length === 0) return 'include'
   let scope = 'include'
@@ -226,7 +258,7 @@ function readOrderByInput(relArgs: unknown): {
   if (!('orderBy' in relArgs)) return { hasOrderBy: false, orderBy: undefined }
   return {
     hasOrderBy: true,
-    orderBy: relArgs.orderBy,
+    orderBy: (relArgs as any).orderBy,
   }
 }
 
@@ -459,10 +491,15 @@ function buildListIncludeSpec(args: {
   const noTake = !isNotNullish(args.takeVal)
   const noSkip = !isNotNullish(args.skipVal)
 
+  const emptyJson =
+    args.ctx.dialect === 'postgres' ? `'[]'::json` : `json('[]')`
+
   if (args.ctx.dialect === 'postgres' && noTake && noSkip) {
-    const selectExpr = args.orderBySql
+    const rawAgg = args.orderBySql
       ? `json_agg(${rowExpr} ORDER BY ${args.orderBySql})`
       : `json_agg(${rowExpr})`
+
+    const selectExpr = `COALESCE(${rawAgg}, ${emptyJson})`
 
     const sql = buildBaseSql({
       selectExpr,
@@ -500,7 +537,9 @@ function buildListIncludeSpec(args: {
     scopeBase,
   )
 
-  const selectExpr = jsonAgg('row', args.ctx.dialect)
+  const agg = jsonAgg('row', args.ctx.dialect)
+  const selectExpr = `COALESCE(${agg}, ${emptyJson})`
+
   const sql =
     `${SQL_TEMPLATES.SELECT} ${selectExpr} ` +
     `${SQL_TEMPLATES.FROM} (${base}) ${SQL_TEMPLATES.AS} ${rowAlias}`
@@ -573,7 +612,10 @@ function buildPartitionBy(
     .join(SQL_SEPARATORS.FIELD_LIST)
 }
 
-function hasNestedRelationInArgs(relArgs: unknown, relModel: Model): boolean {
+export function hasNestedRelationInArgs(
+  relArgs: unknown,
+  relModel: Model,
+): boolean {
   if (!isPlainObject(relArgs)) return false
 
   const relationSet = getRelationFieldSet(relModel)
@@ -1083,7 +1125,7 @@ function resolveCountRelationOrThrow(
 function defaultReferencesForCount(fkCount: number): string[] {
   if (fkCount === 1) return ['id']
   throw new Error(
-    'Relation count for composite keys requires explicit references matching foreignKey length',
+    'Relation count for composite keys requires explicit references matching...',
   )
 }
 

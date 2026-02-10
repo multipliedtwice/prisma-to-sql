@@ -2,6 +2,7 @@ import { DMMF } from '@prisma/generator-helper'
 import { OrderByType } from './builder/shared/order-by-utils'
 import { SqlDialect } from './sql-builder-dialect'
 import { BatchQuery } from './batch'
+import { ParamMap } from '@dee-wan/schema-parser'
 
 export interface Field {
   name: string
@@ -67,7 +68,10 @@ export interface PrismaSQLConfig<TClient> {
 
 export interface SqlResult {
   sql: string
-  params: unknown[]
+  params: readonly unknown[]
+  paramMappings?: readonly ParamMap[]
+  requiresReduction?: boolean
+  includeSpec?: Record<string, any>
 }
 
 export interface PrismaSQLResult<TClient> {

@@ -1,11 +1,19 @@
 import { AliasGenerator } from './types'
 import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
+const SAFE_IDENTIFIER_CACHE = new Map<string, string>()
+
 function toSafeSqlIdentifier(input: string): string {
+  const cached = SAFE_IDENTIFIER_CACHE.get(input)
+  if (cached !== undefined) return cached
+
   const raw = String(input)
   const n = raw.length
 
-  if (n === 0) return '_t'
+  if (n === 0) {
+    SAFE_IDENTIFIER_CACHE.set(input, '_t')
+    return '_t'
+  }
 
   let out = ''
   for (let i = 0; i < n; i++) {
@@ -22,7 +30,13 @@ function toSafeSqlIdentifier(input: string): string {
     (c0 >= 65 && c0 <= 90) || (c0 >= 97 && c0 <= 122) || c0 === 95
   const lowered = (startsOk ? out : `_${out}`).toLowerCase()
 
-  return ALIAS_FORBIDDEN_KEYWORDS.has(lowered) ? `_${lowered}` : lowered
+  const result = ALIAS_FORBIDDEN_KEYWORDS.has(lowered) ? `_${lowered}` : lowered
+
+  if (SAFE_IDENTIFIER_CACHE.size < 1000) {
+    SAFE_IDENTIFIER_CACHE.set(input, result)
+  }
+
+  return result
 }
 
 export function createAliasGenerator(

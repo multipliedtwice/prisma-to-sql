@@ -1,15 +1,18 @@
+// src/builder/shared/param-store.ts
 import {
   extractDynamicName,
   isDynamicParameter,
   ParamMap,
 } from '@dee-wan/schema-parser'
 import { normalizeValue } from '../../utils/normalize-value'
+import { SqlDialect } from '../../sql-builder-dialect'
 
 export interface ParamStore {
   add(value: unknown, dynamicName?: string): string
   addAuto(value: unknown): string
   snapshot(): ParamSnapshot
   readonly index: number
+  readonly dialect: SqlDialect
 }
 
 interface ParamSnapshot {
@@ -128,8 +131,18 @@ function assertCanAddParam(currentIndex: number): void {
   }
 }
 
-function formatPosition(position: number): string {
+const POSTGRES_POSITION_CACHE = new Array(100)
+for (let i = 0; i < 100; i++) {
+  POSTGRES_POSITION_CACHE[i] = `$${i + 1}`
+}
+
+function formatPositionPostgres(position: number): string {
+  if (position <= 100) return POSTGRES_POSITION_CACHE[position - 1]
   return `$${position}`
+}
+
+function formatPositionSqlite(_position: number): string {
+  return '?'
 }
 
 function validateDynamicName(dynamicName: string): string {
@@ -142,6 +155,7 @@ function validateDynamicName(dynamicName: string): string {
 
 function createStoreInternal(
   startIndex: number,
+  dialect: SqlDialect,
   initialParams: unknown[] = [],
   initialMappings: ParamMap[] = [],
 ): ParamStore {
@@ -155,6 +169,9 @@ function createStoreInternal(
 
   let dirty = true
   let cachedSnapshot: ParamSnapshot | null = null
+
+  const formatPosition =
+    dialect === 'sqlite' ? formatPositionSqlite : formatPositionPostgres
 
   function addDynamic(dynamicName: string): string {
     const dn = validateDynamicName(dynamicName)
@@ -216,10 +233,16 @@ function createStoreInternal(
     get index() {
       return index
     },
+    get dialect() {
+      return dialect
+    },
   }
 }
 
-export function createParamStore(startIndex = 1): ParamStore {
+export function createParamStore(
+  startIndex = 1,
+  dialect: SqlDialect = 'postgres',
+): ParamStore {
   if (!Number.isInteger(startIndex) || startIndex < 1) {
     throw new Error(`Start index must be integer >= 1, got ${startIndex}`)
   }
@@ -230,17 +253,19 @@ export function createParamStore(startIndex = 1): ParamStore {
     )
   }
 
-  return createStoreInternal(startIndex)
+  return createStoreInternal(startIndex, dialect)
 }
 
 export function createParamStoreFrom(
   existingParams: readonly unknown[],
   existingMappings: readonly ParamMap[],
   nextIndex: number,
+  dialect: SqlDialect = 'postgres',
 ): ParamStore {
   validateState(existingParams, existingMappings, nextIndex)
   return createStoreInternal(
     nextIndex,
+    dialect,
     existingParams.slice(),
     existingMappings.slice(),
   )

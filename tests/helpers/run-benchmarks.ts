@@ -2,16 +2,24 @@ import { execSync } from 'child_process'
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs'
 import path from 'path'
 
+type CapturedQuery = {
+  sql: string
+  params: unknown[]
+  durationMs?: number
+}
+
 interface BenchmarkTest {
   name: string
   prismaMs: number
-  generatedMs: number
-  sqlGenMs: number
-  totalGeneratedMs: number
+  extendedMs: number
   drizzleMs: number
   speedupVsPrisma: number
   speedupVsDrizzle: number
-  generatedSql: string
+  regressionLog?: {
+    extendedQueries: CapturedQuery[]
+    prismaQueries: CapturedQuery[]
+    drizzleQueries: CapturedQuery[]
+  }
 }
 
 interface BenchmarkResult {
@@ -25,13 +33,12 @@ interface BenchmarkResult {
 
 interface Regression {
   name: string
-  totalMs: number
-  sqlGenMs: number
-  execMs: number
+  extendedMs: number
   opponent: string
   opponentMs: number
   speedup: number
-  sql: string
+  sourceVersion: 6 | 7
+  source: BenchmarkTest
 }
 
 const RESULTS_DIR = path.join(process.cwd(), 'benchmark-results')
@@ -124,6 +131,93 @@ async function runBenchmark(
   return JSON.parse(readFileSync(resultFile, 'utf-8'))
 }
 
+function fmtMs(n: number) {
+  return `${n?.toFixed(3)}ms`
+}
+
+function fmtX(n: number) {
+  return `${n?.toFixed(2)}x`
+}
+
+function wrapText(input: string, width: number) {
+  const text = (input ?? '').trim()
+  if (!text) return []
+  const out: string[] = []
+  let i = 0
+  while (i < text.length) {
+    let end = Math.min(text.length, i + width)
+    if (end < text.length) {
+      const lastSpace = text.lastIndexOf(' ', end)
+      if (lastSpace > i + Math.floor(width * 0.6)) end = lastSpace
+    }
+    out.push(text.slice(i, end).trim())
+    i = end
+    while (i < text.length && text[i] === ' ') i++
+  }
+  return out
+}
+
+function printKV(key: string, value: string, indent = '    ') {
+  console.log(`${indent}${key.padEnd(18)}${value}`)
+}
+
+function printSqlBlock(title: string, sql: string, indent = '    ') {
+  console.log(`${indent}${title}:`)
+  const lines = wrapText(sql, 110)
+  if (lines.length === 0) {
+    console.log(`${indent}  (empty)`)
+    return
+  }
+  for (const line of lines) {
+    console.log(`${indent}  ${line}`)
+  }
+}
+
+function printParamsBlock(title: string, params: unknown, indent = '    ') {
+  console.log(`${indent}${title}: ${JSON.stringify(params)}`)
+}
+
+function printCapturedSection(title: string, qs: CapturedQuery[]) {
+  const shown = qs.slice(0, 10)
+  console.log(`    ${title}: ${qs.length}`)
+  if (qs.length === 0) {
+    console.log(`      (none captured)`)
+    return
+  }
+  console.log(`      showing: ${shown.length}`)
+  for (let i = 0; i < shown.length; i++) {
+    const q = shown[i]
+    console.log(`      ${i + 1})`)
+    printSqlBlock('sql', q.sql, '        ')
+    printParamsBlock('params', q.params, '        ')
+    if (typeof q.durationMs === 'number') {
+      printKV('duration', fmtMs(q.durationMs), '        ')
+    }
+  }
+}
+
+function printRegressionDetails(r: Regression) {
+  const log = r.source.regressionLog
+  if (!log) {
+    console.log(`    Context: (no regressionLog)`)
+    return
+  }
+
+  console.log(`\n    BASELINE`)
+  if (r.opponent.startsWith('Prisma')) {
+    printCapturedSection('Prisma queries', log.prismaQueries)
+  } else if (r.opponent === 'Drizzle') {
+    printCapturedSection('Drizzle queries', log.drizzleQueries)
+  } else {
+    printCapturedSection('Prisma queries', log.prismaQueries)
+    console.log('')
+    printCapturedSection('Drizzle queries', log.drizzleQueries)
+  }
+
+  console.log(`\n    EXTENDED`)
+  printCapturedSection('Extended queries', log.extendedQueries)
+}
+
 function printComparison(results: BenchmarkResult[]) {
   console.log('\n' + '='.repeat(140))
   console.log('BENCHMARK RESULTS - Prisma v6 vs v7 vs Generated SQL')
@@ -148,7 +242,7 @@ function printComparison(results: BenchmarkResult[]) {
     if (!v6 || !v7) continue
 
     console.log(
-      '| Test                                     | Prisma v6 | Prisma v7 | Generated | Drizzle  | v6 Speedup | v7 Speedup | vs Drizzle |',
+      '| Test                                     | Prisma v6 | Prisma v7 | Extended  | Drizzle  | v6 Speedup | v7 Speedup | vs Drizzle |',
     )
     console.log(
       '|------------------------------------------|-----------|-----------|-----------|----------|------------|------------|------------|',
@@ -168,62 +262,57 @@ function printComparison(results: BenchmarkResult[]) {
       if (!v6Test || !v7Test) continue
 
       const name = testName.padEnd(40)
-      const v6Time = (v6Test.prismaMs.toFixed(2) + 'ms').padStart(9)
-      const v7Time = (v7Test.prismaMs.toFixed(2) + 'ms').padStart(9)
-      const genTime = (v6Test.totalGeneratedMs.toFixed(2) + 'ms').padStart(9)
+      const v6Time = (v6Test.prismaMs?.toFixed(2) + 'ms').padStart(9)
+      const v7Time = (v7Test.prismaMs?.toFixed(2) + 'ms').padStart(9)
+      const extTime = (v6Test.extendedMs?.toFixed(2) + 'ms').padStart(9)
       const drizzleTime =
         v6Test.drizzleMs > 0
-          ? (v6Test.drizzleMs.toFixed(2) + 'ms').padStart(8)
+          ? (v6Test.drizzleMs?.toFixed(2) + 'ms').padStart(8)
           : 'N/A'.padStart(8)
-      const v6Speedup = (v6Test.speedupVsPrisma.toFixed(2) + 'x').padStart(10)
-      const v7Speedup = (v7Test.speedupVsPrisma.toFixed(2) + 'x').padStart(10)
+      const v6Speedup = (v6Test.speedupVsPrisma?.toFixed(2) + 'x').padStart(10)
+      const v7Speedup = (v7Test.speedupVsPrisma?.toFixed(2) + 'x').padStart(10)
       const drizzleSpeedup =
         v6Test.speedupVsDrizzle > 0
-          ? (v6Test.speedupVsDrizzle.toFixed(2) + 'x').padStart(10)
+          ? (v6Test.speedupVsDrizzle?.toFixed(2) + 'x').padStart(10)
           : 'N/A'.padStart(10)
 
       console.log(
-        `| ${name} | ${v6Time} | ${v7Time} | ${genTime} | ${drizzleTime} | ${v6Speedup} | ${v7Speedup} | ${drizzleSpeedup} |`,
+        `| ${name} | ${v6Time} | ${v7Time} | ${extTime} | ${drizzleTime} | ${v6Speedup} | ${v7Speedup} | ${drizzleSpeedup} |`,
       )
-
-      const sql = v6Test.generatedSql || v7Test.generatedSql || ''
 
       if (v6Test.speedupVsPrisma < 1.0) {
         regressions.push({
           name: testName,
-          totalMs: v6Test.totalGeneratedMs,
-          sqlGenMs: v6Test.sqlGenMs,
-          execMs: v6Test.generatedMs,
+          extendedMs: v6Test.extendedMs,
           opponent: 'Prisma v6',
           opponentMs: v6Test.prismaMs,
           speedup: v6Test.speedupVsPrisma,
-          sql,
+          sourceVersion: 6,
+          source: v6Test,
         })
       }
 
       if (v7Test.speedupVsPrisma < 1.0) {
         regressions.push({
           name: testName,
-          totalMs: v7Test.totalGeneratedMs,
-          sqlGenMs: v7Test.sqlGenMs,
-          execMs: v7Test.generatedMs,
+          extendedMs: v7Test.extendedMs,
           opponent: 'Prisma v7',
           opponentMs: v7Test.prismaMs,
           speedup: v7Test.speedupVsPrisma,
-          sql,
+          sourceVersion: 7,
+          source: v7Test,
         })
       }
 
       if (v6Test.drizzleMs > 0 && v6Test.speedupVsDrizzle < 1.0) {
         regressions.push({
           name: testName,
-          totalMs: v6Test.totalGeneratedMs,
-          sqlGenMs: v6Test.sqlGenMs,
-          execMs: v6Test.generatedMs,
+          extendedMs: v6Test.extendedMs,
           opponent: 'Drizzle',
           opponentMs: v6Test.drizzleMs,
           speedup: v6Test.speedupVsDrizzle,
-          sql,
+          sourceVersion: 6,
+          source: v6Test,
         })
       }
     }
@@ -231,14 +320,14 @@ function printComparison(results: BenchmarkResult[]) {
     console.log('\n' + '-'.repeat(140))
     console.log('Summary:')
     console.log(
-      `  Generated SQL vs Prisma v6: ${v6.avgSpeedupVsPrisma.toFixed(2)}x faster`,
+      `  Generated SQL vs Prisma v6: ${v6.avgSpeedupVsPrisma?.toFixed(2)}x faster`,
     )
     console.log(
-      `  Generated SQL vs Prisma v7: ${v7.avgSpeedupVsPrisma.toFixed(2)}x faster`,
+      `  Generated SQL vs Prisma v7: ${v7.avgSpeedupVsPrisma?.toFixed(2)}x faster`,
     )
     if (v6.avgSpeedupVsDrizzle > 0) {
       console.log(
-        `  Generated SQL vs Drizzle:   ${v6.avgSpeedupVsDrizzle.toFixed(2)}x faster`,
+        `  Generated SQL vs Drizzle:   ${v6.avgSpeedupVsDrizzle?.toFixed(2)}x faster`,
       )
     }
 
@@ -247,12 +336,28 @@ function printComparison(results: BenchmarkResult[]) {
       console.log(
         `\n⚠ ${dialect.toUpperCase()} — Generated SQL slower than baseline (${regressions.length}):`,
       )
-      for (const r of regressions) {
+
+      for (let i = 0; i < regressions.length; i++) {
+        const r = regressions[i]
+        console.log('\n' + '─'.repeat(140))
         console.log(
-          `\n    ${r.name} vs ${r.opponent}: generated=${r.totalMs.toFixed(3)}ms (sql=${r.sqlGenMs.toFixed(3)}ms + exec=${r.execMs.toFixed(3)}ms) vs ${r.opponentMs.toFixed(3)}ms → ${r.speedup.toFixed(2)}x`,
+          `  [${String(i + 1).padStart(2, '0')}/${String(regressions.length).padStart(2, '0')}] ${r.name}`,
         )
-        console.log(`    SQL: ${r.sql}`)
+        printKV('opponent', r.opponent, '    ')
+        printKV(
+          'speedup',
+          `${fmtX(r.speedup)} (extended ${fmtMs(r.extendedMs)} vs ${fmtMs(r.opponentMs)})`,
+          '    ',
+        )
+
+        console.log(`\n    PERF`)
+        printKV('extended_ms', fmtMs(r.extendedMs), '      ')
+        printKV('opponent_ms', fmtMs(r.opponentMs), '      ')
+
+        printRegressionDetails(r)
       }
+
+      console.log('\n' + '─'.repeat(140))
     }
   }
 }

@@ -1,5 +1,6 @@
 import type { Model, PrismaMethod } from './types'
 import type { SqlDialect } from './sql-builder-dialect'
+import type { ParamMap } from '@dee-wan/schema-parser'
 import { buildWhereClause } from './builder/where'
 import { buildSelectSql } from './builder/select'
 import {
@@ -15,6 +16,9 @@ import { tryFastPath } from './fast-path'
 interface SqlResult {
   sql: string
   params: unknown[]
+  paramMappings?: readonly ParamMap[]
+  requiresReduction?: boolean
+  includeSpec?: Record<string, any>
 }
 
 interface CacheStats {
@@ -263,7 +267,13 @@ function buildSQLFull(
 
   const withMethod = { ...args, method }
 
-  let result: { sql: string; params: readonly unknown[] }
+  let result: {
+    sql: string
+    params: readonly unknown[]
+    paramMappings?: readonly ParamMap[]
+    requiresReduction?: boolean
+    includeSpec?: Record<string, any>
+  }
 
   switch (method) {
     case 'aggregate':
@@ -306,9 +316,17 @@ function buildSQLFull(
       })
   }
 
-  return dialect === 'sqlite'
-    ? toSqliteParams(result.sql, result.params)
-    : { sql: result.sql, params: [...result.params] }
+  const sqlResult =
+    dialect === 'sqlite'
+      ? toSqliteParams(result.sql, result.params)
+      : { sql: result.sql, params: [...result.params] }
+
+  return {
+    ...sqlResult,
+    paramMappings: result.paramMappings,
+    requiresReduction: result.requiresReduction,
+    includeSpec: result.includeSpec,
+  }
 }
 
 export function buildSQLWithCache(
@@ -323,7 +341,13 @@ export function buildSQLWithCache(
   const cached = queryCache.get(cacheKey)
   if (cached) {
     queryCacheStats.hit()
-    return { sql: cached.sql, params: [...cached.params] }
+    return {
+      sql: cached.sql,
+      params: [...cached.params],
+      paramMappings: cached.paramMappings,
+      requiresReduction: cached.requiresReduction,
+      includeSpec: cached.includeSpec,
+    }
   }
 
   queryCacheStats.miss()
@@ -339,7 +363,13 @@ export function buildSQLWithCache(
 
   const result = buildSQLFull(model, models, method, args, dialect)
 
-  queryCache.set(cacheKey, { sql: result.sql, params: [...result.params] })
+  queryCache.set(cacheKey, {
+    sql: result.sql,
+    params: [...result.params],
+    paramMappings: result.paramMappings,
+    requiresReduction: result.requiresReduction,
+    includeSpec: result.includeSpec,
+  })
 
   return result
 }
