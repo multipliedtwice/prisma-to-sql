@@ -488,6 +488,7 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
   includeCols: string
   selectWithIncludes: string
   countJoins: string[]
+  includeJoins: string[]
 } {
   const { select, includes, dialect, model, schemas, from, params } = spec
   const baseSelect = (select ?? '').trim()
@@ -524,28 +525,51 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
   const hasCountCols = isNonEmptyString(countCols)
 
   if (!hasIncludes && !hasCountCols) {
-    return { includeCols: '', selectWithIncludes: baseSelect, countJoins: [] }
+    return {
+      includeCols: '',
+      selectWithIncludes: baseSelect,
+      countJoins: [],
+      includeJoins: [],
+    }
   }
 
   const emptyJson = dialect === 'postgres' ? `'[]'::json` : `json('[]')`
 
-  const includeCols = hasIncludes
-    ? includes
-        .map((inc) => {
-          const expr = inc.isOneToOne
-            ? '(' + inc.sql + ')'
-            : 'COALESCE((' + inc.sql + '), ' + emptyJson + ')'
-          return expr + ' ' + SQL_TEMPLATES.AS + ' ' + quote(inc.name)
-        })
-        .join(SQL_SEPARATORS.FIELD_LIST)
-    : ''
+  const correlatedParts: string[] = []
+  const joinIncludeJoins: string[] = []
+  const joinIncludeSelects: string[] = []
 
-  const allCols = joinNonEmpty(
-    [includeCols, countCols],
+  if (hasIncludes) {
+    for (const inc of includes) {
+      if (inc.joinSql && inc.selectExpr) {
+        joinIncludeJoins.push(inc.joinSql)
+        joinIncludeSelects.push(inc.selectExpr)
+      } else {
+        const expr = inc.isOneToOne
+          ? '(' + inc.sql + ')'
+          : 'COALESCE((' + inc.sql + '), ' + emptyJson + ')'
+        correlatedParts.push(
+          expr + ' ' + SQL_TEMPLATES.AS + ' ' + quote(inc.name),
+        )
+      }
+    }
+  }
+
+  const correlatedCols = correlatedParts.join(SQL_SEPARATORS.FIELD_LIST)
+  const joinSelectCols = joinIncludeSelects.join(SQL_SEPARATORS.FIELD_LIST)
+
+  const allIncludeCols = joinNonEmpty(
+    [correlatedCols, joinSelectCols, countCols],
     SQL_SEPARATORS.FIELD_LIST,
   )
-  const selectWithIncludes = buildSelectList(baseSelect, allCols)
-  return { includeCols: allCols, selectWithIncludes, countJoins }
+  const selectWithIncludes = buildSelectList(baseSelect, allIncludeCols)
+
+  return {
+    includeCols: allIncludeCols,
+    selectWithIncludes,
+    countJoins,
+    includeJoins: joinIncludeJoins,
+  }
 }
 
 function appendPagination(sql: string, spec: SelectQuerySpec): string {
@@ -681,14 +705,15 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const useWindowDistinct = hasWindowDistinct(spec)
   assertDistinctAllowed(method, useWindowDistinct)
 
-  const { includeCols, selectWithIncludes, countJoins } =
+  const { includeCols, selectWithIncludes, countJoins, includeJoins } =
     buildIncludeColumns(spec)
 
   if (useWindowDistinct) {
     const baseSelect = (select ?? '').trim()
     assertHasSelectFields(baseSelect, includeCols)
 
-    const spec2 = withCountJoins(spec, countJoins, whereJoins)
+    const allExtraJoins = [...countJoins, ...includeJoins]
+    const spec2 = withCountJoins(spec, allExtraJoins, whereJoins)
     let sql = buildSqliteDistinctQuery(spec2, selectWithIncludes).trim()
     sql = appendPagination(sql, spec)
     return finalizeSql(sql, params, dialect)
@@ -720,6 +745,10 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   }
 
   pushJoinGroups(parts, whereJoins, countJoins)
+
+  if (isNonEmptyArray(includeJoins)) {
+    parts.push(includeJoins.join(' '))
+  }
 
   const conditions = buildConditions(whereClause, cursorClause)
   pushWhere(parts, conditions)

@@ -9,7 +9,9 @@ const execAsync = promisify(exec)
 
 export interface TestDB {
   prisma: any
+  dialect: 'postgres' | 'sqlite'
   execute: (sql: string, params: unknown[]) => Promise<unknown[]>
+  measureServerMs: (sql: string, params: unknown[]) => Promise<number>
   close: () => Promise<void>
 }
 
@@ -114,6 +116,28 @@ async function generatePrismaClient(
   }
 }
 
+function extractExplainAnalyzeMs(rows: unknown[]): number {
+  const row = (rows as any[])[0]
+  if (!row) return 0
+
+  const raw =
+    row['QUERY PLAN'] ??
+    row['QUERY_PLAN'] ??
+    row['query_plan'] ??
+    row['queryPlan']
+  if (!raw) return 0
+
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+  const first = Array.isArray(parsed) ? parsed[0] : parsed
+
+  const planning =
+    typeof first?.['Planning Time'] === 'number' ? first['Planning Time'] : 0
+  const execution =
+    typeof first?.['Execution Time'] === 'number' ? first['Execution Time'] : 0
+
+  return planning + execution
+}
+
 async function createPostgresDB(version?: number): Promise<TestDB> {
   await generatePrismaClient('postgres', version)
   if ((version || PRISMA_VERSION) === 6) {
@@ -125,8 +149,17 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
 
     return {
       prisma,
+      dialect: 'postgres',
       execute: async (sql: string, params: unknown[]) => {
         return (await pgClient.unsafe(sql, params as any[])) as unknown[]
+      },
+      measureServerMs: async (sql: string, params: unknown[]) => {
+        const explainSql = `EXPLAIN (ANALYZE, FORMAT JSON) ${sql}`
+        const rows = (await pgClient.unsafe(
+          explainSql,
+          params as any[],
+        )) as unknown[]
+        return extractExplainAnalyzeMs(rows)
       },
       close: async () => {
         await prisma.$disconnect()
@@ -143,8 +176,17 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
 
     return {
       prisma,
+      dialect: 'postgres',
       execute: async (sql: string, params: unknown[]) => {
         return (await pgClient.unsafe(sql, params as any[])) as unknown[]
+      },
+      measureServerMs: async (sql: string, params: unknown[]) => {
+        const explainSql = `EXPLAIN (ANALYZE, FORMAT JSON) ${sql}`
+        const rows = (await pgClient.unsafe(
+          explainSql,
+          params as any[],
+        )) as unknown[]
+        return extractExplainAnalyzeMs(rows)
       },
       close: async () => {
         await prisma.$disconnect()
@@ -166,13 +208,30 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
       datasources: { db: { url: SQLITE_URL } },
     })
     const sqliteClient = new Database(SQLITE_DB_PATH)
+    const stmtCache = new Map<string, Database.Statement>()
+
+    const getStmt = (sql: string) => {
+      const cached = stmtCache.get(sql)
+      if (cached) return cached
+      const stmt = sqliteClient.prepare(sql)
+      stmtCache.set(sql, stmt)
+      return stmt
+    }
 
     return {
       prisma,
+      dialect: 'sqlite',
       execute: async (sql: string, params: unknown[]) => {
         const stmt = sqliteClient.prepare(sql)
         const result = stmt.all(...(params as any[]))
         return Array.isArray(result) ? result : [result]
+      },
+      measureServerMs: async (sql: string, params: unknown[]) => {
+        const stmt = getStmt(sql)
+        const t0 = performance.now()
+        stmt.all(...(params as any[]))
+        const t1 = performance.now()
+        return t1 - t0
       },
       close: async () => {
         await prisma.$disconnect()
@@ -188,13 +247,30 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
     const adapter = new PrismaBetterSqlite3({ url: SQLITE_URL })
     const prisma = new PrismaClient({ adapter })
     const sqliteClient = new Database(SQLITE_DB_PATH)
+    const stmtCache = new Map<string, Database.Statement>()
+
+    const getStmt = (sql: string) => {
+      const cached = stmtCache.get(sql)
+      if (cached) return cached
+      const stmt = sqliteClient.prepare(sql)
+      stmtCache.set(sql, stmt)
+      return stmt
+    }
 
     return {
       prisma,
+      dialect: 'sqlite',
       execute: async (sql: string, params: unknown[]) => {
         const stmt = sqliteClient.prepare(sql)
         const result = stmt.all(...(params as any[]))
         return Array.isArray(result) ? result : [result]
+      },
+      measureServerMs: async (sql: string, params: unknown[]) => {
+        const stmt = getStmt(sql)
+        const t0 = performance.now()
+        stmt.all(...(params as any[]))
+        const t1 = performance.now()
+        return t1 - t0
       },
       close: async () => {
         await prisma.$disconnect()

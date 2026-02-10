@@ -2,21 +2,36 @@ import { execSync } from 'child_process'
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs'
 import path from 'path'
 
+interface BenchmarkTest {
+  name: string
+  prismaMs: number
+  generatedMs: number
+  sqlGenMs: number
+  totalGeneratedMs: number
+  drizzleMs: number
+  speedupVsPrisma: number
+  speedupVsDrizzle: number
+  generatedSql: string
+}
+
 interface BenchmarkResult {
   version: number
   dialect: 'postgres' | 'sqlite'
-  tests: Array<{
-    name: string
-    prismaMs: number
-    generatedMs: number
-    sqlGenMs: number
-    drizzleMs: number
-    speedupVsPrisma: number
-    speedupVsDrizzle: number
-  }>
+  tests: BenchmarkTest[]
   avgSpeedupVsPrisma: number
   avgSpeedupVsDrizzle: number
   timestamp: string
+}
+
+interface Regression {
+  name: string
+  totalMs: number
+  sqlGenMs: number
+  execMs: number
+  opponent: string
+  opponentMs: number
+  speedup: number
+  sql: string
 }
 
 const RESULTS_DIR = path.join(process.cwd(), 'benchmark-results')
@@ -110,9 +125,9 @@ async function runBenchmark(
 }
 
 function printComparison(results: BenchmarkResult[]) {
-  console.log('\n' + '='.repeat(120))
+  console.log('\n' + '='.repeat(140))
   console.log('BENCHMARK RESULTS - Prisma v6 vs v7 vs Generated SQL')
-  console.log('='.repeat(120))
+  console.log('='.repeat(140))
 
   const byDialect = results.reduce(
     (acc, r) => {
@@ -125,7 +140,7 @@ function printComparison(results: BenchmarkResult[]) {
 
   for (const [dialect, dialectResults] of Object.entries(byDialect)) {
     console.log(`\n${dialect.toUpperCase()} Results:`)
-    console.log('-'.repeat(120))
+    console.log('-'.repeat(140))
 
     const v6 = dialectResults.find((r) => r.version === 6)
     const v7 = dialectResults.find((r) => r.version === 7)
@@ -133,16 +148,18 @@ function printComparison(results: BenchmarkResult[]) {
     if (!v6 || !v7) continue
 
     console.log(
-      '| Test                                     | Prisma v6 | Prisma v7 | Generated | Drizzle  | v6 Speedup | v7 Speedup |',
+      '| Test                                     | Prisma v6 | Prisma v7 | Generated | Drizzle  | v6 Speedup | v7 Speedup | vs Drizzle |',
     )
     console.log(
-      '|------------------------------------------|-----------|-----------|-----------|----------|------------|------------|',
+      '|------------------------------------------|-----------|-----------|-----------|----------|------------|------------|------------|',
     )
 
     const testNames = new Set([
       ...v6.tests.map((t) => t.name),
       ...v7.tests.map((t) => t.name),
     ])
+
+    const regressions: Regression[] = []
 
     for (const testName of testNames) {
       const v6Test = v6.tests.find((t) => t.name === testName)
@@ -153,20 +170,65 @@ function printComparison(results: BenchmarkResult[]) {
       const name = testName.padEnd(40)
       const v6Time = (v6Test.prismaMs.toFixed(2) + 'ms').padStart(9)
       const v7Time = (v7Test.prismaMs.toFixed(2) + 'ms').padStart(9)
-      const genTime = (v6Test.generatedMs.toFixed(2) + 'ms').padStart(9)
+      const genTime = (v6Test.totalGeneratedMs.toFixed(2) + 'ms').padStart(9)
       const drizzleTime =
         v6Test.drizzleMs > 0
           ? (v6Test.drizzleMs.toFixed(2) + 'ms').padStart(8)
           : 'N/A'.padStart(8)
       const v6Speedup = (v6Test.speedupVsPrisma.toFixed(2) + 'x').padStart(10)
       const v7Speedup = (v7Test.speedupVsPrisma.toFixed(2) + 'x').padStart(10)
+      const drizzleSpeedup =
+        v6Test.speedupVsDrizzle > 0
+          ? (v6Test.speedupVsDrizzle.toFixed(2) + 'x').padStart(10)
+          : 'N/A'.padStart(10)
 
       console.log(
-        `| ${name} | ${v6Time} | ${v7Time} | ${genTime} | ${drizzleTime} | ${v6Speedup} | ${v7Speedup} |`,
+        `| ${name} | ${v6Time} | ${v7Time} | ${genTime} | ${drizzleTime} | ${v6Speedup} | ${v7Speedup} | ${drizzleSpeedup} |`,
       )
+
+      const sql = v6Test.generatedSql || v7Test.generatedSql || ''
+
+      if (v6Test.speedupVsPrisma < 1.0) {
+        regressions.push({
+          name: testName,
+          totalMs: v6Test.totalGeneratedMs,
+          sqlGenMs: v6Test.sqlGenMs,
+          execMs: v6Test.generatedMs,
+          opponent: 'Prisma v6',
+          opponentMs: v6Test.prismaMs,
+          speedup: v6Test.speedupVsPrisma,
+          sql,
+        })
+      }
+
+      if (v7Test.speedupVsPrisma < 1.0) {
+        regressions.push({
+          name: testName,
+          totalMs: v7Test.totalGeneratedMs,
+          sqlGenMs: v7Test.sqlGenMs,
+          execMs: v7Test.generatedMs,
+          opponent: 'Prisma v7',
+          opponentMs: v7Test.prismaMs,
+          speedup: v7Test.speedupVsPrisma,
+          sql,
+        })
+      }
+
+      if (v6Test.drizzleMs > 0 && v6Test.speedupVsDrizzle < 1.0) {
+        regressions.push({
+          name: testName,
+          totalMs: v6Test.totalGeneratedMs,
+          sqlGenMs: v6Test.sqlGenMs,
+          execMs: v6Test.generatedMs,
+          opponent: 'Drizzle',
+          opponentMs: v6Test.drizzleMs,
+          speedup: v6Test.speedupVsDrizzle,
+          sql,
+        })
+      }
     }
 
-    console.log('\n' + '-'.repeat(120))
+    console.log('\n' + '-'.repeat(140))
     console.log('Summary:')
     console.log(
       `  Generated SQL vs Prisma v6: ${v6.avgSpeedupVsPrisma.toFixed(2)}x faster`,
@@ -178,6 +240,19 @@ function printComparison(results: BenchmarkResult[]) {
       console.log(
         `  Generated SQL vs Drizzle:   ${v6.avgSpeedupVsDrizzle.toFixed(2)}x faster`,
       )
+    }
+
+    if (regressions.length > 0) {
+      regressions.sort((a, b) => a.speedup - b.speedup)
+      console.log(
+        `\n⚠ ${dialect.toUpperCase()} — Generated SQL slower than baseline (${regressions.length}):`,
+      )
+      for (const r of regressions) {
+        console.log(
+          `\n    ${r.name} vs ${r.opponent}: generated=${r.totalMs.toFixed(3)}ms (sql=${r.sqlGenMs.toFixed(3)}ms + exec=${r.execMs.toFixed(3)}ms) vs ${r.opponentMs.toFixed(3)}ms → ${r.speedup.toFixed(2)}x`,
+        )
+        console.log(`    SQL: ${r.sql}`)
+      }
     }
   }
 }
@@ -222,9 +297,9 @@ async function main() {
 
   printComparison(allResults)
 
-  console.log('\n' + '='.repeat(120))
+  console.log('\n' + '='.repeat(140))
   console.log(`✓ Results saved to: ${summaryPath}`)
-  console.log('='.repeat(120) + '\n')
+  console.log('='.repeat(140) + '\n')
 
   console.log('Cleaning up generated schemas...')
   await cleanupGeneratedSchemas()

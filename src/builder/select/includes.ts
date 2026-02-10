@@ -8,6 +8,7 @@ import { createAliasGenerator } from '../shared/alias-generator'
 import { SQL_TEMPLATES, SQL_SEPARATORS } from '../shared/constants'
 import {
   buildTableReference,
+  quote,
   sqlStringLiteral,
   normalizeKeyList,
   quoteColumn,
@@ -31,6 +32,7 @@ import {
   getScalarFieldSet,
 } from '../shared/model-field-cache'
 import { ensureDeterministicOrderByInput } from '../shared/order-by-determinism'
+import { isDynamicParameter } from '@dee-wan/schema-parser'
 
 const MAX_INCLUDE_DEPTH = 10
 
@@ -61,6 +63,7 @@ interface IncludeBuildContext {
   visitPath?: string[]
   depth?: number
   stats?: IncludeComplexityStats
+  outerHasLimit?: boolean
 }
 
 function buildIncludeScope(includePath: readonly string[]): string {
@@ -335,7 +338,7 @@ function buildWhereParts(
   relModel: Model,
   relAlias: string,
   ctx: IncludeBuildContext,
-): { joins: string; whereClause: string } {
+): { joins: string; whereClause: string; rawClause: string } {
   const whereResult = buildWhereClause(whereInput, {
     alias: relAlias,
     schemaModels: ctx.schemas,
@@ -347,11 +350,13 @@ function buildWhereParts(
   })
 
   const joins = whereResult.joins.join(' ')
-  const whereClause = isValidWhereClause(whereResult.clause)
-    ? ` ${SQL_TEMPLATES.AND} ${whereResult.clause}`
-    : ''
+  const hasClause = isValidWhereClause(whereResult.clause)
 
-  return { joins, whereClause }
+  return {
+    joins,
+    whereClause: hasClause ? ` ${SQL_TEMPLATES.AND} ${whereResult.clause}` : '',
+    rawClause: hasClause ? whereResult.clause : '',
+  }
 }
 
 function limitOneSql(
@@ -503,6 +508,261 @@ function buildListIncludeSpec(args: {
   return Object.freeze({ name: args.relName, sql, isOneToOne: false })
 }
 
+function resolveIncludeKeyPairs(field: Field): {
+  relKeyFields: string[]
+  parentKeyFields: string[]
+} {
+  const fkFields = normalizeKeyList(field.foreignKey)
+  if (fkFields.length === 0) {
+    throw new Error(
+      `Relation '${field.name}' is missing foreignKey for join-based include`,
+    )
+  }
+
+  const refs = normalizeKeyList(field.references)
+  const refFields = refs.length > 0 ? refs : fkFields.length === 1 ? ['id'] : []
+
+  if (refFields.length !== fkFields.length) {
+    throw new Error(
+      `Relation '${field.name}' references count doesn't match foreignKey count`,
+    )
+  }
+
+  return {
+    relKeyFields: field.isForeignKeyLocal ? refFields : fkFields,
+    parentKeyFields: field.isForeignKeyLocal ? fkFields : refFields,
+  }
+}
+
+function buildFkSelectList(
+  relAlias: string,
+  relModel: Model,
+  relKeyFields: string[],
+): string {
+  return relKeyFields
+    .map((f, i) => `${relAlias}.${quoteColumn(relModel, f)} AS "__fk${i}"`)
+    .join(SQL_SEPARATORS.FIELD_LIST)
+}
+
+function buildFkGroupByUnqualified(relKeyFields: string[]): string {
+  return relKeyFields
+    .map((_, i) => `"__fk${i}"`)
+    .join(SQL_SEPARATORS.FIELD_LIST)
+}
+
+function buildJoinOnCondition(
+  joinAlias: string,
+  parentAlias: string,
+  parentModel: Model,
+  parentKeyFields: string[],
+): string {
+  const parts = parentKeyFields.map(
+    (f, i) =>
+      `${joinAlias}."__fk${i}" = ${parentAlias}.${quoteColumn(parentModel, f)}`,
+  )
+  return parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`
+}
+
+function buildPartitionBy(
+  relAlias: string,
+  relModel: Model,
+  relKeyFields: string[],
+): string {
+  return relKeyFields
+    .map((f) => `${relAlias}.${quoteColumn(relModel, f)}`)
+    .join(SQL_SEPARATORS.FIELD_LIST)
+}
+
+function hasNestedRelationInArgs(relArgs: unknown, relModel: Model): boolean {
+  if (!isPlainObject(relArgs)) return false
+
+  const relationSet = getRelationFieldSet(relModel)
+  const checkSource = (src: unknown): boolean => {
+    if (!isPlainObject(src)) return false
+    for (const k of Object.keys(src)) {
+      if (relationSet.has(k) && (src as Record<string, unknown>)[k] !== false)
+        return true
+    }
+    return false
+  }
+
+  if (checkSource((relArgs as Record<string, unknown>).include)) return true
+  if (checkSource((relArgs as Record<string, unknown>).select)) return true
+
+  return false
+}
+
+function canUseJoinInclude(
+  dialect: string,
+  isList: boolean,
+  takeVal: OptionalIntOrDynamic,
+  skipVal: OptionalIntOrDynamic,
+  depth: number,
+  outerHasLimit: boolean,
+  hasNestedIncludes: boolean,
+): boolean {
+  if (dialect !== 'postgres') return false
+  if (!isList) return false
+  if (depth > 0) return false
+  if (outerHasLimit) return false
+  if (hasNestedIncludes) return false
+  if (isDynamicParameter(takeVal) || isDynamicParameter(skipVal)) return false
+  return true
+}
+
+function buildJoinBasedNonPaginated(args: {
+  relName: string
+  relTable: string
+  relAlias: string
+  relModel: Model
+  field: Field
+  whereJoins: string
+  rawWhereClause: string
+  orderBySql: string
+  relSelect: string
+  ctx: IncludeBuildContext
+}): IncludeSpec {
+  const { relKeyFields, parentKeyFields } = resolveIncludeKeyPairs(args.field)
+  const joinAlias = args.ctx.aliasGen.next(`__inc_${args.relName}`)
+
+  const fkSelect = buildFkSelectList(args.relAlias, args.relModel, relKeyFields)
+  const fkGroupBy = buildPartitionBy(args.relAlias, args.relModel, relKeyFields)
+  const rowExpr = jsonBuildObject(args.relSelect, args.ctx.dialect)
+
+  const aggExpr = args.orderBySql
+    ? `json_agg(${rowExpr} ORDER BY ${args.orderBySql})`
+    : `json_agg(${rowExpr})`
+
+  const joinsPart = args.whereJoins ? ` ${args.whereJoins}` : ''
+  const wherePart = args.rawWhereClause
+    ? ` ${SQL_TEMPLATES.WHERE} ${args.rawWhereClause}`
+    : ''
+
+  const subquery =
+    `SELECT ${fkSelect}${SQL_SEPARATORS.FIELD_LIST}${aggExpr} AS __agg` +
+    ` FROM ${args.relTable} ${args.relAlias}${joinsPart}${wherePart}` +
+    ` GROUP BY ${fkGroupBy}`
+
+  const onCondition = buildJoinOnCondition(
+    joinAlias,
+    args.ctx.parentAlias,
+    args.ctx.model,
+    parentKeyFields,
+  )
+
+  const joinSql = `LEFT JOIN (${subquery}) ${joinAlias} ON ${onCondition}`
+  const selectExpr = `COALESCE(${joinAlias}.__agg, '[]'::json) AS ${quote(args.relName)}`
+
+  return Object.freeze({
+    name: args.relName,
+    sql: '',
+    isOneToOne: false,
+    joinSql,
+    selectExpr,
+  })
+}
+
+function buildJoinBasedPaginated(args: {
+  relName: string
+  relTable: string
+  relAlias: string
+  relModel: Model
+  field: Field
+  whereJoins: string
+  rawWhereClause: string
+  orderBySql: string
+  relSelect: string
+  takeVal: number | undefined
+  skipVal: number | undefined
+  ctx: IncludeBuildContext
+}): IncludeSpec {
+  const { relKeyFields, parentKeyFields } = resolveIncludeKeyPairs(args.field)
+  const joinAlias = args.ctx.aliasGen.next(`__inc_${args.relName}`)
+  const rankedAlias = args.ctx.aliasGen.next(`__ranked_${args.relName}`)
+
+  const fkSelect = buildFkSelectList(args.relAlias, args.relModel, relKeyFields)
+  const partitionBy = buildPartitionBy(
+    args.relAlias,
+    args.relModel,
+    relKeyFields,
+  )
+  const rowExpr = jsonBuildObject(args.relSelect, args.ctx.dialect)
+
+  const orderExpr =
+    args.orderBySql ||
+    `${args.relAlias}.${quoteColumn(args.relModel, 'id')} ASC`
+
+  const joinsPart = args.whereJoins ? ` ${args.whereJoins}` : ''
+  const wherePart = args.rawWhereClause
+    ? ` ${SQL_TEMPLATES.WHERE} ${args.rawWhereClause}`
+    : ''
+
+  const innerSql =
+    `SELECT ${fkSelect}${SQL_SEPARATORS.FIELD_LIST}` +
+    `${rowExpr} AS __row${SQL_SEPARATORS.FIELD_LIST}` +
+    `ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY ${orderExpr}) AS __rn` +
+    ` FROM ${args.relTable} ${args.relAlias}${joinsPart}${wherePart}`
+
+  const scopeBase = buildIncludeScope(args.ctx.includePath)
+  const rnFilterParts: string[] = []
+
+  if (isNotNullish(args.skipVal) && args.skipVal > 0) {
+    const skipPh = addAutoScoped(
+      args.ctx.params,
+      args.skipVal,
+      `${scopeBase}.skip`,
+    )
+    rnFilterParts.push(`__rn > ${skipPh}`)
+
+    if (isNotNullish(args.takeVal)) {
+      const takePh = addAutoScoped(
+        args.ctx.params,
+        args.takeVal,
+        `${scopeBase}.take`,
+      )
+      rnFilterParts.push(`__rn <= (${skipPh} + ${takePh})`)
+    }
+  } else if (isNotNullish(args.takeVal)) {
+    const takePh = addAutoScoped(
+      args.ctx.params,
+      args.takeVal,
+      `${scopeBase}.take`,
+    )
+    rnFilterParts.push(`__rn <= ${takePh}`)
+  }
+
+  const rnFilter =
+    rnFilterParts.length > 0
+      ? ` ${SQL_TEMPLATES.WHERE} ${rnFilterParts.join(SQL_SEPARATORS.CONDITION_AND)}`
+      : ''
+
+  const fkGroupByOuter = buildFkGroupByUnqualified(relKeyFields)
+
+  const outerSql =
+    `SELECT ${fkGroupByOuter}${SQL_SEPARATORS.FIELD_LIST}` +
+    `json_agg(__row ORDER BY __rn) AS __agg` +
+    ` FROM (${innerSql}) ${rankedAlias}${rnFilter}` +
+    ` GROUP BY ${fkGroupByOuter}`
+
+  const onCondition = buildJoinOnCondition(
+    joinAlias,
+    args.ctx.parentAlias,
+    args.ctx.model,
+    parentKeyFields,
+  )
+
+  const joinSql = `LEFT JOIN (${outerSql}) ${joinAlias} ON ${onCondition}`
+  const selectExpr = `COALESCE(${joinAlias}.__agg, '[]'::json) AS ${quote(args.relName)}`
+
+  return Object.freeze({
+    name: args.relName,
+    sql: '',
+    isOneToOne: false,
+    joinSql,
+    selectExpr,
+  })
+}
+
 function buildSingleInclude(
   relName: string,
   relArgs: unknown,
@@ -578,6 +838,55 @@ function buildSingleInclude(
       ctx,
     })
     return Object.freeze({ name: relName, sql, isOneToOne: true })
+  }
+
+  const depth = ctx.depth || 0
+  const outerHasLimit = ctx.outerHasLimit === true
+  const nestedIncludes = hasNestedRelationInArgs(relArgs, relModel)
+
+  if (
+    canUseJoinInclude(
+      ctx.dialect,
+      isList,
+      adjusted.takeVal,
+      paginationConfig.skipVal,
+      depth,
+      outerHasLimit,
+      nestedIncludes,
+    )
+  ) {
+    const hasTakeOrSkip =
+      isNotNullish(adjusted.takeVal) || isNotNullish(paginationConfig.skipVal)
+
+    if (!hasTakeOrSkip) {
+      return buildJoinBasedNonPaginated({
+        relName,
+        relTable,
+        relAlias,
+        relModel,
+        field,
+        whereJoins: whereParts.joins,
+        rawWhereClause: whereParts.rawClause,
+        orderBySql,
+        relSelect,
+        ctx,
+      })
+    }
+
+    return buildJoinBasedPaginated({
+      relName,
+      relTable,
+      relAlias,
+      relModel,
+      field,
+      whereJoins: whereParts.joins,
+      rawWhereClause: whereParts.rawClause,
+      orderBySql,
+      relSelect,
+      takeVal: adjusted.takeVal as number | undefined,
+      skipVal: paginationConfig.skipVal as number | undefined,
+      ctx,
+    })
   }
 
   return buildListIncludeSpec({
@@ -677,7 +986,7 @@ function buildIncludeSqlInternal(
         ...ctx,
         includePath: nextIncludePath,
         visitPath: currentPath,
-        depth: depth + 1,
+        depth: depth,
         stats,
       }),
     )
@@ -693,6 +1002,7 @@ export function buildIncludeSql(
   parentAlias: string,
   params: ParamStore,
   dialect: SqlDialect,
+  outerHasLimit: boolean = true,
 ): IncludeSpec[] {
   const aliasGen = createAliasGenerator()
   const stats: IncludeComplexityStats = {
@@ -716,6 +1026,7 @@ export function buildIncludeSql(
     visitPath: [],
     depth: 0,
     stats,
+    outerHasLimit,
   })
 }
 

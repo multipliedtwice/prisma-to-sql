@@ -298,6 +298,15 @@ function handleInOperator(
     return op === Ops.IN ? '0=1' : '1=1'
   }
 
+  if (dialect === 'sqlite' && val.length <= 30) {
+    const placeholders: string[] = []
+    for (const item of val) {
+      placeholders.push(params.add(item))
+    }
+    const list = placeholders.join(', ')
+    return op === Ops.IN ? `${expr} IN (${list})` : `${expr} NOT IN (${list})`
+  }
+
   const paramValue = prepareArrayParam(val as unknown[], dialect)
   const placeholder = params.add(paramValue)
 

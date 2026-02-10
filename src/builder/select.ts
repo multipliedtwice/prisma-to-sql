@@ -244,6 +244,8 @@ function buildSelectSpec(input: {
     whereResult.nextParamIndex,
   )
 
+  const outerHasLimit = isNotNullish(take)
+
   const includes = buildIncludeSql(
     normalizedArgs,
     model,
@@ -251,6 +253,7 @@ function buildSelectSpec(input: {
     alias,
     params,
     dialect,
+    outerHasLimit,
   )
 
   const cursorResult = buildCursorClauseIfAny({

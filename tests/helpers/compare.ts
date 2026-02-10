@@ -4,19 +4,10 @@ import { Decimal } from '../generated/client/runtime/library'
 export function normalizeValue(value: unknown): unknown {
   if (value === null || value === undefined) return value
 
+  if (value === 0) return false
+  if (value === 1) return true
+
   if (value instanceof Date) return null
-
-  if (typeof value === 'number') {
-    if (value === 0) return false
-    if (value === 1) return true
-
-    if (value > 946684800000 && value < 2147483647000) {
-      return null
-    }
-    return parseFloat(value.toFixed(10))
-  }
-
-  if (typeof value === 'bigint') return Number(value)
 
   if (
     value instanceof Decimal ||
@@ -25,10 +16,18 @@ export function normalizeValue(value: unknown): unknown {
     return parseFloat((value as any).toNumber().toFixed(10))
   }
 
-  if (typeof value === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+  if (typeof value === 'number') {
+    if (value > 946684800000 && value < 2147483647000) {
       return null
     }
+    return parseFloat(value.toFixed(10))
+  }
+
+  if (typeof value === 'bigint') return Number(value)
+
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return null
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value)) return null
 
     if (/^-?\d+$/.test(value)) {
       const num = parseInt(value, 10)
@@ -89,7 +88,7 @@ export function diffResults(expected: unknown[], actual: unknown[]): string[] {
 
   const maxLen = Math.max(expected.length, actual.length)
   for (let i = 0; i < Math.min(maxLen, 5); i++) {
-    if (!deepEqual(expected[i], actual[i])) {
+    if (!deepEqual(normalizeValue(expected[i]), normalizeValue(actual[i]))) {
       diffs.push(
         `Row ${i}:\n  Expected: ${JSON.stringify(normalizeValue(expected[i]), null, 2)}\n  Actual: ${JSON.stringify(normalizeValue(actual[i]), null, 2)}`,
       )
@@ -97,9 +96,9 @@ export function diffResults(expected: unknown[], actual: unknown[]): string[] {
   }
 
   if (maxLen > 5) {
-    const remaining = diffs.length - 1
+    const remaining = maxLen - 5
     if (remaining > 0) {
-      diffs.push(`... and ${remaining} more differences`)
+      diffs.push(`... and ${remaining} more rows not checked`)
     }
   }
 

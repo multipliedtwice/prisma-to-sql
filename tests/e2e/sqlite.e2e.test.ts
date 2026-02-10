@@ -67,7 +67,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany basic',
         'User',
-        { method: 'findMany' },
+        { method: 'findMany', orderBy: { id: 'asc' } },
         () => db.prisma.user.findMany({ orderBy: { id: 'asc' } }),
         {
           drizzleQuery: () =>
@@ -84,7 +84,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany where =',
         'User',
-        { method: 'findMany', where: { status: 'ACTIVE' } },
+        {
+          method: 'findMany',
+          where: { status: 'ACTIVE' },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.user.findMany({
             where: { status: 'ACTIVE' },
@@ -106,7 +110,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany where >=',
         'Task',
-        { method: 'findMany', where: { position: { gte: 5 } } },
+        {
+          method: 'findMany',
+          where: { position: { gte: 5 } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.task.findMany({
             where: { position: { gte: 5 } },
@@ -131,6 +139,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         {
           method: 'findMany',
           where: { status: { in: ['ACTIVE', 'INACTIVE'] } },
+          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.user.findMany({
@@ -153,7 +162,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany where null',
         'User',
-        { method: 'findMany', where: { name: null } },
+        { method: 'findMany', where: { name: null }, orderBy: { id: 'asc' } },
         () =>
           db.prisma.user.findMany({
             where: { name: null },
@@ -178,6 +187,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         {
           method: 'findMany',
           where: { email: { contains: 'example', mode: 'insensitive' } },
+          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.user.findMany({
@@ -203,6 +213,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         {
           method: 'findMany',
           where: { AND: [{ status: 'TODO' }, { priority: 'HIGH' }] },
+          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.task.findMany({
@@ -233,6 +244,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         {
           method: 'findMany',
           where: { OR: [{ status: 'DONE' }, { status: 'CANCELLED' }] },
+          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.task.findMany({
@@ -260,7 +272,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany NOT',
         'User',
-        { method: 'findMany', where: { NOT: { status: 'DELETED' } } },
+        {
+          method: 'findMany',
+          where: { NOT: { status: 'DELETED' } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.user.findMany({
             where: { NOT: { status: 'DELETED' } },
@@ -355,6 +371,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         {
           method: 'findMany',
           where: { assignedTasks: { some: { status: 'IN_PROGRESS' } } },
+          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.user.findMany({
@@ -369,7 +386,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany relation every',
         'Project',
-        { method: 'findMany', where: { tasks: { every: { status: 'DONE' } } } },
+        {
+          method: 'findMany',
+          where: { tasks: { every: { status: 'DONE' } } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.project.findMany({
             where: { tasks: { every: { status: 'DONE' } } },
@@ -385,7 +406,11 @@ describe('Prisma Parity E2E - SQLite', () => {
           benchmarkResults,
           'findMany relation none',
           'Task',
-          { method: 'findMany', where: { comments: { none: {} } } },
+          {
+            method: 'findMany',
+            where: { comments: { none: {} } },
+            orderBy: { id: 'asc' },
+          },
           () =>
             db.prisma.task.findMany({
               where: { comments: { none: {} } },
@@ -412,6 +437,7 @@ describe('Prisma Parity E2E - SQLite', () => {
               },
             },
           },
+          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.organization.findMany({
@@ -774,7 +800,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'groupBy',
         'Task',
-        { method: 'groupBy', by: ['status'] },
+        { method: 'groupBy', by: ['status'], orderBy: { status: 'asc' } },
         () =>
           db.prisma.task.groupBy({
             by: ['status'],
@@ -791,7 +817,12 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'groupBy count',
         'Task',
-        { method: 'groupBy', by: ['status'], _count: { _all: true } },
+        {
+          method: 'groupBy',
+          by: ['status'],
+          _count: { _all: true },
+          orderBy: { status: 'asc' },
+        },
         () =>
           db.prisma.task.groupBy({
             by: ['status'],
@@ -818,6 +849,7 @@ describe('Prisma Parity E2E - SQLite', () => {
           method: 'groupBy',
           by: ['status', 'priority'],
           _count: { _all: true },
+          orderBy: [{ status: 'asc' }, { priority: 'asc' }],
         },
         () =>
           db.prisma.task.groupBy({
@@ -857,6 +889,7 @@ describe('Prisma Parity E2E - SQLite', () => {
           by: ['status'],
           _count: { _all: true },
           having: { status: { _count: { gte: 5 } } },
+          orderBy: { status: 'asc' },
         },
         () =>
           db.prisma.task.groupBy({
@@ -892,6 +925,7 @@ describe('Prisma Parity E2E - SQLite', () => {
           by: ['status'],
           where: { priority: 'HIGH' },
           _count: { _all: true },
+          orderBy: { status: 'asc' },
         },
         () =>
           db.prisma.task.groupBy({
@@ -921,6 +955,7 @@ describe('Prisma Parity E2E - SQLite', () => {
           by: ['status'],
           _sum: { position: true },
           _avg: { position: true },
+          orderBy: { status: 'asc' },
         },
         () =>
           db.prisma.task.groupBy({
@@ -951,6 +986,7 @@ describe('Prisma Parity E2E - SQLite', () => {
           by: ['status'],
           _min: { position: true },
           _max: { position: true },
+          orderBy: { status: 'asc' },
         },
         () =>
           db.prisma.task.groupBy({
@@ -1270,7 +1306,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany startsWith',
         'User',
-        { method: 'findMany', where: { email: { startsWith: 'user' } } },
+        {
+          method: 'findMany',
+          where: { email: { startsWith: 'user' } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.user.findMany({
             where: { email: { startsWith: 'user' } },
@@ -1292,7 +1332,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany endsWith',
         'User',
-        { method: 'findMany', where: { email: { endsWith: '.com' } } },
+        {
+          method: 'findMany',
+          where: { email: { endsWith: '.com' } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.user.findMany({
             where: { email: { endsWith: '.com' } },
@@ -1314,7 +1358,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany NOT contains',
         'User',
-        { method: 'findMany', where: { NOT: { email: { contains: 'test' } } } },
+        {
+          method: 'findMany',
+          where: { NOT: { email: { contains: 'test' } } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.user.findMany({
             where: { NOT: { email: { contains: 'test' } } },
@@ -1339,6 +1387,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         {
           method: 'findMany',
           where: { email: { contains: 'Example' } },
+          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.user.findMany({
@@ -1363,7 +1412,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany <',
         'Task',
-        { method: 'findMany', where: { position: { lt: 10 } } },
+        {
+          method: 'findMany',
+          where: { position: { lt: 10 } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.task.findMany({
             where: { position: { lt: 10 } },
@@ -1385,7 +1438,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany <=',
         'Task',
-        { method: 'findMany', where: { position: { lte: 10 } } },
+        {
+          method: 'findMany',
+          where: { position: { lte: 10 } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.task.findMany({
             where: { position: { lte: 10 } },
@@ -1407,7 +1464,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany >',
         'Task',
-        { method: 'findMany', where: { position: { gt: 5 } } },
+        {
+          method: 'findMany',
+          where: { position: { gt: 5 } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.task.findMany({
             where: { position: { gt: 5 } },
@@ -1432,6 +1493,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         {
           method: 'findMany',
           where: { status: { notIn: ['DELETED', 'BANNED'] } },
+          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.user.findMany({
@@ -1456,7 +1518,11 @@ describe('Prisma Parity E2E - SQLite', () => {
         benchmarkResults,
         'findMany isNot null',
         'User',
-        { method: 'findMany', where: { name: { not: null } } },
+        {
+          method: 'findMany',
+          where: { name: { not: null } },
+          orderBy: { id: 'asc' },
+        },
         () =>
           db.prisma.user.findMany({
             where: { name: { not: null } },

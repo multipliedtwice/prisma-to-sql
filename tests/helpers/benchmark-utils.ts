@@ -1,5 +1,6 @@
 import type { DMMF } from '@prisma/generator-helper'
 import type { DirectiveProps } from '@dee-wan/schema-parser'
+import type { TestDB } from './db'
 import { getDatamodel } from './datamodel'
 import { generateSQL } from '../../src/sql-generator'
 import { deepEqual, normalizeValue, sortByField } from './compare'
@@ -9,20 +10,18 @@ export interface BenchmarkResult {
   prismaMs: number
   generatedMs: number
   sqlGenMs: number
+  generatedServerMs: number
+  generatedClientMs: number
   drizzleMs: number
   speedupVsPrisma: number
   speedupVsDrizzle: number
+  generatedSql: string
 }
 
 export interface BenchmarkConfig {
   version: number
   dialect: 'postgres' | 'sqlite'
   shouldOutputJson: boolean
-}
-
-export interface TestDB {
-  execute: (sql: string, params: unknown[]) => Promise<unknown[]>
-  prisma: any
 }
 
 export function createQuery(
@@ -48,6 +47,27 @@ export function createQuery(
   }
 }
 
+async function measureGeneratedServerMs(
+  db: TestDB,
+  sql: string,
+  params: unknown[],
+  iterations: number,
+): Promise<number> {
+  const isPostgres = db.dialect === 'postgres'
+  const n = isPostgres ? Math.min(3, iterations) : iterations
+
+  if (n <= 0) return 0
+
+  await db.measureServerMs(sql, params)
+
+  let total = 0
+  for (let i = 0; i < n; i++) {
+    total += await db.measureServerMs(sql, params)
+  }
+
+  return total / n
+}
+
 export async function runParityTest<T>(
   db: TestDB,
   benchmarkResults: BenchmarkResult[],
@@ -70,39 +90,13 @@ export async function runParityTest<T>(
     sortField = 'id',
     transformPrisma = (r) => (Array.isArray(r) ? r : r ? [r] : []),
     transformGenerated = (r) => r,
-    transformDrizzle = (r) => r,
     drizzleQuery,
   } = options
 
-  // Detect dialect from database connection
-  const isPostgres =
-    db.prisma?._engineConfig?.datasources?.db?.url?.includes('postgres') ||
-    process.env.DATABASE_URL?.includes('postgres')
-  const dialect = isPostgres ? 'postgres' : 'sqlite'
+  const dialect = db.dialect
 
-  // Load datamodel for current dialect
   const datamodel = await getDatamodel(dialect)
   const directive = createQuery(model, args, datamodel)
-
-  let estimatedPrismaMs = 0
-  if (benchmark) {
-    const warmupStart = performance.now()
-    await prismaQuery()
-    estimatedPrismaMs = performance.now() - warmupStart
-  }
-
-  const iterations =
-    options.iterations ??
-    (estimatedPrismaMs > 200 ? 5 : estimatedPrismaMs > 50 ? 10 : 50)
-
-  let sqlGenMs = 0
-  if (benchmark) {
-    const sqlGenStart = performance.now()
-    for (let i = 0; i < iterations; i++) {
-      generateSQL(directive)
-    }
-    sqlGenMs = (performance.now() - sqlGenStart) / iterations
-  }
 
   const generated = generateSQL(directive)
 
@@ -133,11 +127,41 @@ export async function runParityTest<T>(
   }
 
   if (benchmark) {
+    const SQL_GEN_ITERATIONS = 100
+    const sqlGenStart = performance.now()
+    for (let i = 0; i < SQL_GEN_ITERATIONS; i++) {
+      generateSQL(directive)
+    }
+    const sqlGenMs = (performance.now() - sqlGenStart) / SQL_GEN_ITERATIONS
+
+    const warmupStart = performance.now()
+    await prismaQuery()
+    const estimatedPrismaMs = performance.now() - warmupStart
+
+    const iterations =
+      options.iterations ??
+      (estimatedPrismaMs > 200 ? 5 : estimatedPrismaMs > 50 ? 10 : 50)
+
+    for (let w = 0; w < 3; w++) {
+      await db.execute(generated.sql, generated.staticParams)
+      await prismaQuery()
+      if (drizzleQuery) await drizzleQuery()
+    }
+
     const genStart = performance.now()
     for (let i = 0; i < iterations; i++) {
       await db.execute(generated.sql, generated.staticParams)
     }
     const generatedMs = (performance.now() - genStart) / iterations
+
+    const generatedServerMs = await measureGeneratedServerMs(
+      db,
+      generated.sql,
+      generated.staticParams,
+      iterations,
+    )
+
+    const generatedClientMs = Math.max(0, generatedMs - generatedServerMs)
 
     const prismaStart = performance.now()
     for (let i = 0; i < iterations; i++) {
@@ -149,24 +173,30 @@ export async function runParityTest<T>(
     if (drizzleQuery) {
       const drizzleStart = performance.now()
       for (let i = 0; i < iterations; i++) {
-        const result = await drizzleQuery()
-        if (transformDrizzle) {
-          transformDrizzle(result)
-        }
+        await drizzleQuery()
       }
       drizzleMs = (performance.now() - drizzleStart) / iterations
     }
+
+    const totalGeneratedMs = generatedMs + sqlGenMs
 
     benchmarkResults.push({
       name,
       prismaMs,
       generatedMs,
       sqlGenMs,
+      generatedServerMs,
+      generatedClientMs,
       drizzleMs,
-      speedupVsPrisma: prismaMs / generatedMs,
-      speedupVsDrizzle: drizzleMs > 0 ? drizzleMs / generatedMs : 0,
+      speedupVsPrisma: prismaMs / totalGeneratedMs,
+      speedupVsDrizzle: drizzleMs > 0 ? drizzleMs / totalGeneratedMs : 0,
+      generatedSql: generated.sql,
     })
   }
+}
+
+function getTotalGeneratedMs(r: BenchmarkResult): number {
+  return r.generatedMs + r.sqlGenMs
 }
 
 export function formatBenchmarkResults(
@@ -180,10 +210,14 @@ export function formatBenchmarkResults(
       name: r.name,
       prismaMs: Math.round(r.prismaMs * 1000) / 1000,
       generatedMs: Math.round(r.generatedMs * 1000) / 1000,
+      generatedServerMs: Math.round(r.generatedServerMs * 1000) / 1000,
+      generatedClientMs: Math.round(r.generatedClientMs * 1000) / 1000,
       sqlGenMs: Math.round(r.sqlGenMs * 1000) / 1000,
+      totalGeneratedMs: Math.round(getTotalGeneratedMs(r) * 1000) / 1000,
       drizzleMs: Math.round(r.drizzleMs * 1000) / 1000,
       speedupVsPrisma: Math.round(r.speedupVsPrisma * 100) / 100,
       speedupVsDrizzle: Math.round(r.speedupVsDrizzle * 100) / 100,
+      generatedSql: r.generatedSql,
     })),
     avgSpeedupVsPrisma:
       Math.round(
@@ -230,13 +264,14 @@ export async function outputBenchmarkResults(
   } else {
     console.log(`\n=== ${config.dialect.toUpperCase()} Benchmark Results ===`)
     console.log(
-      '| Test | Prisma (ms) | Generated (ms) | Drizzle (ms) | SQL Gen (ms) | vs Prisma | vs Drizzle |',
+      '| Test | Prisma (ms) | Gen Total | Gen Client | Gen Server | SQL Gen | Drizzle (ms) | vs Prisma | vs Drizzle |',
     )
     console.log(
-      '|------|-------------|----------------|--------------|--------------|-----------|------------|',
+      '|------|-------------|----------:|-----------:|-----------:|--------:|-------------|----------:|----------:|',
     )
 
     for (const r of benchmarkResults) {
+      const totalGenerated = getTotalGeneratedMs(r)
       const drizzleCol =
         r.drizzleMs > 0
           ? r.drizzleMs.toFixed(3).padStart(12)
@@ -245,8 +280,9 @@ export async function outputBenchmarkResults(
         r.speedupVsDrizzle > 0
           ? `${r.speedupVsDrizzle.toFixed(2)}x`.padStart(10)
           : 'N/A'.padStart(10)
+
       console.log(
-        `| ${r.name.padEnd(40)} | ${r.prismaMs.toFixed(3).padStart(11)} | ${r.generatedMs.toFixed(3).padStart(14)} | ${drizzleCol} | ${r.sqlGenMs.toFixed(3).padStart(12)} | ${r.speedupVsPrisma.toFixed(2).padStart(9)}x | ${vsDrizzle} |`,
+        `| ${r.name.padEnd(40)} | ${r.prismaMs.toFixed(3).padStart(11)} | ${totalGenerated.toFixed(3).padStart(9)} | ${r.generatedClientMs.toFixed(3).padStart(10)} | ${r.generatedServerMs.toFixed(3).padStart(10)} | ${r.sqlGenMs.toFixed(3).padStart(7)} | ${drizzleCol} | ${r.speedupVsPrisma.toFixed(2).padStart(9)}x | ${vsDrizzle} |`,
       )
     }
 
@@ -268,6 +304,64 @@ export async function outputBenchmarkResults(
       console.log(
         `Average speedup vs Drizzle: ${avgSpeedupDrizzle.toFixed(2)}x`,
       )
+    }
+
+    const regressions: Array<{
+      name: string
+      totalMs: number
+      sqlGenMs: number
+      execMs: number
+      clientMs: number
+      serverMs: number
+      opponent: string
+      opponentMs: number
+      speedup: number
+      sql: string
+    }> = []
+
+    for (const r of benchmarkResults) {
+      const totalGenerated = getTotalGeneratedMs(r)
+      if (r.speedupVsPrisma < 1.0) {
+        regressions.push({
+          name: r.name,
+          totalMs: totalGenerated,
+          sqlGenMs: r.sqlGenMs,
+          execMs: r.generatedMs,
+          clientMs: r.generatedClientMs,
+          serverMs: r.generatedServerMs,
+          opponent: `Prisma v${config.version}`,
+          opponentMs: r.prismaMs,
+          speedup: r.speedupVsPrisma,
+          sql: r.generatedSql,
+        })
+      }
+      if (r.drizzleMs > 0 && r.speedupVsDrizzle < 1.0) {
+        regressions.push({
+          name: r.name,
+          totalMs: totalGenerated,
+          sqlGenMs: r.sqlGenMs,
+          execMs: r.generatedMs,
+          clientMs: r.generatedClientMs,
+          serverMs: r.generatedServerMs,
+          opponent: 'Drizzle',
+          opponentMs: r.drizzleMs,
+          speedup: r.speedupVsDrizzle,
+          sql: r.generatedSql,
+        })
+      }
+    }
+
+    if (regressions.length > 0) {
+      regressions.sort((a, b) => a.speedup - b.speedup)
+      console.log(
+        `\n⚠ Generated SQL slower than baseline (${regressions.length}):`,
+      )
+      for (const r of regressions) {
+        console.log(
+          `\n    ${r.name} vs ${r.opponent}: generated=${r.totalMs.toFixed(3)}ms (sqlGen=${r.sqlGenMs.toFixed(3)}ms + exec=${r.execMs.toFixed(3)}ms; execSplit client=${r.clientMs.toFixed(3)}ms + server=${r.serverMs.toFixed(3)}ms) vs ${r.opponentMs.toFixed(3)}ms → ${r.speedup.toFixed(2)}x`,
+        )
+        console.log(`    SQL: ${r.sql}`)
+      }
     }
   }
 }
