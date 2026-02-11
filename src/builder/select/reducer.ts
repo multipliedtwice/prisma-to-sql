@@ -346,6 +346,10 @@ function processRelation(
   const relKey = keyFromRowByCols(row, rel.keyCols)
   if (relKey == null) return
 
+  if (isUnsafePrototypeKey(rel.name)) {
+    return
+  }
+
   if (rel.cardinality === 'one') {
     let current = parentObj[rel.name]
     if (current == null) {
@@ -404,6 +408,10 @@ function pickParentScalarFieldsFromRows(
   return picked.length > 0 ? picked : all
 }
 
+function isUnsafePrototypeKey(key: string): boolean {
+  return key === '__proto__' || key === 'constructor' || key === 'prototype'
+}
+
 export function reduceFlatRows(rows: any[], config: ReducerConfig): any[] {
   if (rows.length === 0) return []
 
@@ -423,7 +431,7 @@ export function reduceFlatRows(rows: any[], config: ReducerConfig): any[] {
 
     let record = resultMap.get(parentKey)
     if (!record) {
-      record = {}
+      record = Object.create(null)
       for (const fieldName of parentScalarFields) {
         record[fieldName] = maybeParseJsonScalarFast(
           parentJsonSet.has(fieldName),
@@ -431,6 +439,7 @@ export function reduceFlatRows(rows: any[], config: ReducerConfig): any[] {
         )
       }
       for (const rel of includedRelations) {
+        if (isUnsafePrototypeKey(rel.name)) continue
         record[rel.name] = rel.cardinality === 'many' ? [] : null
       }
       resultMap.set(parentKey, record)
