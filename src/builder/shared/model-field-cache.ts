@@ -1,86 +1,133 @@
 import { Model, Field } from '../../types'
+import { Field as ParsedField } from '@dee-wan/schema-parser'
 import { quote } from './sql-utils'
 
-const SCALAR_FIELD_CACHE = new WeakMap<Model, Set<string>>()
-const RELATION_FIELD_CACHE = new WeakMap<Model, Set<string>>()
-const COLUMN_MAP_CACHE = new WeakMap<Model, Map<string, string>>()
-const QUOTED_COLUMN_CACHE = new WeakMap<Model, Map<string, string>>()
-const FIELD_BY_NAME_CACHE = new WeakMap<Model, Map<string, Field>>()
-
-export function getScalarFieldSet(model: Model): ReadonlySet<string> {
-  let cached = SCALAR_FIELD_CACHE.get(model)
-  if (cached) return cached
-
-  const set = new Set<string>()
-  for (const f of model.fields) {
-    if (!f.isRelation) set.add(f.name)
-  }
-
-  SCALAR_FIELD_CACHE.set(model, set)
-  return set
+interface FieldIndices {
+  scalarFields: ReadonlyMap<string, Field>
+  relationFields: ReadonlyMap<string, Field>
+  scalarNames: readonly string[]
+  relationNames: readonly string[]
+  jsonFields: ReadonlySet<string>
+  pkFields: readonly string[]
+  columnMap: ReadonlyMap<string, string>
+  quotedColumns: ReadonlyMap<string, string>
 }
 
-export function getRelationFieldSet(model: Model): ReadonlySet<string> {
-  let cached = RELATION_FIELD_CACHE.get(model)
-  if (cached) return cached
+const FIELD_INDICES_CACHE = new WeakMap<Model, FieldIndices>()
 
-  const set = new Set<string>()
-  for (const f of model.fields) {
-    if (f.isRelation) set.add(f.name)
-  }
-
-  RELATION_FIELD_CACHE.set(model, set)
-  return set
+function normalizeField(field: ParsedField): Field {
+  return field as unknown as Field
 }
 
-export function getColumnMap(model: Model): ReadonlyMap<string, string> {
-  let cached = COLUMN_MAP_CACHE.get(model)
+export function getFieldIndices(model: Model): FieldIndices {
+  let cached = FIELD_INDICES_CACHE.get(model)
   if (cached) return cached
 
-  const map = new Map<string, string>()
-  for (const f of model.fields) {
-    if (f.dbName && f.dbName !== f.name) {
-      map.set(f.name, f.dbName)
+  const scalarFields = new Map<string, Field>()
+  const relationFields = new Map<string, Field>()
+  const scalarNames: string[] = []
+  const relationNames: string[] = []
+  const jsonFields = new Set<string>()
+  const pkFields: string[] = []
+  const columnMap = new Map<string, string>()
+  const quotedColumns = new Map<string, string>()
+
+  for (const rawField of model.fields) {
+    const field = normalizeField(rawField)
+
+    if (field.isRelation) {
+      relationFields.set(field.name, field)
+      relationNames.push(field.name)
+    } else {
+      scalarFields.set(field.name, field)
+      scalarNames.push(field.name)
+
+      const fieldType = String((field as any).type ?? '').toLowerCase()
+      if (fieldType === 'json') {
+        jsonFields.add(field.name)
+      }
+
+      if (
+        (field as any).isId ||
+        (field as any).isPrimaryKey ||
+        (field as any).primaryKey
+      ) {
+        pkFields.push(field.name)
+      }
+
+      if (field.dbName && field.dbName !== field.name) {
+        columnMap.set(field.name, field.dbName)
+      }
+
+      const columnName = field.dbName || field.name
+      quotedColumns.set(field.name, quote(columnName))
     }
   }
 
-  COLUMN_MAP_CACHE.set(model, map)
-  return map
+  cached = Object.freeze({
+    scalarFields,
+    relationFields,
+    scalarNames,
+    relationNames,
+    jsonFields,
+    pkFields,
+    columnMap,
+    quotedColumns,
+  })
+
+  FIELD_INDICES_CACHE.set(model, cached)
+  return cached
+}
+
+export function getRelationFieldSet(model: Model): ReadonlySet<string> {
+  return new Set(getFieldIndices(model).relationNames)
+}
+
+export function getScalarFieldSet(model: Model): ReadonlySet<string> {
+  return new Set(getFieldIndices(model).scalarNames)
+}
+
+export function getColumnMap(model: Model): ReadonlyMap<string, string> {
+  return getFieldIndices(model).columnMap
+}
+
+export function getScalarFieldNames(model: Model): string[] {
+  return [...getFieldIndices(model).scalarNames]
 }
 
 export function getQuotedColumn(
   model: Model,
   fieldName: string,
 ): string | undefined {
-  let cache = QUOTED_COLUMN_CACHE.get(model)
-  if (!cache) {
-    cache = new Map()
-    QUOTED_COLUMN_CACHE.set(model, cache)
-  }
-
-  const cached = cache.get(fieldName)
-  if (cached !== undefined) return cached
-
-  const columnMap = getColumnMap(model)
-  const columnName = columnMap.get(fieldName) || fieldName
-  const quoted = quote(columnName)
-
-  cache.set(fieldName, quoted)
-  return quoted
+  return getFieldIndices(model).quotedColumns.get(fieldName)
 }
 
-export function getFieldByName(
-  model: Model,
-  fieldName: string,
-): Field | undefined {
-  let cache = FIELD_BY_NAME_CACHE.get(model)
-  if (!cache) {
-    cache = new Map()
-    for (const field of model.fields) {
-      cache.set(field.name, field)
-    }
-    FIELD_BY_NAME_CACHE.set(model, cache)
-  }
+export function getJsonFieldSet(model: Model): ReadonlySet<string> {
+  return getFieldIndices(model).jsonFields
+}
 
-  return cache.get(fieldName)
+export function parseJsonIfNeeded(isJson: boolean, value: any): any {
+  if (!isJson) return value
+  if (value == null) return value
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+export function maybeParseJson(
+  value: any,
+  jsonSet: ReadonlySet<string>,
+  fieldName: string,
+): any {
+  if (!jsonSet.has(fieldName)) return value
+  if (value == null) return value
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
 }

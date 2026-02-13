@@ -1,19 +1,14 @@
 #!/usr/bin/env node
-
 import { generatorHandler, GeneratorOptions } from '@prisma/generator-helper'
 import { generateClient } from './code-emitter'
-import { logger } from '@prisma/internals'
 import { dirname, join, resolve } from 'path'
-
 const { version } = require('../package.json')
 
 function getDialectFromProvider(provider: string): 'postgres' | 'sqlite' {
   const normalized = provider.toLowerCase()
-
   if (normalized === 'sqlite') return 'sqlite'
   if (normalized === 'postgresql' || normalized === 'postgres')
     return 'postgres'
-
   throw new Error(
     `Unsupported database provider: ${provider}. ` +
       `Supported: postgresql, postgres, sqlite`,
@@ -22,21 +17,35 @@ function getDialectFromProvider(provider: string): 'postgres' | 'sqlite' {
 
 function getOutputDir(options: GeneratorOptions): string {
   const schemaDir = dirname(options.schemaPath)
-
   if (options.generator.output?.value) {
     return resolve(schemaDir, options.generator.output.value)
   }
-
   const clientGenerator = options.otherGenerators.find(
     (g) => g.provider.value === 'prisma-client-js',
   )
-
   if (clientGenerator?.output?.value) {
     const clientOutput = resolve(schemaDir, clientGenerator.output.value)
     return join(resolve(dirname(clientOutput), '..'), 'sql')
   }
-
   return resolve(schemaDir, './generated/sql')
+}
+
+function getDatasourceUrl(options: GeneratorOptions): string | undefined {
+  const configUrl = options.generator.config.databaseUrl
+  if (typeof configUrl === 'string' && configUrl) {
+    return configUrl
+  }
+
+  const datasource = options.datasources?.[0]
+  if (datasource?.url?.value) {
+    return datasource.url.value
+  }
+  if (datasource?.url?.fromEnvVar) {
+    const fromEnv = process.env[datasource.url.fromEnvVar]
+    if (fromEnv) return fromEnv
+  }
+
+  return process.env.DATABASE_URL || undefined
 }
 
 generatorHandler({
@@ -47,10 +56,8 @@ generatorHandler({
       prettyName: 'prisma-sql-generator',
     }
   },
-
   async onGenerate(options: GeneratorOptions) {
     const { generator, dmmf, datasources } = options
-
     if (!datasources || datasources.length === 0) {
       throw new Error('No datasource found in schema')
     }
@@ -63,7 +70,7 @@ generatorHandler({
     const dialect = configDialect || autoDialect
 
     if (configDialect && configDialect !== autoDialect) {
-      logger.warn(
+      console.warn(
         `Generator dialect (${configDialect}) differs from datasource provider (${datasources[0].provider}). ` +
           `Using generator config: ${configDialect}`,
       )
@@ -75,18 +82,23 @@ generatorHandler({
     }
 
     const outputDir = getOutputDir(options)
+    const datasourceUrl = getDatasourceUrl(options)
 
-    logger.info(`Generating SQL client to ${outputDir}`)
-    logger.info(`Datasource: ${datasources[0].provider}`)
-    logger.info(`Dialect: ${config.dialect}`)
-    logger.info(`Skip invalid: ${config.skipInvalid}`)
+    console.info(`Generating SQL client to ${outputDir}`)
+    console.info(`Datasource: ${datasources[0].provider}`)
+    console.info(`Dialect: ${config.dialect}`)
+    console.info(`Skip invalid: ${config.skipInvalid}`)
+    console.info(
+      `Database URL: ${datasourceUrl ? '✓ available' : '✗ not available (stats collection will be skipped)'}`,
+    )
 
     await generateClient({
       datamodel: dmmf.datamodel,
       outputDir,
       config,
+      datasourceUrl,
     })
 
-    logger.info('✓ Generated SQL client successfully')
+    console.info('✓ Generated SQL client successfully')
   },
 })

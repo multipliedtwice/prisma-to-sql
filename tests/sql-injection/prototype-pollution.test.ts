@@ -1,3 +1,4 @@
+// tests/sql-injection/prototype-pollution.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Prisma, PrismaClient } from '../generated/client'
 import { createToSQL } from '../../src'
@@ -100,7 +101,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
             ['__proto__' as any]: true,
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject constructor in select', () => {
@@ -110,7 +111,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
             ['constructor' as any]: true,
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject prototype in select', () => {
@@ -120,13 +121,12 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
             ['prototype' as any]: true,
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
   })
 
   describe('Include Clause Prototype Pollution', () => {
     it('should safely ignore __proto__ in include', () => {
-      // Include silently ignores non-relation fields (safe behavior)
       const { sql } = toSQL('User', 'findMany', {
         include: {
           ['__proto__' as any]: true,
@@ -157,7 +157,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
             ['__proto__' as any]: 'asc',
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject constructor in orderBy', () => {
@@ -167,7 +167,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
             ['constructor' as any]: 'desc',
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
   })
 
@@ -177,7 +177,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
         toSQL('User', 'findMany', {
           distinct: ['__proto__' as any],
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject constructor in distinct', () => {
@@ -185,7 +185,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
         toSQL('User', 'findMany', {
           distinct: ['constructor' as any],
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
   })
 
@@ -198,7 +198,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
           },
           take: 10,
         })
-      }).toThrow(/unknown field|does not exist/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject constructor in cursor', () => {
@@ -209,7 +209,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
           },
           take: 10,
         })
-      }).toThrow(/unknown field|does not exist/i)
+      }).toThrow(/does not exist/i)
     })
   })
 
@@ -221,7 +221,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
             ['__proto__' as any]: true,
           },
         })
-      }).toThrow(/unknown field|does not exist/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject constructor in aggregate _sum', () => {
@@ -231,7 +231,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
             ['constructor' as any]: true,
           },
         })
-      }).toThrow(/unknown field|does not exist/i)
+      }).toThrow(/does not exist/i)
     })
   })
 
@@ -241,7 +241,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
         toSQL('Task', 'groupBy', {
           by: ['__proto__' as any],
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject constructor in groupBy by', () => {
@@ -249,7 +249,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
         toSQL('Task', 'groupBy', {
           by: ['constructor' as any],
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject __proto__ in groupBy having', () => {
@@ -293,7 +293,7 @@ describe('SQL Injection - Prototype Pollution Protection', () => {
             },
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject __proto__ in deeply nested structures', () => {

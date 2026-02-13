@@ -1,4 +1,3 @@
-// src/builder/select.ts
 import { SqlDialect, getGlobalDialect } from '../sql-builder-dialect'
 import { PrismaQueryArgs, Model } from '../types'
 import {
@@ -21,13 +20,18 @@ import {
   isNotNullish,
   isNonEmptyArray,
   isPlainObject,
+  isNonEmptyString,
 } from './shared/validators/type-guards'
 import { assertScalarField } from './shared/validators/field-assertions'
+import {
+  getScalarFieldSet,
+  getRelationFieldSet,
+} from './shared/model-field-cache'
 
 type OrderByValue =
   | 'asc'
   | 'desc'
-  | { sort: 'asc' | 'desc'; nulls?: 'first' | 'last' }
+  | { direction: 'asc' | 'desc'; nulls?: 'first' | 'last' }
 
 type OrderByItem = Record<string, OrderByValue>
 
@@ -97,14 +101,49 @@ function validateDistinct(
   distinct: PrismaQueryArgs['distinct'],
 ): void {
   if (!isNotNullish(distinct) || !isNonEmptyArray(distinct)) return
+
   const seen = new Set<string>()
+  const scalarSet = getScalarFieldSet(model)
+
   for (const raw of distinct) {
+    if (typeof raw !== 'string') {
+      throw new Error(
+        `distinct values must be strings. Got ${typeof raw}: ${JSON.stringify(raw)}`,
+      )
+    }
+
     const f = String(raw).trim()
-    if (f.length === 0) continue
+
+    if (f.length === 0) {
+      throw new Error('distinct field name cannot be empty')
+    }
+
+    if (f.length > 255) {
+      throw new Error(
+        `distinct field name too long (${f.length} chars, max 255): ${f.slice(0, 50)}...`,
+      )
+    }
+
     if (seen.has(f)) {
       throw new Error(`distinct must not contain duplicates (field: '${f}')`)
     }
+
     seen.add(f)
+
+    if (!scalarSet.has(f)) {
+      const relationSet = getRelationFieldSet(model)
+      if (relationSet.has(f)) {
+        throw new Error(
+          `distinct field '${f}' is a relation. Only scalar fields are allowed.\n` +
+            `Available scalar fields: ${[...scalarSet].join(', ')}`,
+        )
+      }
+      throw new Error(
+        `distinct field '${f}' does not exist on model ${model.name}.\n` +
+          `Available fields: ${[...scalarSet].join(', ')}`,
+      )
+    }
+
     assertScalarField(model, f, 'distinct')
   }
 }
@@ -118,35 +157,86 @@ function validateOrderBy(
   const items = normalizeOrderByInput(orderBy)
   if (items.length === 0) return
 
+  const scalarSet = getScalarFieldSet(model)
+  const relationSet = getRelationFieldSet(model)
+
   for (const it of items) {
     const entries = Object.entries(it)
     if (entries.length !== 1) {
-      throw new Error('orderBy array entries must have exactly one field')
+      throw new Error(
+        'orderBy array entries must have exactly one field. ' +
+          `Got ${entries.length} fields: ${Object.keys(it).join(', ')}`,
+      )
     }
-    const fieldName = String(entries[0][0]).trim()
-    if (fieldName.length === 0) {
+
+    const [fieldName, value] = entries[0]
+    const f = String(fieldName).trim()
+
+    if (f.length === 0) {
       throw new Error('orderBy field name cannot be empty')
     }
-    assertScalarField(model, fieldName, 'orderBy')
-    parseOrderByValue(entries[0][1], fieldName)
+
+    if (f.length > 255) {
+      throw new Error(
+        `orderBy field name too long (${f.length} chars, max 255): ${f.slice(0, 50)}...`,
+      )
+    }
+
+    if (!scalarSet.has(f)) {
+      if (relationSet.has(f)) {
+        throw new Error(
+          `orderBy field '${f}' is a relation. Only scalar fields are allowed.\n` +
+            `Available scalar fields: ${[...scalarSet].join(', ')}`,
+        )
+      }
+      throw new Error(
+        `orderBy field '${f}' does not exist on model ${model.name}.\n` +
+          `Available fields: ${[...scalarSet].join(', ')}`,
+      )
+    }
+
+    assertScalarField(model, f, 'orderBy')
+    parseOrderByValue(value, f)
   }
 }
 
-function validateCursor(model: Model, cursor: unknown): void {
+function validateCursor(
+  model: Model,
+  cursor: unknown,
+  distinct?: unknown,
+): void {
   if (!isNotNullish(cursor)) return
   if (!isPlainObject(cursor)) {
     throw new Error('cursor must be an object')
   }
   const entries = Object.entries(cursor)
-  if (entries.length === 0) {
-    throw new Error('cursor must have at least one field')
+
+  const definedEntries = entries.filter(([_, value]) => value !== undefined)
+  if (definedEntries.length === 0) {
+    throw new Error('cursor must have at least one field with defined value')
   }
-  for (const [fieldName] of entries) {
+
+  for (const [fieldName] of definedEntries) {
     const f = String(fieldName).trim()
     if (f.length === 0) {
       throw new Error('cursor field name cannot be empty')
     }
     assertScalarField(model, f, 'cursor')
+  }
+
+  if (isNotNullish(distinct) && isNonEmptyArray(distinct)) {
+    const cursorFields = new Set(definedEntries.map(([k]) => k))
+    const distinctSet = new Set(distinct.map((d) => String(d)))
+
+    for (const cursorField of cursorFields) {
+      if (!distinctSet.has(cursorField)) {
+        throw new Error(
+          `Cursor field '${cursorField}' must be included in distinct fields.\n` +
+            `Current distinct: [${[...distinctSet].join(', ')}]\n` +
+            `Cursor fields: [${[...cursorFields].join(', ')}]`,
+        )
+      }
+    }
   }
 }
 
@@ -243,6 +333,7 @@ function buildSelectSpec(input: {
     whereResult.params,
     whereResult.paramMappings,
     whereResult.nextParamIndex,
+    dialect,
   )
 
   const outerHasLimit = isNotNullish(take)
@@ -321,7 +412,7 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
 
   validateDistinct(model, normalizedArgs.distinct)
   validateOrderBy(model, normalizedArgs.orderBy)
-  validateCursor(model, normalizedArgs.cursor)
+  validateCursor(model, normalizedArgs.cursor, normalizedArgs.distinct)
 
   const spec = buildSelectSpec({
     method,

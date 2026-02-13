@@ -24,21 +24,6 @@ function toSelectEntries(select: Record<string, unknown>): SelectEntry[] {
   return out
 }
 
-function validateSelectKeys(
-  entries: readonly SelectEntry[],
-  scalarSet: ReadonlySet<string>,
-  relationSet: ReadonlySet<string>,
-): void {
-  const unknown: string[] = []
-  for (const [k] of entries) {
-    if (k === '_count') continue
-    if (!scalarSet.has(k) && !relationSet.has(k)) unknown.push(k)
-  }
-  if (unknown.length > 0) {
-    throw new Error(`Select contains unknown fields: ${unknown.join(', ')}`)
-  }
-}
-
 function analyzeSelectEntries(
   entries: readonly SelectEntry[],
   scalarSet: ReadonlySet<string>,
@@ -120,7 +105,7 @@ export function buildSelectFields(
   }
 
   const entries = toSelectEntries(args.select)
-  validateSelectKeys(entries, scalarSet, relationSet)
+  validateFieldKeys(entries, scalarSet, relationSet, true)
 
   const { scalarSelected, hasRelationSelection, hasCount } =
     analyzeSelectEntries(entries, scalarSet, relationSet)
@@ -154,14 +139,16 @@ function buildAllScalarParts(model: Model, alias: string): string[] {
   return parts
 }
 
-function validateRelationSelectKeys(
+function validateFieldKeys(
   entries: readonly SelectEntry[],
-  scalarNames: ReadonlySet<string>,
-  relationNames: ReadonlySet<string>,
+  scalarSet: ReadonlySet<string>,
+  relationSet: ReadonlySet<string>,
+  allowCount = false,
 ): void {
   const unknown: string[] = []
   for (const [k] of entries) {
-    if (!scalarNames.has(k) && !relationNames.has(k)) unknown.push(k)
+    if (allowCount && k === '_count') continue
+    if (!scalarSet.has(k) && !relationSet.has(k)) unknown.push(k)
   }
   if (unknown.length > 0) {
     throw new Error(`Select contains unknown fields: ${unknown.join(', ')}`)
@@ -203,15 +190,11 @@ export function buildRelationSelect(
       )
     }
 
-    const scalarNames = new Set(
-      relModel.fields.filter((f) => !f.isRelation).map((f) => f.name),
-    )
-    const relationNames = new Set(
-      relModel.fields.filter((f) => f.isRelation).map((f) => f.name),
-    )
+    const scalarNames = getScalarFieldSet(relModel)
+    const relationNames = getRelationFieldSet(relModel)
 
     const entries = toSelectEntries(sel)
-    validateRelationSelectKeys(entries, scalarNames, relationNames)
+    validateFieldKeys(entries, scalarNames, relationNames, false)
 
     return buildSelectedScalarParts(
       entries,

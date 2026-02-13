@@ -1,4 +1,3 @@
-// src/builder/shared/param-store.ts
 import {
   extractDynamicName,
   isDynamicParameter,
@@ -19,6 +18,7 @@ interface ParamSnapshot {
   readonly index: number
   readonly params: readonly unknown[]
   readonly mappings: readonly ParamMap[]
+  readonly dynamicNameIndex: ReadonlyMap<string, number>
 }
 
 const MAX_PARAM_INDEX = Number.MAX_SAFE_INTEGER - 1000
@@ -131,13 +131,13 @@ function assertCanAddParam(currentIndex: number): void {
   }
 }
 
-const POSTGRES_POSITION_CACHE = new Array(100)
-for (let i = 0; i < 100; i++) {
+const POSTGRES_POSITION_CACHE = new Array(500)
+for (let i = 0; i < 500; i++) {
   POSTGRES_POSITION_CACHE[i] = `$${i + 1}`
 }
 
 function formatPositionPostgres(position: number): string {
-  if (position <= 100) return POSTGRES_POSITION_CACHE[position - 1]
+  if (position <= 500) return POSTGRES_POSITION_CACHE[position - 1]
   return `$${position}`
 }
 
@@ -158,20 +158,41 @@ function createStoreInternal(
   dialect: SqlDialect,
   initialParams: unknown[] = [],
   initialMappings: ParamMap[] = [],
+  cachedIndex?: ReadonlyMap<string, number>,
 ): ParamStore {
   let index = startIndex
-  const params: unknown[] =
-    initialParams.length > 0 ? initialParams.slice() : []
-  const mappings: ParamMap[] =
+  let params: unknown[] = initialParams.length > 0 ? initialParams.slice() : []
+  let mappings: ParamMap[] =
     initialMappings.length > 0 ? initialMappings.slice() : []
+  let frozen = false
 
-  const dynamicNameToIndex = buildDynamicNameIndex(mappings)
+  let dynamicNameToIndex = cachedIndex
+    ? new Map(cachedIndex)
+    : buildDynamicNameIndex(mappings)
 
   let dirty = true
   let cachedSnapshot: ParamSnapshot | null = null
 
   const formatPosition =
     dialect === 'sqlite' ? formatPositionSqlite : formatPositionPostgres
+
+  function ensureMutable(): void {
+    if (frozen) {
+      params = params.slice()
+      mappings = mappings.slice()
+      frozen = false
+    }
+  }
+
+  function registerParam(paramValue: unknown, mapping: ParamMap): string {
+    ensureMutable()
+    const position = index
+    params.push(paramValue)
+    mappings.push(mapping)
+    index++
+    dirty = true
+    return formatPosition(position)
+  }
 
   function addDynamic(dynamicName: string): string {
     const dn = validateDynamicName(dynamicName)
@@ -180,21 +201,16 @@ function createStoreInternal(
 
     const position = index
     dynamicNameToIndex.set(dn, position)
-    params.push(undefined)
-    mappings.push({ index: position, dynamicName: dn })
-    index++
-    dirty = true
-    return formatPosition(position)
+    return registerParam(undefined, { index: position, dynamicName: dn })
   }
 
   function addStatic(value: unknown): string {
     const position = index
     const normalizedValue = normalizeValue(value)
-    params.push(normalizedValue)
-    mappings.push({ index: position, value: normalizedValue })
-    index++
-    dirty = true
-    return formatPosition(position)
+    return registerParam(normalizedValue, {
+      index: position,
+      value: normalizedValue,
+    })
   }
 
   function add(value: unknown, dynamicName?: string): string {
@@ -215,10 +231,13 @@ function createStoreInternal(
   function snapshot(): ParamSnapshot {
     if (!dirty && cachedSnapshot) return cachedSnapshot
 
+    frozen = true
+
     const snap: ParamSnapshot = {
       index,
-      params: params.slice(),
-      mappings: mappings.slice(),
+      params,
+      mappings,
+      dynamicNameIndex: new Map(dynamicNameToIndex),
     }
 
     cachedSnapshot = snap
@@ -263,10 +282,14 @@ export function createParamStoreFrom(
   dialect: SqlDialect = 'postgres',
 ): ParamStore {
   validateState(existingParams, existingMappings, nextIndex)
+
+  const cachedIndex = buildDynamicNameIndex(existingMappings)
+
   return createStoreInternal(
     nextIndex,
     dialect,
     existingParams.slice(),
     existingMappings.slice(),
+    cachedIndex,
   )
 }

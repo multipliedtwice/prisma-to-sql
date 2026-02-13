@@ -1,7 +1,13 @@
-import { Model, PrismaQueryArgs } from '../../types'
-import { SqlDialect } from '../../sql-builder-dialect'
-import { ParamStore } from './param-store'
-import { ParamMap } from '@dee-wan/schema-parser'
+import type {
+  Model,
+  PrismaQueryArgs,
+  ParamMapping,
+  SqlResult,
+} from '../../types'
+import type { SqlDialect } from '../../sql-builder-dialect'
+import type { ParamStore } from './param-store'
+
+export type { SqlResult, ParamMapping }
 
 export interface BuildContext {
   readonly alias: string
@@ -13,6 +19,7 @@ export interface BuildContext {
   readonly dialect: SqlDialect
   readonly params: ParamStore
   readonly depth: number
+  readonly seenObjects: WeakSet<object>
 }
 
 export interface AliasGenerator {
@@ -55,16 +62,8 @@ export interface WhereClauseResult {
   readonly clause: string
   readonly joins: readonly string[]
   readonly params: readonly unknown[]
-  readonly paramMappings: readonly ParamMap[]
+  readonly paramMappings: readonly ParamMapping[]
   readonly nextParamIndex: number
-}
-
-export interface SqlResult {
-  readonly sql: string
-  readonly params: readonly unknown[]
-  readonly paramMappings: readonly ParamMap[]
-  readonly requiresReduction?: boolean
-  readonly includeSpec?: Record<string, any>
 }
 
 export interface ErrorContext {
@@ -79,7 +78,7 @@ export interface ErrorContext {
 export interface SqlBatchQuery {
   readonly sql: string
   readonly params: readonly unknown[]
-  readonly paramMappings: readonly ParamMap[]
+  readonly paramMappings: readonly ParamMapping[]
   readonly role: 'parent' | 'children'
   readonly relationName?: string
   readonly parentKeyField?: string

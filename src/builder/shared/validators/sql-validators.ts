@@ -72,7 +72,13 @@ function parseDollarNumber(
   return { next: i, num }
 }
 
+const MAX_PARAMS = 32767
+
 function scanDollarPlaceholders(sql: string, markUpTo: number): DollarScan {
+  if (markUpTo > MAX_PARAMS) {
+    throw new Error(`Parameter count ${markUpTo} exceeds maximum ${MAX_PARAMS}`)
+  }
+
   const seen = new Uint8Array(markUpTo + 1)
   let min = Number.POSITIVE_INFINITY
   let max = 0
@@ -212,12 +218,7 @@ export function validateParamConsistencyByDialect(
 }
 
 export function needsQuoting(identifier: string): boolean {
-  const s = String(identifier)
-
-  if (!REGEX_CACHE.VALID_IDENTIFIER.test(s)) return true
-
-  const lowered = s.toLowerCase()
-  if (SQL_KEYWORDS.has(lowered)) return true
-
+  if (!REGEX_CACHE.VALID_IDENTIFIER.test(identifier)) return true
+  if (SQL_KEYWORDS.has(identifier.toLowerCase())) return true
   return false
 }

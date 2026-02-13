@@ -159,6 +159,7 @@ async function generateSpeedExtension(
     outputDir,
     config: { dialect, skipInvalid: false },
     runtimeImportPath: '../../../src/index',
+    datasourceUrl: dialect === 'postgres' ? PG_URL : SQLITE_URL,
   })
 }
 

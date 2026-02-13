@@ -14,6 +14,7 @@ import {
 import { BuildContext, QueryResult } from '../shared/types'
 import { isNotNullish, isPlainObject } from '../shared/validators/type-guards'
 import { Field, Model } from '../../types'
+import { getFieldByName } from '../shared/primary-key-utils'
 
 export interface IWhereBuilder {
   build(where: Record<string, unknown>, ctx: BuildContext): QueryResult
@@ -33,11 +34,7 @@ type RelationFilterArgs = {
   join: string
 }
 
-const NO_JOINS: readonly string[] = Object.freeze([] as string[])
-
-function freezeJoins(items: readonly string[]): readonly string[] {
-  return Object.freeze([...items])
-}
+const NO_JOINS: readonly string[] = []
 
 function isListRelation(fieldType: unknown): boolean {
   return typeof fieldType === 'string' && fieldType.endsWith('[]')
@@ -127,10 +124,10 @@ function tryOptimizeNoneFilter(
   const leftJoinSql = `LEFT JOIN ${relTable} ${relAlias} ON ${join}`
   const whereClause = `${relAlias}.${quoteColumn(relModel, checkField.name)} IS NULL`
 
-  return Object.freeze({
+  return {
     clause: whereClause,
-    joins: freezeJoins([leftJoinSql]),
-  })
+    joins: [leftJoinSql],
+  }
 }
 
 function processRelationFilter(
@@ -236,10 +233,10 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
     )
   }
 
-  return Object.freeze({
+  return {
     clause: clauses.join(SQL_SEPARATORS.CONDITION_AND),
     joins: NO_JOINS,
-  })
+  }
 }
 
 function buildToOneRelationFilters(args: RelationFilterArgs): QueryResult {
@@ -285,10 +282,10 @@ function buildToOneRelationFilters(args: RelationFilterArgs): QueryResult {
   }
 
   if (filterVal === undefined) {
-    return Object.freeze({
+    return {
       clause: DEFAULT_WHERE_CLAUSE,
       joins: NO_JOINS,
-    })
+    }
   }
 
   if (filterVal === null) {
@@ -302,10 +299,10 @@ function buildToOneRelationFilters(args: RelationFilterArgs): QueryResult {
       join,
       wantNull,
     )
-    return Object.freeze({
+    return {
       clause,
       joins: NO_JOINS,
-    })
+    }
   }
 
   if (!isPlainObject(filterVal)) {
@@ -334,10 +331,10 @@ function buildToOneRelationFilters(args: RelationFilterArgs): QueryResult {
       ? buildToOneExistsMatch(relTable, relAlias, join, sub)
       : buildToOneNotExistsMatch(relTable, relAlias, join, sub)
 
-  return Object.freeze({
+  return {
     clause,
     joins: NO_JOINS,
-  })
+  }
 }
 
 function ensureRelationFilterObject(
@@ -361,7 +358,7 @@ function buildRelation(
   ctx: BuildContext,
   whereBuilder: IWhereBuilder,
 ): QueryResult {
-  const field = ctx.model.fields.find((f) => f.name === fieldName)
+  const field = getFieldByName(ctx.model, fieldName)
 
   if (!isValidRelationField(field)) {
     throw createError(`Invalid relation '${fieldName}'`, {

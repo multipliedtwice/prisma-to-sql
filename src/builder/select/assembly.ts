@@ -31,6 +31,9 @@ type DistinctOrderEntry = {
   nulls?: 'first' | 'last'
 }
 
+const SELECT_FIELD_REGEX =
+  /^\s*("(?:[^"]|"")+"|[a-z_][a-z0-9_]*)\s*\.\s*("(?:[^"]|"")+"|[a-z_][a-z0-9_]*)(?:\s+AS\s+("(?:[^"]|"")+"|[a-z_][a-z0-9_]*))?\s*$/i
+
 function buildWhereSql(conditions: readonly string[]): string {
   if (!isNonEmptyArray(conditions)) return ''
   return (
@@ -68,161 +71,50 @@ function finalizeSql(
 ): SqlResult {
   const snapshot = params.snapshot()
   validateSelectQuery(sql)
-  validateParamConsistencyByDialect(
-    sql,
-    snapshot.params,
-    dialect === 'sqlite' ? 'postgres' : dialect,
-  )
+  validateParamConsistencyByDialect(sql, snapshot.params, dialect)
   return {
     sql,
-    params: snapshot.params,
-    paramMappings: snapshot.mappings,
+    params: [...snapshot.params],
+    paramMappings: [...snapshot.mappings],
   }
 }
 
-function skipSpaces(s: string, i: number): number {
-  while (i < s.length) {
-    const c = s.charCodeAt(i)
-    if (c !== 32 && c !== 9) break
-    i++
+function unquoteIdent(s: string): string {
+  if (s.startsWith('"') && s.endsWith('"')) {
+    return s.slice(1, -1).replace(/""/g, '"')
   }
-  return i
-}
-
-interface ReadResult {
-  text: string
-  next: number
-  quoted: boolean
-}
-
-function parseQuotedIdentifier(s: string, start: number): ReadResult {
-  const n = s.length
-  let i = start + 1
-  let out = ''
-  let saw = false
-
-  while (i < n) {
-    const c = s.charCodeAt(i)
-    if (c !== 34) {
-      out += s[i]
-      saw = true
-      i++
-      continue
-    }
-
-    const next = i + 1
-    if (next < n && s.charCodeAt(next) === 34) {
-      out += '"'
-      saw = true
-      i += 2
-      continue
-    }
-
-    if (!saw) {
-      throw new Error(
-        `sqlite distinct emulation: empty quoted identifier in: ${s}`,
-      )
-    }
-    return { text: out, next: i + 1, quoted: true }
-  }
-
-  throw new Error(
-    `sqlite distinct emulation: unterminated quoted identifier in: ${s}`,
-  )
-}
-
-function parseUnquotedIdentifier(s: string, start: number): ReadResult {
-  const n = s.length
-  let i = start
-
-  while (i < n) {
-    const c = s.charCodeAt(i)
-    if (c === 32 || c === 9 || c === 46) break
-    i++
-  }
-
-  return { text: s.slice(start, i), next: i, quoted: false }
-}
-
-function readIdentOrQuoted(s: string, start: number): ReadResult {
-  const n = s.length
-  if (start >= n) return { text: '', next: start, quoted: false }
-
-  if (s.charCodeAt(start) === 34) {
-    return parseQuotedIdentifier(s, start)
-  }
-
-  return parseUnquotedIdentifier(s, start)
-}
-
-function parseOutputAlias(p: string, i: number): string {
-  if (i >= p.length) return ''
-
-  const rest = p.slice(i).trim()
-  if (rest.length === 0) return ''
-
-  const m = rest.match(/^AS\s+/i)
-  if (!m) {
-    throw new Error(
-      `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
-    )
-  }
-
-  let j = i
-  j = skipSpaces(p, j)
-  if (!/^AS\b/i.test(p.slice(j))) {
-    throw new Error(`Failed to parse AS in: ${p}`)
-  }
-  j += 2
-  j = skipSpaces(p, j)
-  const out = readIdentOrQuoted(p, j)
-  const outAlias = out.text.trim()
-  if (outAlias.length === 0) {
-    throw new Error(`Failed to parse output alias from: ${p}`)
-  }
-  j = skipSpaces(p, out.next)
-  if (j !== p.length) {
-    throw new Error(
-      `sqlite distinct emulation requires scalar select fields to be simple columns (optionally with AS). Got: ${p}`,
-    )
-  }
-
-  return outAlias
+  return s
 }
 
 function parseSelectField(p: string, fromAlias: string): string {
-  const fromLower = fromAlias.toLowerCase()
-
-  let i = 0
-  i = skipSpaces(p, i)
-
-  const a = readIdentOrQuoted(p, i)
-  const actualAlias = a.text.toLowerCase()
-  if (actualAlias !== fromLower) {
-    throw new Error(`Expected alias '${fromAlias}', got '${a.text}' in: ${p}`)
-  }
-  i = a.next
-
-  if (i >= p.length || p.charCodeAt(i) !== 46) {
+  const match = SELECT_FIELD_REGEX.exec(p)
+  if (!match) {
     throw new Error(
-      `sqlite distinct emulation requires scalar select fields to be simple columns (alias.column). Got: ${p}`,
+      `SQLite distinct emulation requires simple column references.\n` +
+        `Complex expressions, functions, and computed fields are not supported.\n` +
+        `Got: ${p}\n\n` +
+        `Hint: When using distinct with SQLite:\n` +
+        `  - Use only direct field selections (e.g., { id: true, name: true })\n` +
+        `  - Remove computed fields from select\n` +
+        `  - Avoid selecting relation counts or aggregates\n` +
+        `  - Or switch to PostgreSQL which supports DISTINCT ON with expressions`,
     )
   }
-  i++
-  i = skipSpaces(p, i)
 
-  const colPart = readIdentOrQuoted(p, i)
-  const columnName = colPart.text.trim()
-  if (columnName.length === 0) {
-    throw new Error(`Failed to parse selected column name from: ${p}`)
+  const [, alias, column, outputAlias] = match
+
+  const actualAlias = unquoteIdent(alias)
+  if (actualAlias.toLowerCase() !== fromAlias.toLowerCase()) {
+    throw new Error(
+      `Expected alias '${fromAlias}', got '${actualAlias}' in: ${p}`,
+    )
   }
-  i = colPart.next
 
-  i = skipSpaces(p, i)
+  if (outputAlias) {
+    return unquoteIdent(outputAlias)
+  }
 
-  const outAlias = parseOutputAlias(p, i)
-
-  return outAlias.length > 0 ? outAlias : columnName
+  return unquoteIdent(column)
 }
 
 function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
@@ -280,12 +172,11 @@ function buildWindowOrder(args: {
 
   const orderFields = baseOrder
     .split(SQL_SEPARATORS.ORDER_BY)
-    .map((s) => s.trim().toLowerCase())
+    .map((s) => s.trim().toLowerCase().replace(/\s+/g, ' '))
 
-  const hasIdInOrder = orderFields.some(
-    (f) =>
-      f.startsWith(fromLower + '.id ') || f.startsWith(fromLower + '."id" '),
-  )
+  const hasIdInOrder = orderFields.some((f) => {
+    return f.includes(`${fromLower}.id`) || f.includes(`${fromLower}."id"`)
+  })
 
   if (hasIdInOrder) return baseOrder
 
@@ -702,14 +593,11 @@ function splitOrderByTerms(orderBy: string): string[] {
 }
 
 function hasIdInOrderBy(orderBy: string, fromAlias: string): boolean {
-  const aliasLower = String(fromAlias).toLowerCase()
-  const terms = splitOrderByTerms(orderBy).map((t) => t.toLowerCase())
-  return terms.some(
-    (t) =>
-      t.startsWith(aliasLower + '.id ') ||
-      t.startsWith(aliasLower + '."id" ') ||
-      t === aliasLower + '.id' ||
-      t === aliasLower + '."id"',
+  const lower = orderBy.toLowerCase()
+  const aliasLower = fromAlias.toLowerCase()
+
+  return (
+    lower.includes(`${aliasLower}.id `) || lower.includes(`${aliasLower}."id"`)
   )
 }
 
@@ -780,15 +668,19 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const includeSpec = extractIncludeSpec(args)
   const hasIncludes = hasNestedIncludes(includeSpec)
 
+  const hasPagination = isNotNullish(pagination.take)
+
   const shouldUseFlatJoin =
-    dialect === 'postgres' && hasIncludes && canUseFlatJoinForAll(includeSpec)
+    dialect === 'postgres' &&
+    hasPagination &&
+    hasIncludes &&
+    canUseFlatJoinForAll(includeSpec)
 
   if (shouldUseFlatJoin) {
     const flatResult = buildFlatJoinSql(spec)
 
     if (flatResult.sql) {
       const baseSqlResult = finalizeSql(flatResult.sql, params, dialect)
-
       return {
         sql: baseSqlResult.sql,
         params: baseSqlResult.params,

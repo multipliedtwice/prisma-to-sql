@@ -1,55 +1,52 @@
-import { DMMF } from '@prisma/generator-helper'
-import { OrderByType } from './builder/shared/order-by-utils'
-import { SqlDialect } from './sql-builder-dialect'
-import { BatchQuery } from './batch'
-import { ParamMap } from '@dee-wan/schema-parser'
+import { Model as DMMMModel } from '@dee-wan/schema-parser'
 
-export interface Field {
-  name: string
-  dbName: string
-  type: string
-  isRequired: boolean
-  isRelation: boolean
-  isId?: boolean
-  relatedModel?: string
-  relationName?: string
-  foreignKey?: string | string[]
-  references?: string | string[]
-  isForeignKeyLocal?: boolean
+export type Model = DMMMModel
+
+export interface ParamMapping {
+  index: number
+  dynamicName?: string
+  value?: unknown
 }
 
-export interface Model {
-  name: string
-  tableName: string
-  fields: Field[]
+export interface SqlResult {
+  sql: string
+  params: unknown[]
+  paramMappings?: ParamMapping[]
+  requiresReduction?: boolean
+  includeSpec?: Record<string, any>
+  supportsStreaming?: boolean
 }
 
 export interface PrismaQueryArgs {
   where?: Record<string, unknown>
   select?: Record<string, unknown>
   include?: Record<string, unknown>
-  orderBy?: OrderByType
-  cursor?: Record<string, unknown>
+  orderBy?: unknown
   take?: number | string
   skip?: number | string
-  distinct?: readonly string[]
-
-  by?: readonly string[]
-  having?: Record<string, unknown>
-
+  cursor?: Record<string, unknown>
+  distinct?: string[]
   _count?: unknown
   _sum?: unknown
   _avg?: unknown
   _min?: unknown
   _max?: unknown
-
-  method?: string
+  by?: string[]
+  having?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export type PrismaMethod =
-  | 'findMany'
-  | 'findFirst'
   | 'findUnique'
+  | 'findFirst'
+  | 'findMany'
+  | 'create'
+  | 'createMany'
+  | 'update'
+  | 'updateMany'
+  | 'upsert'
+  | 'delete'
+  | 'deleteMany'
   | 'count'
   | 'aggregate'
   | 'groupBy'
@@ -57,21 +54,13 @@ export type PrismaMethod =
 export interface PrismaSQLConfig<TClient> {
   client: TClient
   models?: Model[]
-  dmmf?: DMMF.Document
-  dialect: SqlDialect
+  dmmf?: any
+  dialect: 'postgres' | 'sqlite'
   execute: (
     client: TClient,
     sql: string,
     params: unknown[],
   ) => Promise<unknown[]>
-}
-
-export interface SqlResult {
-  sql: string
-  params: readonly unknown[]
-  paramMappings?: readonly ParamMap[]
-  requiresReduction?: boolean
-  includeSpec?: Record<string, any>
 }
 
 export interface PrismaSQLResult<TClient> {
@@ -85,6 +74,23 @@ export interface PrismaSQLResult<TClient> {
     method: PrismaMethod,
     args?: Record<string, unknown>,
   ) => Promise<T>
-  batchSql: (queries: Record<string, BatchQuery>) => SqlResult
+  batchSql: (queries: Record<string, any>) => SqlResult
   client: TClient
+}
+
+export interface Field {
+  name: string
+  type: string
+  isId?: boolean
+  isUnique?: boolean
+  isRequired?: boolean
+  isList?: boolean
+  isRelation?: boolean
+  relationName?: string
+  relatedModel?: string
+  dbName?: string | null
+  foreignKey?: string | string[]
+  references?: string | string[]
+  isForeignKeyLocal?: boolean
+  [key: string]: unknown
 }

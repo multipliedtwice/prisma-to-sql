@@ -3,9 +3,8 @@ import {
   deepEqual,
   normalizeValue,
   sortByField,
-  diffAny,
   stableStringify,
-  typeSignature,
+  deepSortNestedArrays,
 } from './compare'
 import type { CapturedQuery } from './query-capture'
 import {
@@ -71,18 +70,10 @@ export async function runParityTest<T>(
     benchmark?: boolean
     iterations?: number
     sortField?: string
-    transformPrisma?: (result: T) => unknown[]
-    transformGenerated?: (result: unknown[]) => unknown[]
-    transformDrizzle?: (result: unknown[]) => unknown[]
     drizzleQuery?: () => Promise<unknown[]>
   } = {},
 ): Promise<void> {
-  const {
-    benchmark = true,
-    sortField = 'id',
-    transformPrisma = (r) => (Array.isArray(r) ? r : r ? [r] : []),
-    transformGenerated = (r) => r,
-  } = options
+  const { benchmark = true, sortField = 'id' } = options
 
   const { method, ...queryArgs } = args
   const extendedQuery = async () => {
@@ -94,66 +85,73 @@ export async function runParityTest<T>(
     prismaQuery(),
   ])
 
-  const prismaResult = transformPrisma(prismaRaw)
-  const extendedResult = transformGenerated(extendedRaw as any)
-
   const sortedPrisma = sortField
-    ? sortByField(prismaResult as any[], sortField as any)
-    : prismaResult
+    ? sortByField(prismaRaw as any[], sortField as any)
+    : prismaRaw
   const sortedExtended = sortField
-    ? sortByField(extendedResult as any[], sortField as any)
-    : extendedResult
+    ? sortByField(extendedRaw as any[], sortField as any)
+    : extendedRaw
 
-  const normalizedPrisma = normalizeValue(sortedPrisma)
-  const normalizedExtended = normalizeValue(sortedExtended)
-
+  const normalizedPrisma = deepSortNestedArrays(normalizeValue(sortedPrisma))
+  const normalizedExtended = deepSortNestedArrays(
+    normalizeValue(sortedExtended),
+  )
+  // console.log(
+  //   'normalizedExtended :>> ',
+  //   Array.isArray(normalizedExtended)
+  //     ? `Array: [${JSON.stringify(normalizedExtended[0])}, ...]`
+  //     : normalizedExtended,
+  // )
   if (!deepEqual(normalizedPrisma, normalizedExtended)) {
-    const maxChars = envNum('PARITY_ERROR_MAX_CHARS', 12000)
+    const maxChars = 12000
     const captureSql = envBool('PARITY_CAPTURE_SQL', false)
 
     const parts: string[] = []
     parts.push(`Parity check failed for ${name}`)
-    parts.push(`Model: ${model}`)
-    parts.push(`Method: ${String(method)}`)
-    parts.push(`Args: ${truncate(JSON.stringify(queryArgs, null, 2), 4000)}`)
+    parts.push(`Model: ${model}, Method: ${String(method)}`)
+
+    const prismaLen = Array.isArray(normalizedPrisma)
+      ? normalizedPrisma.length
+      : 1
+    const extLen = Array.isArray(normalizedExtended)
+      ? normalizedExtended.length
+      : 1
+    parts.push(`Rows: Prisma = ${prismaLen}, Prisma-SQL = ${extLen}`)
 
     parts.push(``)
-    parts.push(`Signature (normalized types)`)
-    parts.push(
-      `Prisma: ${truncate(JSON.stringify(typeSignature(sortedPrisma), null, 2), 4000)}`,
+    parts.push(`Difference Analysis:`)
+    const differences = findDeepDifferences(
+      normalizedPrisma,
+      normalizedExtended,
+      '',
     )
-    parts.push(
-      `Extended: ${truncate(JSON.stringify(typeSignature(sortedExtended), null, 2), 4000)}`,
-    )
 
-    parts.push(``)
-    parts.push(`Diff (first rows)`)
-    const diffs = diffAny(normalizedPrisma, normalizedExtended)
-    parts.push(diffs.length ? diffs.join('\n\n') : '(no diff produced)')
-
-    const prismaJson = safeJson(normalizedPrisma)
-    const extJson = safeJson(normalizedExtended)
-
-    parts.push(``)
-    parts.push(`Normalized outputs`)
-    parts.push(`Prisma: ${truncate(prismaJson, 4000)}`)
-    parts.push(`Extended: ${truncate(extJson, 4000)}`)
+    if (differences.length === 0) {
+      parts.push(`  No specific differences found (normalization issue?)`)
+    } else {
+      for (const diff of differences.slice(0, 10)) {
+        parts.push(`  ${diff}`)
+      }
+      if (differences.length > 10) {
+        parts.push(`  ... and ${differences.length - 10} more differences`)
+      }
+    }
 
     if (captureSql) {
       parts.push(``)
-      parts.push(`SQL capture (Prisma baseline)`)
+      parts.push(`SQL (Prisma):`)
       const prismaCaptured = await withPrismaCapture(async () => prismaQuery())
-      parts.push(formatCapturedQueries(prismaCaptured.queries, 10))
+      parts.push(formatCapturedQueries(prismaCaptured.queries, 2))
 
       parts.push(``)
-      parts.push(`SQL capture (Extended)`)
+      parts.push(`SQL (Extended):`)
       const extendedCaptured = await withPrismaCapture(async () =>
         extendedQuery(),
       )
-      parts.push(formatCapturedQueries(extendedCaptured.queries, 10))
+      parts.push(formatCapturedQueries(extendedCaptured.queries, 2))
     } else {
       parts.push(``)
-      parts.push(`SQL capture disabled (set PARITY_CAPTURE_SQL=1 to include)`)
+      parts.push(`(Set PARITY_CAPTURE_SQL=1 for SQL queries)`)
     }
 
     const message = truncate(parts.join('\n'), maxChars)
@@ -342,4 +340,114 @@ export async function outputBenchmarkResults(
       `\n⚠ Extended slower than baseline (${regressions.length} tests)`,
     )
   }
+}
+
+function findDeepDifferences(
+  expected: unknown,
+  actual: unknown,
+  path: string,
+  maxDepth: number = 10,
+): string[] {
+  if (maxDepth <= 0) return []
+
+  const diffs: string[] = []
+
+  if (typeof expected !== typeof actual) {
+    diffs.push(
+      `${path || 'root'}: type mismatch (${typeof expected} vs ${typeof actual})`,
+    )
+    return diffs
+  }
+
+  if (
+    expected === null ||
+    expected === undefined ||
+    actual === null ||
+    actual === undefined
+  ) {
+    if (expected !== actual) {
+      diffs.push(
+        `${path || 'root'}: ${JSON.stringify(expected)} !== ${JSON.stringify(actual)}`,
+      )
+    }
+    return diffs
+  }
+
+  if (Array.isArray(expected) && Array.isArray(actual)) {
+    if (expected.length !== actual.length) {
+      diffs.push(
+        `${path || 'root'}[]: length ${expected.length} !== ${actual.length}`,
+      )
+    }
+
+    const minLen = Math.min(expected.length, actual.length)
+    for (let i = 0; i < Math.min(minLen, 5); i++) {
+      const itemPath = `${path}[${i}]`
+      diffs.push(
+        ...findDeepDifferences(expected[i], actual[i], itemPath, maxDepth - 1),
+      )
+    }
+
+    return diffs
+  }
+
+  if (typeof expected === 'object' && typeof actual === 'object') {
+    const expObj = expected as Record<string, unknown>
+    const actObj = actual as Record<string, unknown>
+
+    const allKeys = new Set([...Object.keys(expObj), ...Object.keys(actObj)])
+
+    for (const key of allKeys) {
+      if (!(key in expObj)) {
+        const val = JSON.stringify(actObj[key])
+        diffs.push(
+          `${path}.${key}: missing in expected (actual has ${truncate(val, 50)})`,
+        )
+        continue
+      }
+
+      if (!(key in actObj)) {
+        const val = JSON.stringify(expObj[key])
+        diffs.push(
+          `${path}.${key}: missing in actual (expected has ${truncate(val, 50)})`,
+        )
+        continue
+      }
+
+      const expVal = expObj[key]
+      const actVal = actObj[key]
+
+      if (
+        typeof expVal === 'object' &&
+        expVal !== null &&
+        typeof actVal === 'object' &&
+        actVal !== null
+      ) {
+        diffs.push(
+          ...findDeepDifferences(
+            expVal,
+            actVal,
+            `${path}.${key}`,
+            maxDepth - 1,
+          ),
+        )
+      } else if (expVal !== actVal) {
+        const expStr = JSON.stringify(expVal)
+        const actStr = JSON.stringify(actVal)
+        diffs.push(
+          `${path}.${key}: ${truncate(expStr, 50)} !== ${truncate(actStr, 50)}`,
+        )
+      }
+    }
+
+    return diffs
+  }
+
+  if (expected !== actual) {
+    diffs.push(
+      `${path || 'root'}: ${JSON.stringify(expected)} !== ${JSON.stringify(actual)}`,
+    )
+  }
+
+  return diffs
 }

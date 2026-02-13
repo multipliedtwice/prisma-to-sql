@@ -1,3 +1,4 @@
+// tests/sql-injection/basic.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { readFileSync, writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
@@ -188,7 +189,7 @@ describe('SQL Injection - Basic Protection', () => {
         toSQL('User', 'findMany', {
           select: { ["'; DROP TABLE users--" as any]: true },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject SQL injection in field names', () => {
@@ -204,7 +205,7 @@ describe('SQL Injection - Basic Protection', () => {
         toSQL('User', 'findMany', {
           orderBy: { ["'; DROP TABLE--" as any]: 'asc' },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject non-existent fields', () => {

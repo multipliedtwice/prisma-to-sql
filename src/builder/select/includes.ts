@@ -33,17 +33,21 @@ import {
 } from '../shared/model-field-cache'
 import { ensureDeterministicOrderByInput } from '../shared/order-by-determinism'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
+import { resolveRelationKeys } from '../shared/relation-key-utils'
+import {
+  extractRelationEntries,
+  RelationEntry,
+} from '../shared/relation-extraction-utils'
 
-const MAX_INCLUDE_DEPTH = 10
+const MAX_INCLUDE_DEPTH = 5
+const MAX_INCLUDES_PER_LEVEL = 10
+const MAX_TOTAL_SUBQUERIES = 100
 
 interface IncludeComplexityStats {
   totalIncludes: number
   totalSubqueries: number
   maxDepth: number
 }
-
-const MAX_TOTAL_SUBQUERIES = 100
-const MAX_TOTAL_INCLUDES = 50
 
 type DynamicInt = string
 type IntOrDynamic = number | DynamicInt
@@ -60,9 +64,9 @@ interface IncludeBuildContext {
   dialect: SqlDialect
   params: ParamStore
   includePath: string[]
-  visitPath?: string[]
-  depth?: number
-  stats?: IncludeComplexityStats
+  visitSet: Set<string>
+  depth: number
+  stats: IncludeComplexityStats
   outerHasLimit?: boolean
 }
 
@@ -126,7 +130,9 @@ function resolveRelationOrThrow(
   schemaByName: Map<string, Model>,
   relName: string,
 ): { field: Field; relModel: Model } {
-  const field = model.fields.find((f) => f.name === relName)
+  const field = model.fields.find((f) => f.name === relName) as
+    | Field
+    | undefined
 
   if (!isNotNullish(field)) {
     throw new Error(
@@ -163,31 +169,6 @@ function resolveRelationOrThrow(
   }
 
   return { field, relModel }
-}
-
-function relationEntriesFromArgs(
-  args: IncludeSelectArgs,
-  model: Model,
-): Array<[string, unknown]> {
-  const relationSet = getRelationFieldSet(model)
-  const out: Array<[string, unknown]> = []
-  const seen = new Set<string>()
-
-  const pushFrom = (src: unknown): void => {
-    if (!isPlainObject(src)) return
-    for (const [k, v] of Object.entries(src)) {
-      if (v === false) continue
-      if (!relationSet.has(k)) continue
-      if (seen.has(k)) continue
-      seen.add(k)
-      out.push([k, v])
-    }
-  }
-
-  pushFrom(args.include)
-  pushFrom(args.select)
-
-  return out
 }
 
 function validateOrderByForModel(model: Model, orderBy: unknown): void {
@@ -336,7 +317,7 @@ function buildSelectWithNestedIncludes(
         ...ctx,
         model: relModel,
         parentAlias: relAlias,
-        depth: (ctx.depth || 0) + 1,
+        depth: ctx.depth + 1,
       })
     : []
 
@@ -547,32 +528,6 @@ function buildListIncludeSpec(args: {
   return Object.freeze({ name: args.relName, sql, isOneToOne: false })
 }
 
-function resolveIncludeKeyPairs(field: Field): {
-  relKeyFields: string[]
-  parentKeyFields: string[]
-} {
-  const fkFields = normalizeKeyList(field.foreignKey)
-  if (fkFields.length === 0) {
-    throw new Error(
-      `Relation '${field.name}' is missing foreignKey for join-based include`,
-    )
-  }
-
-  const refs = normalizeKeyList(field.references)
-  const refFields = refs.length > 0 ? refs : fkFields.length === 1 ? ['id'] : []
-
-  if (refFields.length !== fkFields.length) {
-    throw new Error(
-      `Relation '${field.name}' references count doesn't match foreignKey count`,
-    )
-  }
-
-  return {
-    relKeyFields: field.isForeignKeyLocal ? refFields : fkFields,
-    parentKeyFields: field.isForeignKeyLocal ? fkFields : refFields,
-  }
-}
-
 function buildFkSelectList(
   relAlias: string,
   relModel: Model,
@@ -664,7 +619,9 @@ function buildJoinBasedNonPaginated(args: {
   relSelect: string
   ctx: IncludeBuildContext
 }): IncludeSpec {
-  const { relKeyFields, parentKeyFields } = resolveIncludeKeyPairs(args.field)
+  const { childKeys: relKeyFields, parentKeys: parentKeyFields } =
+    resolveRelationKeys(args.field, 'include')
+
   const joinAlias = args.ctx.aliasGen.next(`__inc_${args.relName}`)
 
   const fkSelect = buildFkSelectList(args.relAlias, args.relModel, relKeyFields)
@@ -718,7 +675,9 @@ function buildJoinBasedPaginated(args: {
   skipVal: number | undefined
   ctx: IncludeBuildContext
 }): IncludeSpec {
-  const { relKeyFields, parentKeyFields } = resolveIncludeKeyPairs(args.field)
+  const { childKeys: relKeyFields, parentKeys: parentKeyFields } =
+    resolveRelationKeys(args.field, 'include')
+
   const joinAlias = args.ctx.aliasGen.next(`__inc_${args.relName}`)
   const rankedAlias = args.ctx.aliasGen.next(`__ranked_${args.relName}`)
 
@@ -882,7 +841,7 @@ function buildSingleInclude(
     return Object.freeze({ name: relName, sql, isOneToOne: true })
   }
 
-  const depth = ctx.depth || 0
+  const depth = ctx.depth
   const outerHasLimit = ctx.outerHasLimit === true
   const nestedIncludes = hasNestedRelationInArgs(relArgs, relModel)
 
@@ -950,51 +909,63 @@ function buildIncludeSqlInternal(
   args: IncludeSelectArgs,
   ctx: IncludeBuildContext,
 ): IncludeSpec[] {
-  const stats = ctx.stats || {
-    totalIncludes: 0,
-    totalSubqueries: 0,
-    maxDepth: 0,
-  }
-  const depth = ctx.depth || 0
-  const visitPath = ctx.visitPath || []
+  const depth = ctx.depth
 
   if (depth > MAX_INCLUDE_DEPTH) {
     throw new Error(
       `Maximum include depth of ${MAX_INCLUDE_DEPTH} exceeded. ` +
-        `Path: ${visitPath.join(' -> ')}. ` +
+        `Path: ${Array.from(ctx.visitSet).join(' -> ')}. ` +
         `Deep includes cause exponential SQL complexity and performance issues.`,
     )
   }
 
-  stats.maxDepth = Math.max(stats.maxDepth, depth)
+  const modelPath = ctx.includePath
+    .map((p) => {
+      const parts = p.split('.')
+      return parts.length > 0 ? parts[0] : ''
+    })
+    .filter((p) => p.length > 0)
+
+  const currentModelCount = modelPath.filter((m) => m === ctx.model.name).length
+  if (currentModelCount > 2) {
+    throw new Error(
+      `Circular relation detected: Model '${ctx.model.name}' appears ${currentModelCount} times ` +
+        `in include path: ${ctx.includePath.join(' -> ')}. ` +
+        `Self-referential relations must be limited to 2 levels deep.`,
+    )
+  }
+
+  ctx.stats.maxDepth = Math.max(ctx.stats.maxDepth, depth)
 
   const includes: IncludeSpec[] = []
-  const entries = relationEntriesFromArgs(args, ctx.model)
+  const entries = extractRelationEntries(args, ctx.model)
 
-  for (const [relName, relArgs] of entries) {
+  if (entries.length > MAX_INCLUDES_PER_LEVEL) {
+    throw new Error(
+      `Too many includes at depth ${depth} (${entries.length} > ${MAX_INCLUDES_PER_LEVEL}). ` +
+        `Path: ${Array.from(ctx.visitSet).join(' -> ')}`,
+    )
+  }
+
+  for (const entry of entries) {
+    const relName = entry.name
+    const relArgs = entry.value
+
     if (relArgs === false) continue
 
-    stats.totalIncludes++
-    if (stats.totalIncludes > MAX_TOTAL_INCLUDES) {
+    ctx.stats.totalIncludes++
+    if (ctx.stats.totalIncludes > MAX_TOTAL_SUBQUERIES) {
       throw new Error(
-        `Maximum total includes (${MAX_TOTAL_INCLUDES}) exceeded. ` +
-          `Current: ${stats.totalIncludes} includes. ` +
-          `Query has ${stats.maxDepth} levels deep. ` +
-          `Simplify your query structure or use multiple queries.`,
-      )
-    }
-
-    stats.totalSubqueries++
-    if (stats.totalSubqueries > MAX_TOTAL_SUBQUERIES) {
-      throw new Error(
-        `Query complexity limit exceeded: ${stats.totalSubqueries} subqueries generated. ` +
+        `Query complexity limit exceeded: ${ctx.stats.totalIncludes} includes generated. ` +
           `Maximum allowed: ${MAX_TOTAL_SUBQUERIES}. ` +
           `This indicates exponential include nesting. ` +
-          `Stats: depth=${stats.maxDepth}, includes=${stats.totalIncludes}. ` +
-          `Path: ${visitPath.join(' -> ')}. ` +
+          `Stats: depth=${ctx.stats.maxDepth}, includes=${ctx.stats.totalIncludes}. ` +
+          `Path: ${Array.from(ctx.visitSet).join(' -> ')}. ` +
           `Simplify your include structure or split into multiple queries.`,
       )
     }
+
+    ctx.stats.totalSubqueries++
 
     const resolved = resolveRelationOrThrow(
       ctx.model,
@@ -1003,33 +974,24 @@ function buildIncludeSqlInternal(
     )
 
     const relationPath = `${ctx.model.name}.${relName}`
-    const currentPath = [...visitPath, relationPath]
 
-    if (visitPath.includes(relationPath)) {
+    if (ctx.visitSet.has(relationPath)) {
       throw new Error(
-        `Circular include detected: ${currentPath.join(' -> ')}. Relation '${relationPath}' creates an infinite loop.`,
-      )
-    }
-
-    const modelOccurrences = currentPath.filter((p) =>
-      p.startsWith(`${resolved.relModel.name}.`),
-    ).length
-    if (modelOccurrences > 2) {
-      throw new Error(
-        `Include too deeply nested: model '${resolved.relModel.name}' ` +
-          `appears ${modelOccurrences} times in path: ${currentPath.join(' -> ')}`,
+        `Circular include detected: ${Array.from(ctx.visitSet).join(' -> ')} -> ${relationPath}. ` +
+          `Relation '${relationPath}' creates an infinite loop.`,
       )
     }
 
     const nextIncludePath = [...ctx.includePath, relName]
+    const nextVisitSet = new Set(ctx.visitSet)
+    nextVisitSet.add(relationPath)
 
     includes.push(
       buildSingleInclude(relName, relArgs, resolved.field, resolved.relModel, {
         ...ctx,
         includePath: nextIncludePath,
-        visitPath: currentPath,
+        visitSet: nextVisitSet,
         depth: depth,
-        stats,
       }),
     )
   }
@@ -1065,7 +1027,7 @@ export function buildIncludeSql(
     params,
     dialect,
     includePath: [],
-    visitPath: [],
+    visitSet: new Set<string>(),
     depth: 0,
     stats,
     outerHasLimit,
@@ -1089,7 +1051,9 @@ function resolveCountRelationOrThrow(
     )
   }
 
-  const field = model.fields.find((f) => f.name === relName)
+  const field = model.fields.find((f) => f.name === relName) as
+    | Field
+    | undefined
   if (!field) {
     throw new Error(
       `_count.${relName} references unknown relation on model ${model.name}`,
@@ -1120,38 +1084,6 @@ function resolveCountRelationOrThrow(
   }
 
   return { field, relModel }
-}
-
-function defaultReferencesForCount(fkCount: number): string[] {
-  if (fkCount === 1) return ['id']
-  throw new Error(
-    'Relation count for composite keys requires explicit references matching...',
-  )
-}
-
-function resolveCountKeyPairs(field: Field): {
-  relKeyFields: string[]
-  parentKeyFields: string[]
-} {
-  const fkFields = normalizeKeyList(field.foreignKey)
-  if (fkFields.length === 0) {
-    throw new Error('Relation count requires foreignKey')
-  }
-
-  const refs = normalizeKeyList(field.references)
-  const refFields =
-    refs.length > 0 ? refs : defaultReferencesForCount(fkFields.length)
-
-  if (refFields.length !== fkFields.length) {
-    throw new Error(
-      'Relation count requires references count to match foreignKey count',
-    )
-  }
-
-  const relKeyFields = field.isForeignKeyLocal ? refFields : fkFields
-  const parentKeyFields = field.isForeignKeyLocal ? fkFields : refFields
-
-  return { relKeyFields, parentKeyFields }
 }
 
 function aliasQualifiedColumn(
@@ -1219,7 +1151,8 @@ function buildCountJoinAndPair(args: {
   aliasGen: ReturnType<typeof createAliasGenerator>
 }): { joinSql: string; pairSql: string } {
   const relTable = getRelationTableReference(args.relModel, args.dialect)
-  const { relKeyFields, parentKeyFields } = resolveCountKeyPairs(args.field)
+  const { childKeys: relKeyFields, parentKeys: parentKeyFields } =
+    resolveRelationKeys(args.field, 'count')
 
   const forbidden = new Set<string>([args.parentAlias])
 

@@ -2,15 +2,14 @@ import { isDynamicParameter } from '@dee-wan/schema-parser'
 import {
   caseInsensitiveLike,
   caseInsensitiveEquals,
-  inArray,
-  notInArray,
-  prepareArrayParam,
   SqlDialect,
 } from '../../sql-builder-dialect'
 import { Ops, Modes, SQL_TEMPLATES, Wildcards } from '../shared/constants'
 import { createError } from '../shared/errors'
 import { ParamStore } from '../shared/param-store'
 import { isNotNullish, isPlainObject } from '../shared/validators/type-guards'
+import { tryBuildNullComparison } from '../shared/null-comparison'
+import { buildInCondition } from '../shared/in-operator-builder'
 
 const MAX_NOT_DEPTH = 50
 
@@ -102,7 +101,14 @@ function routeOperatorHandler(
   }
 
   if (op === Ops.IN || op === Ops.NOT_IN) {
-    return handleInOperator(expr, op, val, params, dialect!)
+    return buildInCondition(
+      expr,
+      op === Ops.IN ? 'in' : 'notIn',
+      val,
+      params,
+      dialect!,
+      'WHERE clause',
+    )
   }
 
   if (
@@ -134,9 +140,8 @@ export function buildScalarOperator(
     )
   }
 
-  if (val === null) {
-    return handleNullValue(expr, op)
-  }
+  const nullCheck = tryBuildNullComparison(expr, op, val, 'WHERE clause')
+  if (nullCheck) return nullCheck
 
   if (op === Ops.NOT && isPlainObject(val)) {
     return handleNotOperator(expr, val, params, mode, fieldType, dialect, depth)
@@ -162,12 +167,6 @@ export function buildScalarOperator(
   }
 
   return handleComparisonOperator(expr, op, val, params)
-}
-
-function handleNullValue(expr: string, op: string): string {
-  if (op === Ops.EQUALS) return `${expr} ${SQL_TEMPLATES.IS_NULL}`
-  if (op === Ops.NOT) return `${expr} ${SQL_TEMPLATES.IS_NOT_NULL}`
-  throw createError(`Operator '${op}' doesn't support null`, { operator: op })
 }
 
 function normalizeMode(v: unknown): ModeType {
@@ -269,50 +268,6 @@ function handleLikeOperator(
   }
 
   return `${expr} ${SQL_TEMPLATES.LIKE} ${placeholder}`
-}
-
-function handleInOperator(
-  expr: string,
-  op: string,
-  val: unknown,
-  params: ParamStore,
-  dialect: SqlDialect,
-): string {
-  if (val === undefined) return ''
-
-  if (isDynamicParameter(val)) {
-    const placeholder = params.addAuto(val)
-    return op === Ops.IN
-      ? inArray(expr, placeholder, dialect)
-      : notInArray(expr, placeholder, dialect)
-  }
-
-  if (!Array.isArray(val)) {
-    throw createError(`IN operators require array value`, {
-      operator: op,
-      value: val,
-    })
-  }
-
-  if (val.length === 0) {
-    return op === Ops.IN ? '0=1' : '1=1'
-  }
-
-  if (dialect === 'sqlite' && val.length <= 30) {
-    const placeholders: string[] = []
-    for (const item of val) {
-      placeholders.push(params.add(item))
-    }
-    const list = placeholders.join(', ')
-    return op === Ops.IN ? `${expr} IN (${list})` : `${expr} NOT IN (${list})`
-  }
-
-  const paramValue = prepareArrayParam(val as unknown[], dialect)
-  const placeholder = params.add(paramValue)
-
-  return op === Ops.IN
-    ? inArray(expr, placeholder, dialect)
-    : notInArray(expr, placeholder, dialect)
 }
 
 function handleComparisonOperator(

@@ -67,6 +67,48 @@ export function normalizeValue(value: unknown): unknown {
   return value
 }
 
+export function deepSortNestedArrays(value: unknown): unknown {
+  if (value === null || value === undefined) return value
+
+  if (Array.isArray(value)) {
+    const sorted = value.map(deepSortNestedArrays)
+    if (
+      sorted.length > 0 &&
+      sorted[0] &&
+      typeof sorted[0] === 'object' &&
+      !Array.isArray(sorted[0])
+    ) {
+      const first = sorted[0] as Record<string, unknown>
+      if ('id' in first) {
+        sorted.sort((a: any, b: any) => {
+          const aId = a?.id
+          const bId = b?.id
+          if (aId == null && bId == null) return 0
+          if (aId == null) return 1
+          if (bId == null) return -1
+          if (typeof aId === 'number' && typeof bId === 'number')
+            return aId - bId
+          if (typeof aId === 'bigint' && typeof bId === 'bigint')
+            return aId < bId ? -1 : aId > bId ? 1 : 0
+          return String(aId).localeCompare(String(bId))
+        })
+      }
+    }
+    return sorted
+  }
+
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const key of Object.keys(obj)) {
+      out[key] = deepSortNestedArrays(obj[key])
+    }
+    return out
+  }
+
+  return value
+}
+
 export function deepEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(normalizeValue(a)) === JSON.stringify(normalizeValue(b))
 }

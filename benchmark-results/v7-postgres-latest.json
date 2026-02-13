@@ -4,220 +4,218 @@
   "tests": [
     {
       "name": "findMany basic",
-      "prismaMs": 0.393,
-      "extendedMs": 0.382,
-      "drizzleMs": 0.305,
-      "speedupVsPrisma": 1.03,
-      "speedupVsDrizzle": 0.8,
-      "regressionLog": {
-        "extendedQueries": [],
-        "prismaQueries": [
-          {
-            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"avatar_url\", \"public\".\"users\".\"role\", \"public\".\"users\".\"status\", \"public\".\"users\".\"is_deleted\", \"public\".\"users\".\"metadata\", \"public\".\"users\".\"tags\", \"public\".\"users\".\"lastLoginAt\", \"public\".\"users\".\"createdAt\", \"public\".\"users\".\"updatedAt\" FROM \"public\".\"users\" WHERE 1=1 ORDER BY \"public\".\"users\".\"id\" ASC OFFSET $1",
-            "params": [
-              "0"
-            ],
-            "durationMs": 0.3693749999983993
-          }
-        ],
-        "drizzleQueries": [
-          {
-            "sql": "select \"id\", \"email\", \"name\", \"avatar_url\", \"role\", \"status\", \"is_deleted\", \"metadata\", \"tags\", \"lastLoginAt\", \"createdAt\", \"updatedAt\" from \"users\" order by \"users\".\"id\" asc",
-            "params": []
-          }
-        ]
-      }
+      "prismaMs": 0.367,
+      "extendedMs": 0.208,
+      "drizzleMs": 0.273,
+      "speedupVsPrisma": 1.76,
+      "speedupVsDrizzle": 1.31
     },
     {
       "name": "findMany where =",
-      "prismaMs": 0.417,
-      "extendedMs": 0.28,
-      "drizzleMs": 0.356,
-      "speedupVsPrisma": 1.49,
-      "speedupVsDrizzle": 1.27
+      "prismaMs": 0.372,
+      "extendedMs": 0.26,
+      "drizzleMs": 0.308,
+      "speedupVsPrisma": 1.43,
+      "speedupVsDrizzle": 1.19
     },
     {
       "name": "findMany where >=",
-      "prismaMs": 10.882,
-      "extendedMs": 3.737,
-      "drizzleMs": 6.677,
-      "speedupVsPrisma": 2.91,
-      "speedupVsDrizzle": 1.79
+      "prismaMs": 7.975,
+      "extendedMs": 3.048,
+      "drizzleMs": 7.546,
+      "speedupVsPrisma": 2.62,
+      "speedupVsDrizzle": 2.48
     },
     {
       "name": "findMany where IN",
-      "prismaMs": 0.707,
-      "extendedMs": 0.339,
-      "drizzleMs": 0.461,
-      "speedupVsPrisma": 2.09,
-      "speedupVsDrizzle": 1.36
+      "prismaMs": 0.539,
+      "extendedMs": 0.419,
+      "drizzleMs": 0.473,
+      "speedupVsPrisma": 1.29,
+      "speedupVsDrizzle": 1.13
     },
     {
       "name": "findMany where null",
-      "prismaMs": 0.362,
-      "extendedMs": 0.134,
-      "drizzleMs": 0.221,
-      "speedupVsPrisma": 2.71,
-      "speedupVsDrizzle": 1.65
-    },
-    {
-      "name": "findMany ILIKE",
-      "prismaMs": 0.369,
-      "extendedMs": 0.289,
-      "drizzleMs": 0.316,
-      "speedupVsPrisma": 1.28,
+      "prismaMs": 0.289,
+      "extendedMs": 0.147,
+      "drizzleMs": 0.16,
+      "speedupVsPrisma": 1.96,
       "speedupVsDrizzle": 1.09
     },
     {
-      "name": "findMany AND",
-      "prismaMs": 2.454,
-      "extendedMs": 1.114,
-      "drizzleMs": 2.049,
-      "speedupVsPrisma": 2.2,
-      "speedupVsDrizzle": 1.84
-    },
-    {
-      "name": "findMany OR",
-      "prismaMs": 7.744,
-      "extendedMs": 3.493,
-      "drizzleMs": 6.069,
-      "speedupVsPrisma": 2.22,
-      "speedupVsDrizzle": 1.74
-    },
-    {
-      "name": "findMany NOT",
-      "prismaMs": 0.63,
-      "extendedMs": 0.462,
-      "drizzleMs": 0.385,
-      "speedupVsPrisma": 1.36,
-      "speedupVsDrizzle": 0.83,
+      "name": "findMany ILIKE",
+      "prismaMs": 0.349,
+      "extendedMs": 0.228,
+      "drizzleMs": 0.198,
+      "speedupVsPrisma": 1.53,
+      "speedupVsDrizzle": 0.87,
       "regressionLog": {
         "extendedQueries": [],
         "prismaQueries": [
           {
-            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"avatar_url\", \"public\".\"users\".\"role\", \"public\".\"users\".\"status\", \"public\".\"users\".\"is_deleted\", \"public\".\"users\".\"metadata\", \"public\".\"users\".\"tags\", \"public\".\"users\".\"lastLoginAt\", \"public\".\"users\".\"createdAt\", \"public\".\"users\".\"updatedAt\" FROM \"public\".\"users\" WHERE (NOT \"public\".\"users\".\"status\" = $1) ORDER BY \"public\".\"users\".\"id\" ASC OFFSET $2",
+            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"avatar_url\", \"public\".\"users\".\"role\", \"public\".\"users\".\"status\", \"public\".\"users\".\"is_deleted\", \"public\".\"users\".\"metadata\", \"public\".\"users\".\"tags\", \"public\".\"users\".\"lastLoginAt\", \"public\".\"users\".\"createdAt\", \"public\".\"users\".\"updatedAt\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"email\" ILIKE $1 ORDER BY \"public\".\"users\".\"id\" ASC OFFSET $2",
             "params": [
-              "DELETED",
+              "%example%",
               "0"
             ],
-            "durationMs": 0.3255829999998241
+            "durationMs": 0.25441700000010314
           }
         ],
         "drizzleQueries": [
           {
-            "sql": "select \"id\", \"email\", \"name\", \"avatar_url\", \"role\", \"status\", \"is_deleted\", \"metadata\", \"tags\", \"lastLoginAt\", \"createdAt\", \"updatedAt\" from \"users\" where not \"users\".\"status\" = $1 order by \"users\".\"id\" asc",
+            "sql": "select \"id\", \"email\", \"name\", \"avatar_url\", \"role\", \"status\", \"is_deleted\", \"metadata\", \"tags\", \"lastLoginAt\", \"createdAt\", \"updatedAt\" from \"users\" where \"users\".\"email\" ILIKE $1 order by \"users\".\"id\" asc",
             "params": [
-              "DELETED"
+              "%example%"
             ]
           }
         ]
       }
     },
     {
+      "name": "findMany AND",
+      "prismaMs": 2.085,
+      "extendedMs": 0.932,
+      "drizzleMs": 1.48,
+      "speedupVsPrisma": 2.24,
+      "speedupVsDrizzle": 1.59
+    },
+    {
+      "name": "findMany OR",
+      "prismaMs": 8.096,
+      "extendedMs": 3.307,
+      "drizzleMs": 5.123,
+      "speedupVsPrisma": 2.45,
+      "speedupVsDrizzle": 1.55
+    },
+    {
+      "name": "findMany NOT",
+      "prismaMs": 0.534,
+      "extendedMs": 0.307,
+      "drizzleMs": 0.356,
+      "speedupVsPrisma": 1.74,
+      "speedupVsDrizzle": 1.16
+    },
+    {
       "name": "findMany orderBy",
-      "prismaMs": 2.888,
-      "extendedMs": 1.04,
-      "drizzleMs": 1.384,
-      "speedupVsPrisma": 2.78,
-      "speedupVsDrizzle": 1.33
+      "prismaMs": 1.754,
+      "extendedMs": 0.745,
+      "drizzleMs": 1.097,
+      "speedupVsPrisma": 2.35,
+      "speedupVsDrizzle": 1.47
     },
     {
       "name": "findMany pagination",
-      "prismaMs": 0.383,
-      "extendedMs": 0.221,
-      "drizzleMs": 0.237,
-      "speedupVsPrisma": 1.74,
-      "speedupVsDrizzle": 1.07
+      "prismaMs": 0.279,
+      "extendedMs": 0.178,
+      "drizzleMs": 0.201,
+      "speedupVsPrisma": 1.57,
+      "speedupVsDrizzle": 1.13
     },
     {
       "name": "findMany select",
-      "prismaMs": 0.217,
-      "extendedMs": 0.113,
-      "drizzleMs": 0.127,
+      "prismaMs": 0.224,
+      "extendedMs": 0.116,
+      "drizzleMs": 0.104,
       "speedupVsPrisma": 1.93,
-      "speedupVsDrizzle": 1.12
-    },
-    {
-      "name": "findMany relation some",
-      "prismaMs": 0.845,
-      "extendedMs": 0.468,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.81,
-      "speedupVsDrizzle": 0
-    },
-    {
-      "name": "findMany relation every",
-      "prismaMs": 0.763,
-      "extendedMs": 0.47,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.62,
-      "speedupVsDrizzle": 0
-    },
-    {
-      "name": "findMany relation none",
-      "prismaMs": 13.955,
-      "extendedMs": 6.525,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 2.14,
-      "speedupVsDrizzle": 0
-    },
-    {
-      "name": "findMany nested relation",
-      "prismaMs": 1.399,
-      "extendedMs": 0.916,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.53,
-      "speedupVsDrizzle": 0
-    },
-    {
-      "name": "findMany complex",
-      "prismaMs": 2.219,
-      "extendedMs": 0.989,
-      "drizzleMs": 1.582,
-      "speedupVsPrisma": 2.24,
-      "speedupVsDrizzle": 1.6
-    },
-    {
-      "name": "findFirst",
-      "prismaMs": 0.402,
-      "extendedMs": 0.272,
-      "drizzleMs": 0.295,
-      "speedupVsPrisma": 1.48,
-      "speedupVsDrizzle": 1.08
-    },
-    {
-      "name": "findFirst skip",
-      "prismaMs": 0.362,
-      "extendedMs": 0.204,
-      "drizzleMs": 0.22,
-      "speedupVsPrisma": 1.77,
-      "speedupVsDrizzle": 1.07
-    },
-    {
-      "name": "findUnique id",
-      "prismaMs": 0.214,
-      "extendedMs": 0.149,
-      "drizzleMs": 0.135,
-      "speedupVsPrisma": 1.44,
-      "speedupVsDrizzle": 0.91,
+      "speedupVsDrizzle": 0.89,
       "regressionLog": {
         "extendedQueries": [],
         "prismaQueries": [
           {
-            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"avatar_url\", \"public\".\"users\".\"role\", \"public\".\"users\".\"status\", \"public\".\"users\".\"is_deleted\", \"public\".\"users\".\"metadata\", \"public\".\"users\".\"tags\", \"public\".\"users\".\"lastLoginAt\", \"public\".\"users\".\"createdAt\", \"public\".\"users\".\"updatedAt\" FROM \"public\".\"users\" WHERE (\"public\".\"users\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
+            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\" FROM \"public\".\"users\" WHERE 1=1 ORDER BY \"public\".\"users\".\"id\" ASC OFFSET $1",
             "params": [
-              "1",
-              "1",
               "0"
             ],
-            "durationMs": 0.08829100000002654
+            "durationMs": 0.08570800000052259
           }
         ],
         "drizzleQueries": [
           {
-            "sql": "select \"id\", \"email\", \"name\", \"avatar_url\", \"role\", \"status\", \"is_deleted\", \"metadata\", \"tags\", \"lastLoginAt\", \"createdAt\", \"updatedAt\" from \"users\" where \"users\".\"id\" = $1 limit $2",
+            "sql": "select \"id\", \"email\", \"name\" from \"users\" order by \"users\".\"id\" asc",
+            "params": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "findMany relation some",
+      "prismaMs": 0.931,
+      "extendedMs": 0.464,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 2.01,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "findMany relation every",
+      "prismaMs": 0.811,
+      "extendedMs": 0.655,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.24,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "findMany relation none",
+      "prismaMs": 13.959,
+      "extendedMs": 6.301,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 2.22,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "findMany nested relation",
+      "prismaMs": 0.78,
+      "extendedMs": 0.835,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 0.93,
+      "speedupVsDrizzle": 0,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT \"public\".\"organizations\".\"id\", \"public\".\"organizations\".\"name\", \"public\".\"organizations\".\"slug\", \"public\".\"organizations\".\"plan\"::text, \"public\".\"organizations\".\"settings\", \"public\".\"organizations\".\"createdAt\", \"public\".\"organizations\".\"updatedAt\" FROM \"public\".\"organizations\" WHERE EXISTS(SELECT \"t0\".\"organizationId\" FROM \"public\".\"projects\" AS \"t0\" WHERE (EXISTS(SELECT \"t1\".\"projectId\" FROM \"public\".\"tasks\" AS \"t1\" WHERE (\"t1\".\"status\" = CAST($1::text AS \"public\".\"TaskStatus\") AND (\"t0\".\"id\") = (\"t1\".\"projectId\") AND \"t1\".\"projectId\" IS NOT NULL)) AND (\"public\".\"organizations\".\"id\") = (\"t0\".\"organizationId\") AND \"t0\".\"organizationId\" IS NOT NULL)) ORDER BY \"public\".\"organizations\".\"id\" ASC OFFSET $2",
             "params": [
-              1,
+              "DONE",
+              "0"
+            ],
+            "durationMs": 0.5424579999998969
+          }
+        ],
+        "drizzleQueries": []
+      }
+    },
+    {
+      "name": "findMany complex",
+      "prismaMs": 1.279,
+      "extendedMs": 0.541,
+      "drizzleMs": 0.627,
+      "speedupVsPrisma": 2.36,
+      "speedupVsDrizzle": 1.16
+    },
+    {
+      "name": "findFirst",
+      "prismaMs": 0.289,
+      "extendedMs": 0.249,
+      "drizzleMs": 0.195,
+      "speedupVsPrisma": 1.16,
+      "speedupVsDrizzle": 0.78,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"avatar_url\", \"public\".\"users\".\"role\", \"public\".\"users\".\"status\", \"public\".\"users\".\"is_deleted\", \"public\".\"users\".\"metadata\", \"public\".\"users\".\"tags\", \"public\".\"users\".\"lastLoginAt\", \"public\".\"users\".\"createdAt\", \"public\".\"users\".\"updatedAt\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"status\" = $1 ORDER BY \"public\".\"users\".\"id\" ASC LIMIT $2 OFFSET $3",
+            "params": [
+              "ACTIVE",
+              "1",
+              "0"
+            ],
+            "durationMs": 0.20579199999701814
+          }
+        ],
+        "drizzleQueries": [
+          {
+            "sql": "select \"id\", \"email\", \"name\", \"avatar_url\", \"role\", \"status\", \"is_deleted\", \"metadata\", \"tags\", \"lastLoginAt\", \"createdAt\", \"updatedAt\" from \"users\" where \"users\".\"status\" = $1 order by \"users\".\"id\" asc limit $2",
+            "params": [
+              "ACTIVE",
               1
             ]
           }
@@ -225,164 +223,169 @@
       }
     },
     {
+      "name": "findFirst skip",
+      "prismaMs": 0.396,
+      "extendedMs": 0.166,
+      "drizzleMs": 0.218,
+      "speedupVsPrisma": 2.39,
+      "speedupVsDrizzle": 1.31
+    },
+    {
+      "name": "findUnique id",
+      "prismaMs": 0.233,
+      "extendedMs": 0.144,
+      "drizzleMs": 0.159,
+      "speedupVsPrisma": 1.61,
+      "speedupVsDrizzle": 1.1
+    },
+    {
       "name": "findUnique email",
-      "prismaMs": 0.197,
-      "extendedMs": 0.103,
-      "drizzleMs": 0.141,
-      "speedupVsPrisma": 1.91,
-      "speedupVsDrizzle": 1.37
+      "prismaMs": 0.22,
+      "extendedMs": 0.106,
+      "drizzleMs": 0.143,
+      "speedupVsPrisma": 2.08,
+      "speedupVsDrizzle": 1.35
     },
     {
       "name": "count",
-      "prismaMs": 0.116,
-      "extendedMs": 0.047,
-      "drizzleMs": 0.061,
-      "speedupVsPrisma": 2.47,
-      "speedupVsDrizzle": 1.3
+      "prismaMs": 0.154,
+      "extendedMs": 0.049,
+      "drizzleMs": 0.065,
+      "speedupVsPrisma": 3.12,
+      "speedupVsDrizzle": 1.31
     },
     {
       "name": "count where",
-      "prismaMs": 0.443,
-      "extendedMs": 0.252,
-      "drizzleMs": 0.266,
-      "speedupVsPrisma": 1.76,
-      "speedupVsDrizzle": 1.06
+      "prismaMs": 0.482,
+      "extendedMs": 0.272,
+      "drizzleMs": 0.27,
+      "speedupVsPrisma": 1.78,
+      "speedupVsDrizzle": 0.99,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT COUNT(*) AS \"_count$_all\" FROM (SELECT \"public\".\"tasks\".\"id\" FROM \"public\".\"tasks\" WHERE \"public\".\"tasks\".\"status\" = CAST($1::text AS \"public\".\"TaskStatus\") OFFSET $2) AS \"sub\"",
+            "params": [
+              "DONE",
+              "0"
+            ],
+            "durationMs": 0.42237500000192085
+          }
+        ],
+        "drizzleQueries": [
+          {
+            "sql": "select count(*) from \"tasks\" where \"tasks\".\"status\" = $1",
+            "params": [
+              "DONE"
+            ]
+          }
+        ]
+      }
     },
     {
       "name": "aggregate count",
-      "prismaMs": 0.228,
-      "extendedMs": 0.162,
+      "prismaMs": 0.224,
+      "extendedMs": 0.159,
       "drizzleMs": 0,
       "speedupVsPrisma": 1.41,
       "speedupVsDrizzle": 0
     },
     {
       "name": "aggregate sum/avg",
-      "prismaMs": 0.328,
-      "extendedMs": 0.249,
+      "prismaMs": 0.332,
+      "extendedMs": 0.265,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.26,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "aggregate where",
+      "prismaMs": 0.477,
+      "extendedMs": 0.265,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.8,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "aggregate min/max",
+      "prismaMs": 0.345,
+      "extendedMs": 0.259,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.34,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "aggregate complete",
+      "prismaMs": 0.444,
+      "extendedMs": 0.319,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.39,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "groupBy",
+      "prismaMs": 0.463,
+      "extendedMs": 0.352,
       "drizzleMs": 0,
       "speedupVsPrisma": 1.32,
       "speedupVsDrizzle": 0
     },
     {
-      "name": "aggregate where",
-      "prismaMs": 0.436,
-      "extendedMs": 0.247,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.76,
-      "speedupVsDrizzle": 0
-    },
-    {
-      "name": "aggregate min/max",
-      "prismaMs": 0.336,
-      "extendedMs": 0.251,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.33,
-      "speedupVsDrizzle": 0
-    },
-    {
-      "name": "aggregate complete",
-      "prismaMs": 0.43,
-      "extendedMs": 0.297,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.45,
-      "speedupVsDrizzle": 0
-    },
-    {
-      "name": "groupBy",
-      "prismaMs": 0.462,
-      "extendedMs": 0.329,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.4,
-      "speedupVsDrizzle": 0
-    },
-    {
       "name": "groupBy count",
-      "prismaMs": 0.46,
-      "extendedMs": 0.344,
+      "prismaMs": 0.483,
+      "extendedMs": 0.386,
       "drizzleMs": 0,
-      "speedupVsPrisma": 1.34,
+      "speedupVsPrisma": 1.25,
       "speedupVsDrizzle": 0
     },
     {
       "name": "groupBy multi",
-      "prismaMs": 0.566,
-      "extendedMs": 0.413,
+      "prismaMs": 0.573,
+      "extendedMs": 0.449,
       "drizzleMs": 0,
-      "speedupVsPrisma": 1.37,
+      "speedupVsPrisma": 1.28,
       "speedupVsDrizzle": 0
     },
     {
       "name": "groupBy having",
-      "prismaMs": 0.516,
-      "extendedMs": 0.422,
+      "prismaMs": 0.575,
+      "extendedMs": 0.482,
       "drizzleMs": 0,
-      "speedupVsPrisma": 1.22,
+      "speedupVsPrisma": 1.19,
       "speedupVsDrizzle": 0
     },
     {
       "name": "groupBy + where",
-      "prismaMs": 0.546,
-      "extendedMs": 0.334,
+      "prismaMs": 0.553,
+      "extendedMs": 0.365,
       "drizzleMs": 0,
-      "speedupVsPrisma": 1.63,
+      "speedupVsPrisma": 1.52,
       "speedupVsDrizzle": 0
     },
     {
       "name": "groupBy aggregates",
-      "prismaMs": 0.533,
-      "extendedMs": 0.422,
+      "prismaMs": 0.562,
+      "extendedMs": 0.441,
       "drizzleMs": 0,
-      "speedupVsPrisma": 1.26,
+      "speedupVsPrisma": 1.27,
       "speedupVsDrizzle": 0
     },
     {
       "name": "groupBy min/max",
-      "prismaMs": 0.526,
-      "extendedMs": 0.417,
+      "prismaMs": 0.557,
+      "extendedMs": 0.44,
       "drizzleMs": 0,
-      "speedupVsPrisma": 1.26,
+      "speedupVsPrisma": 1.27,
       "speedupVsDrizzle": 0
     },
     {
       "name": "include posts",
-      "prismaMs": 1.501,
-      "extendedMs": 1.466,
-      "drizzleMs": 2.237,
-      "speedupVsPrisma": 1.02,
-      "speedupVsDrizzle": 1.53
-    },
-    {
-      "name": "include profile",
-      "prismaMs": 0.572,
-      "extendedMs": 0.273,
-      "drizzleMs": 0.432,
-      "speedupVsPrisma": 2.09,
-      "speedupVsDrizzle": 1.58
-    },
-    {
-      "name": "include 3 levels",
-      "prismaMs": 1.69,
-      "extendedMs": 1.265,
-      "drizzleMs": 1.596,
-      "speedupVsPrisma": 1.34,
-      "speedupVsDrizzle": 1.26
-    },
-    {
-      "name": "include 4 levels",
-      "prismaMs": 1.867,
-      "extendedMs": 1.148,
-      "drizzleMs": 1.407,
-      "speedupVsPrisma": 1.63,
-      "speedupVsDrizzle": 1.23
-    },
-    {
-      "name": "include + where",
-      "prismaMs": 1.062,
-      "extendedMs": 1.547,
-      "drizzleMs": 1.714,
-      "speedupVsPrisma": 0.69,
-      "speedupVsDrizzle": 1.11,
+      "prismaMs": 1.498,
+      "extendedMs": 1.565,
+      "drizzleMs": 2.268,
+      "speedupVsPrisma": 0.96,
+      "speedupVsDrizzle": 1.45,
       "regressionLog": {
         "extendedQueries": [],
         "prismaQueries": [
@@ -392,12 +395,11 @@
               "5",
               "0"
             ],
-            "durationMs": 0.19666599999982282
+            "durationMs": 1.6216669999994338
           },
           {
-            "sql": "SELECT \"public\".\"tasks\".\"id\", \"public\".\"tasks\".\"title\", \"public\".\"tasks\".\"description\", \"public\".\"tasks\".\"status\"::text, \"public\".\"tasks\".\"priority\"::text, \"public\".\"tasks\".\"position\", \"public\".\"tasks\".\"dueDate\", \"public\".\"tasks\".\"completedAt\", \"public\".\"tasks\".\"estimatedHours\", \"public\".\"tasks\".\"metadata\", \"public\".\"tasks\".\"createdAt\", \"public\".\"tasks\".\"updatedAt\", \"public\".\"tasks\".\"projectId\", \"public\".\"tasks\".\"assigneeId\", \"public\".\"tasks\".\"creatorId\", \"public\".\"tasks\".\"milestoneId\", \"public\".\"tasks\".\"parentId\" FROM \"public\".\"tasks\" WHERE (\"public\".\"tasks\".\"status\" = CAST($1::text AS \"public\".\"TaskStatus\") AND \"public\".\"tasks\".\"projectId\" IN ($2,$3,$4,$5,$6)) ORDER BY \"public\".\"tasks\".\"id\" ASC OFFSET $7",
+            "sql": "SELECT \"public\".\"tasks\".\"id\", \"public\".\"tasks\".\"title\", \"public\".\"tasks\".\"description\", \"public\".\"tasks\".\"status\"::text, \"public\".\"tasks\".\"priority\"::text, \"public\".\"tasks\".\"position\", \"public\".\"tasks\".\"dueDate\", \"public\".\"tasks\".\"completedAt\", \"public\".\"tasks\".\"estimatedHours\", \"public\".\"tasks\".\"metadata\", \"public\".\"tasks\".\"createdAt\", \"public\".\"tasks\".\"updatedAt\", \"public\".\"tasks\".\"projectId\", \"public\".\"tasks\".\"assigneeId\", \"public\".\"tasks\".\"creatorId\", \"public\".\"tasks\".\"milestoneId\", \"public\".\"tasks\".\"parentId\" FROM \"public\".\"tasks\" WHERE \"public\".\"tasks\".\"projectId\" IN ($1,$2,$3,$4,$5) OFFSET $6",
             "params": [
-              "DONE",
               1,
               2,
               3,
@@ -405,15 +407,13 @@
               5,
               "0"
             ],
-            "durationMs": 0.5335410000006959
+            "durationMs": 9.43920799999978
           }
         ],
         "drizzleQueries": [
           {
-            "sql": "select \"pgProjects\".\"id\", \"pgProjects\".\"name\", \"pgProjects\".\"description\", \"pgProjects\".\"color\", \"pgProjects\".\"status\", \"pgProjects\".\"isPublic\", \"pgProjects\".\"budget\", \"pgProjects\".\"startDate\", \"pgProjects\".\"endDate\", \"pgProjects\".\"metadata\", \"pgProjects\".\"createdAt\", \"pgProjects\".\"updatedAt\", \"pgProjects\".\"organizationId\", \"pgProjects_tasks\".\"data\" as \"tasks\" from \"projects\" \"pgProjects\" left join lateral (select coalesce(json_agg(json_build_array(\"pgProjects_tasks\".\"id\", \"pgProjects_tasks\".\"title\", \"pgProjects_tasks\".\"description\", \"pgProjects_tasks\".\"status\", \"pgProjects_tasks\".\"priority\", \"pgProjects_tasks\".\"position\", \"pgProjects_tasks\".\"dueDate\", \"pgProjects_tasks\".\"completedAt\", \"pgProjects_tasks\".\"estimatedHours\", \"pgProjects_tasks\".\"metadata\", \"pgProjects_tasks\".\"createdAt\", \"pgProjects_tasks\".\"updatedAt\", \"pgProjects_tasks\".\"projectId\", \"pgProjects_tasks\".\"assigneeId\", \"pgProjects_tasks\".\"creatorId\", \"pgProjects_tasks\".\"milestoneId\", \"pgProjects_tasks\".\"parentId\") order by \"pgProjects_tasks\".\"id\" asc), '[]'::json) as \"data\" from (select * from \"tasks\" \"pgProjects_tasks\" where (\"pgProjects_tasks\".\"projectId\" = \"pgProjects\".\"id\" and \"pgProjects_tasks\".\"status\" = $1) order by \"pgProjects_tasks\".\"id\" asc limit $2) \"pgProjects_tasks\") \"pgProjects_tasks\" on true order by \"pgProjects\".\"id\" asc limit $3",
+            "sql": "select \"pgProjects\".\"id\", \"pgProjects\".\"name\", \"pgProjects\".\"description\", \"pgProjects\".\"color\", \"pgProjects\".\"status\", \"pgProjects\".\"isPublic\", \"pgProjects\".\"budget\", \"pgProjects\".\"startDate\", \"pgProjects\".\"endDate\", \"pgProjects\".\"metadata\", \"pgProjects\".\"createdAt\", \"pgProjects\".\"updatedAt\", \"pgProjects\".\"organizationId\", \"pgProjects_tasks\".\"data\" as \"tasks\" from \"projects\" \"pgProjects\" left join lateral (select coalesce(json_agg(json_build_array(\"pgProjects_tasks\".\"id\", \"pgProjects_tasks\".\"title\", \"pgProjects_tasks\".\"description\", \"pgProjects_tasks\".\"status\", \"pgProjects_tasks\".\"priority\", \"pgProjects_tasks\".\"position\", \"pgProjects_tasks\".\"dueDate\", \"pgProjects_tasks\".\"completedAt\", \"pgProjects_tasks\".\"estimatedHours\", \"pgProjects_tasks\".\"metadata\", \"pgProjects_tasks\".\"createdAt\", \"pgProjects_tasks\".\"updatedAt\", \"pgProjects_tasks\".\"projectId\", \"pgProjects_tasks\".\"assigneeId\", \"pgProjects_tasks\".\"creatorId\", \"pgProjects_tasks\".\"milestoneId\", \"pgProjects_tasks\".\"parentId\")), '[]'::json) as \"data\" from \"tasks\" \"pgProjects_tasks\" where \"pgProjects_tasks\".\"projectId\" = \"pgProjects\".\"id\") \"pgProjects_tasks\" on true order by \"pgProjects\".\"id\" asc limit $1",
             "params": [
-              "DONE",
-              5,
               5
             ]
           }
@@ -421,183 +421,540 @@
       }
     },
     {
+      "name": "include profile",
+      "prismaMs": 0.629,
+      "extendedMs": 0.35,
+      "drizzleMs": 0.464,
+      "speedupVsPrisma": 1.8,
+      "speedupVsDrizzle": 1.33
+    },
+    {
+      "name": "include 3 levels",
+      "prismaMs": 1.802,
+      "extendedMs": 1.281,
+      "drizzleMs": 1.549,
+      "speedupVsPrisma": 1.41,
+      "speedupVsDrizzle": 1.21
+    },
+    {
+      "name": "include 4 levels",
+      "prismaMs": 1.873,
+      "extendedMs": 1.082,
+      "drizzleMs": 1.467,
+      "speedupVsPrisma": 1.73,
+      "speedupVsDrizzle": 1.36
+    },
+    {
+      "name": "include + where",
+      "prismaMs": 1.04,
+      "extendedMs": 0.385,
+      "drizzleMs": 0.599,
+      "speedupVsPrisma": 2.7,
+      "speedupVsDrizzle": 1.56
+    },
+    {
       "name": "include + select nested",
-      "prismaMs": 0.959,
-      "extendedMs": 0.895,
-      "drizzleMs": 2.071,
-      "speedupVsPrisma": 1.07,
-      "speedupVsDrizzle": 2.31
+      "prismaMs": 0.862,
+      "extendedMs": 0.865,
+      "drizzleMs": 1.758,
+      "speedupVsPrisma": 1,
+      "speedupVsDrizzle": 2.03,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"avatar_url\", \"public\".\"users\".\"role\", \"public\".\"users\".\"status\", \"public\".\"users\".\"is_deleted\", \"public\".\"users\".\"metadata\", \"public\".\"users\".\"tags\", \"public\".\"users\".\"lastLoginAt\", \"public\".\"users\".\"createdAt\", \"public\".\"users\".\"updatedAt\" FROM \"public\".\"users\" WHERE 1=1 ORDER BY \"public\".\"users\".\"id\" ASC LIMIT $1 OFFSET $2",
+            "params": [
+              "5",
+              "0"
+            ],
+            "durationMs": 0.18058300000120653
+          },
+          {
+            "sql": "SELECT \"public\".\"tasks\".\"id\", \"public\".\"tasks\".\"title\", \"public\".\"tasks\".\"status\"::text, \"public\".\"tasks\".\"assigneeId\" FROM \"public\".\"tasks\" WHERE \"public\".\"tasks\".\"assigneeId\" IN ($1,$2,$3,$4,$5) ORDER BY \"public\".\"tasks\".\"id\" ASC OFFSET $6",
+            "params": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              "0"
+            ],
+            "durationMs": 0.48004199999923003
+          }
+        ],
+        "drizzleQueries": [
+          {
+            "sql": "select \"pgUsers\".\"id\", \"pgUsers\".\"email\", \"pgUsers\".\"name\", \"pgUsers\".\"avatar_url\", \"pgUsers\".\"role\", \"pgUsers\".\"status\", \"pgUsers\".\"is_deleted\", \"pgUsers\".\"metadata\", \"pgUsers\".\"tags\", \"pgUsers\".\"lastLoginAt\", \"pgUsers\".\"createdAt\", \"pgUsers\".\"updatedAt\", \"pgUsers_assignedTasks\".\"data\" as \"assignedTasks\" from \"users\" \"pgUsers\" left join lateral (select coalesce(json_agg(json_build_array(\"pgUsers_assignedTasks\".\"id\", \"pgUsers_assignedTasks\".\"title\", \"pgUsers_assignedTasks\".\"status\") order by \"pgUsers_assignedTasks\".\"id\" asc), '[]'::json) as \"data\" from (select * from \"tasks\" \"pgUsers_assignedTasks\" where \"pgUsers_assignedTasks\".\"assigneeId\" = \"pgUsers\".\"id\" order by \"pgUsers_assignedTasks\".\"id\" asc) \"pgUsers_assignedTasks\") \"pgUsers_assignedTasks\" on true order by \"pgUsers\".\"id\" asc limit $1",
+            "params": [
+              5
+            ]
+          }
+        ]
+      }
     },
     {
       "name": "findMany startsWith",
-      "prismaMs": 0.316,
-      "extendedMs": 0.19,
-      "drizzleMs": 0.207,
-      "speedupVsPrisma": 1.66,
-      "speedupVsDrizzle": 1.09
+      "prismaMs": 0.269,
+      "extendedMs": 0.169,
+      "drizzleMs": 0.649,
+      "speedupVsPrisma": 1.6,
+      "speedupVsDrizzle": 3.85
     },
     {
       "name": "findMany endsWith",
-      "prismaMs": 0.389,
-      "extendedMs": 0.255,
-      "drizzleMs": 0.298,
-      "speedupVsPrisma": 1.53,
-      "speedupVsDrizzle": 1.17
+      "prismaMs": 0.454,
+      "extendedMs": 0.259,
+      "drizzleMs": 0.278,
+      "speedupVsPrisma": 1.76,
+      "speedupVsDrizzle": 1.07
     },
     {
       "name": "findMany NOT contains",
-      "prismaMs": 0.427,
-      "extendedMs": 0.232,
-      "drizzleMs": 0.284,
-      "speedupVsPrisma": 1.84,
-      "speedupVsDrizzle": 1.22
+      "prismaMs": 0.439,
+      "extendedMs": 0.235,
+      "drizzleMs": 0.315,
+      "speedupVsPrisma": 1.86,
+      "speedupVsDrizzle": 1.34
     },
     {
       "name": "findMany LIKE",
-      "prismaMs": 0.214,
-      "extendedMs": 0.113,
-      "drizzleMs": 0.124,
-      "speedupVsPrisma": 1.9,
-      "speedupVsDrizzle": 1.1
+      "prismaMs": 0.3,
+      "extendedMs": 0.207,
+      "drizzleMs": 0.167,
+      "speedupVsPrisma": 1.45,
+      "speedupVsDrizzle": 0.81,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"avatar_url\", \"public\".\"users\".\"role\", \"public\".\"users\".\"status\", \"public\".\"users\".\"is_deleted\", \"public\".\"users\".\"metadata\", \"public\".\"users\".\"tags\", \"public\".\"users\".\"lastLoginAt\", \"public\".\"users\".\"createdAt\", \"public\".\"users\".\"updatedAt\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"email\"::text LIKE $1 ORDER BY \"public\".\"users\".\"id\" ASC OFFSET $2",
+            "params": [
+              "%Example%",
+              "0"
+            ],
+            "durationMs": 0.1130830000001879
+          }
+        ],
+        "drizzleQueries": [
+          {
+            "sql": "select \"id\", \"email\", \"name\", \"avatar_url\", \"role\", \"status\", \"is_deleted\", \"metadata\", \"tags\", \"lastLoginAt\", \"createdAt\", \"updatedAt\" from \"users\" where \"users\".\"email\" like $1 order by \"users\".\"id\" asc",
+            "params": [
+              "%Example%"
+            ]
+          }
+        ]
+      }
     },
     {
       "name": "findMany <",
-      "prismaMs": 13.75,
-      "extendedMs": 5.929,
-      "drizzleMs": 9.461,
-      "speedupVsPrisma": 2.32,
-      "speedupVsDrizzle": 1.6
+      "prismaMs": 13.843,
+      "extendedMs": 5.241,
+      "drizzleMs": 9.094,
+      "speedupVsPrisma": 2.64,
+      "speedupVsDrizzle": 1.74
     },
     {
       "name": "findMany <=",
-      "prismaMs": 14.224,
-      "extendedMs": 6.165,
-      "drizzleMs": 9.481,
-      "speedupVsPrisma": 2.31,
-      "speedupVsDrizzle": 1.54
+      "prismaMs": 13.698,
+      "extendedMs": 5.33,
+      "drizzleMs": 9.298,
+      "speedupVsPrisma": 2.57,
+      "speedupVsDrizzle": 1.74
     },
     {
       "name": "findMany >",
-      "prismaMs": 8.874,
-      "extendedMs": 3.712,
-      "drizzleMs": 5.982,
-      "speedupVsPrisma": 2.39,
-      "speedupVsDrizzle": 1.61
+      "prismaMs": 7.965,
+      "extendedMs": 3.104,
+      "drizzleMs": 5.812,
+      "speedupVsPrisma": 2.57,
+      "speedupVsDrizzle": 1.87
     },
     {
       "name": "findMany NOT IN",
-      "prismaMs": 0.445,
-      "extendedMs": 0.291,
-      "drizzleMs": 0.358,
-      "speedupVsPrisma": 1.53,
-      "speedupVsDrizzle": 1.23
+      "prismaMs": 0.504,
+      "extendedMs": 0.354,
+      "drizzleMs": 0.319,
+      "speedupVsPrisma": 1.43,
+      "speedupVsDrizzle": 0.9,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT \"public\".\"users\".\"id\", \"public\".\"users\".\"email\", \"public\".\"users\".\"name\", \"public\".\"users\".\"avatar_url\", \"public\".\"users\".\"role\", \"public\".\"users\".\"status\", \"public\".\"users\".\"is_deleted\", \"public\".\"users\".\"metadata\", \"public\".\"users\".\"tags\", \"public\".\"users\".\"lastLoginAt\", \"public\".\"users\".\"createdAt\", \"public\".\"users\".\"updatedAt\" FROM \"public\".\"users\" WHERE \"public\".\"users\".\"status\" NOT IN ($1,$2) ORDER BY \"public\".\"users\".\"id\" ASC OFFSET $3",
+            "params": [
+              "DELETED",
+              "BANNED",
+              "0"
+            ],
+            "durationMs": 0.27520799999911105
+          }
+        ],
+        "drizzleQueries": [
+          {
+            "sql": "select \"id\", \"email\", \"name\", \"avatar_url\", \"role\", \"status\", \"is_deleted\", \"metadata\", \"tags\", \"lastLoginAt\", \"createdAt\", \"updatedAt\" from \"users\" where not \"users\".\"status\" in ($1, $2) order by \"users\".\"id\" asc",
+            "params": [
+              "DELETED",
+              "BANNED"
+            ]
+          }
+        ]
+      }
     },
     {
       "name": "findMany isNot null",
-      "prismaMs": 0.446,
-      "extendedMs": 0.215,
-      "drizzleMs": 0.273,
-      "speedupVsPrisma": 2.08,
-      "speedupVsDrizzle": 1.27
+      "prismaMs": 0.462,
+      "extendedMs": 0.202,
+      "drizzleMs": 0.286,
+      "speedupVsPrisma": 2.29,
+      "speedupVsDrizzle": 1.42
     },
     {
       "name": "orderBy multi-field",
-      "prismaMs": 3.296,
-      "extendedMs": 0.793,
-      "drizzleMs": 1.274,
-      "speedupVsPrisma": 4.16,
-      "speedupVsDrizzle": 1.61
+      "prismaMs": 2.571,
+      "extendedMs": 0.813,
+      "drizzleMs": 0.809,
+      "speedupVsPrisma": 3.16,
+      "speedupVsDrizzle": 0.99,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT \"public\".\"tasks\".\"id\", \"public\".\"tasks\".\"title\", \"public\".\"tasks\".\"description\", \"public\".\"tasks\".\"status\"::text, \"public\".\"tasks\".\"priority\"::text, \"public\".\"tasks\".\"position\", \"public\".\"tasks\".\"dueDate\", \"public\".\"tasks\".\"completedAt\", \"public\".\"tasks\".\"estimatedHours\", \"public\".\"tasks\".\"metadata\", \"public\".\"tasks\".\"createdAt\", \"public\".\"tasks\".\"updatedAt\", \"public\".\"tasks\".\"projectId\", \"public\".\"tasks\".\"assigneeId\", \"public\".\"tasks\".\"creatorId\", \"public\".\"tasks\".\"milestoneId\", \"public\".\"tasks\".\"parentId\" FROM \"public\".\"tasks\" WHERE 1=1 ORDER BY \"public\".\"tasks\".\"status\" ASC, \"public\".\"tasks\".\"priority\" DESC, \"public\".\"tasks\".\"createdAt\" DESC LIMIT $1 OFFSET $2",
+            "params": [
+              "20",
+              "0"
+            ],
+            "durationMs": 2.1289580000011483
+          }
+        ],
+        "drizzleQueries": [
+          {
+            "sql": "select \"id\", \"title\", \"description\", \"status\", \"priority\", \"position\", \"dueDate\", \"completedAt\", \"estimatedHours\", \"metadata\", \"createdAt\", \"updatedAt\", \"projectId\", \"assigneeId\", \"creatorId\", \"milestoneId\", \"parentId\" from \"tasks\" order by \"tasks\".\"status\" asc, \"tasks\".\"priority\" desc, \"tasks\".\"createdAt\" desc limit $1",
+            "params": [
+              20
+            ]
+          }
+        ]
+      }
     },
     {
       "name": "distinct status",
-      "prismaMs": 7.961,
-      "extendedMs": 1.357,
+      "prismaMs": 8.308,
+      "extendedMs": 1.113,
       "drizzleMs": 0,
-      "speedupVsPrisma": 5.87,
+      "speedupVsPrisma": 7.46,
       "speedupVsDrizzle": 0
     },
     {
       "name": "distinct multi",
-      "prismaMs": 11.161,
-      "extendedMs": 2.371,
+      "prismaMs": 11.9,
+      "extendedMs": 2.43,
       "drizzleMs": 0,
-      "speedupVsPrisma": 4.71,
+      "speedupVsPrisma": 4.9,
       "speedupVsDrizzle": 0
     },
     {
       "name": "cursor pagination",
-      "prismaMs": 0.348,
-      "extendedMs": 0.218,
+      "prismaMs": 0.384,
+      "extendedMs": 0.251,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.53,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "select + include",
+      "prismaMs": 0.742,
+      "extendedMs": 0.191,
+      "drizzleMs": 0.348,
+      "speedupVsPrisma": 3.89,
+      "speedupVsDrizzle": 1.83
+    },
+    {
+      "name": "_count relation",
+      "prismaMs": 0.721,
+      "extendedMs": 0.591,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.22,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "_count multi-relation",
+      "prismaMs": 0.248,
+      "extendedMs": 0.155,
       "drizzleMs": 0,
       "speedupVsPrisma": 1.6,
       "speedupVsDrizzle": 0
     },
     {
-      "name": "select + include",
-      "prismaMs": 0.725,
-      "extendedMs": 0.222,
-      "drizzleMs": 0.332,
-      "speedupVsPrisma": 3.26,
-      "speedupVsDrizzle": 1.49
-    },
-    {
-      "name": "_count relation",
-      "prismaMs": 0.656,
-      "extendedMs": 0.586,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.12,
-      "speedupVsDrizzle": 0
-    },
-    {
-      "name": "_count multi-relation",
-      "prismaMs": 0.264,
-      "extendedMs": 0.15,
-      "drizzleMs": 0,
-      "speedupVsPrisma": 1.76,
-      "speedupVsDrizzle": 0
-    },
-    {
       "name": "ILIKE special chars",
-      "prismaMs": 0.254,
-      "extendedMs": 0.158,
+      "prismaMs": 0.291,
+      "extendedMs": 0.141,
       "drizzleMs": 0,
-      "speedupVsPrisma": 1.61,
+      "speedupVsPrisma": 2.06,
       "speedupVsDrizzle": 0
     },
     {
       "name": "LIKE case sensitive",
-      "prismaMs": 0.241,
-      "extendedMs": 0.122,
+      "prismaMs": 0.285,
+      "extendedMs": 0.152,
       "drizzleMs": 0,
-      "speedupVsPrisma": 1.98,
+      "speedupVsPrisma": 1.88,
       "speedupVsDrizzle": 0
     },
     {
       "name": "findMany Date range",
-      "prismaMs": 1.584,
-      "extendedMs": 0.537,
-      "drizzleMs": 0.58,
-      "speedupVsPrisma": 2.95,
-      "speedupVsDrizzle": 1.08
+      "prismaMs": 0.41,
+      "extendedMs": 0.199,
+      "drizzleMs": 0.246,
+      "speedupVsPrisma": 2.07,
+      "speedupVsDrizzle": 1.24
     },
     {
       "name": "count Date range",
-      "prismaMs": 0.489,
-      "extendedMs": 0.41,
-      "drizzleMs": 0.434,
-      "speedupVsPrisma": 1.19,
-      "speedupVsDrizzle": 1.06
+      "prismaMs": 0.509,
+      "extendedMs": 0.388,
+      "drizzleMs": 0.405,
+      "speedupVsPrisma": 1.31,
+      "speedupVsDrizzle": 1.04
     },
     {
       "name": "findMany Date gte",
-      "prismaMs": 0.35,
-      "extendedMs": 0.195,
-      "drizzleMs": 0.238,
-      "speedupVsPrisma": 1.79,
-      "speedupVsDrizzle": 1.22
+      "prismaMs": 0.394,
+      "extendedMs": 0.164,
+      "drizzleMs": 0.237,
+      "speedupVsPrisma": 2.4,
+      "speedupVsDrizzle": 1.44
+    },
+    {
+      "name": "depth-1 low-fan",
+      "prismaMs": 0.385,
+      "extendedMs": 0.302,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.27,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-1 mid-fan",
+      "prismaMs": 1.961,
+      "extendedMs": 1.623,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.21,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-1 high-fan",
+      "prismaMs": 1.316,
+      "extendedMs": 1.221,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.08,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-1 wide",
+      "prismaMs": 1.353,
+      "extendedMs": 0.963,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.41,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-1 unbound",
+      "prismaMs": 19.549,
+      "extendedMs": 8.361,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 2.34,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-2",
+      "prismaMs": 4.026,
+      "extendedMs": 3.072,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.31,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-2 paginated Project→tasks",
+      "prismaMs": 1.767,
+      "extendedMs": 2.461,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 0.72,
+      "speedupVsDrizzle": 0,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT \"public\".\"projects\".\"id\", \"public\".\"projects\".\"name\", \"public\".\"projects\".\"description\", \"public\".\"projects\".\"color\", \"public\".\"projects\".\"status\"::text, \"public\".\"projects\".\"isPublic\", \"public\".\"projects\".\"budget\", \"public\".\"projects\".\"startDate\", \"public\".\"projects\".\"endDate\", \"public\".\"projects\".\"metadata\", \"public\".\"projects\".\"createdAt\", \"public\".\"projects\".\"updatedAt\", \"public\".\"projects\".\"organizationId\" FROM \"public\".\"projects\" WHERE 1=1 ORDER BY \"public\".\"projects\".\"id\" ASC LIMIT $1 OFFSET $2",
+            "params": [
+              "3",
+              "0"
+            ],
+            "durationMs": 0.1192910000027041
+          },
+          {
+            "sql": "SELECT \"public\".\"tasks\".\"id\", \"public\".\"tasks\".\"title\", \"public\".\"tasks\".\"description\", \"public\".\"tasks\".\"status\"::text, \"public\".\"tasks\".\"priority\"::text, \"public\".\"tasks\".\"position\", \"public\".\"tasks\".\"dueDate\", \"public\".\"tasks\".\"completedAt\", \"public\".\"tasks\".\"estimatedHours\", \"public\".\"tasks\".\"metadata\", \"public\".\"tasks\".\"createdAt\", \"public\".\"tasks\".\"updatedAt\", \"public\".\"tasks\".\"projectId\", \"public\".\"tasks\".\"assigneeId\", \"public\".\"tasks\".\"creatorId\", \"public\".\"tasks\".\"milestoneId\", \"public\".\"tasks\".\"parentId\" FROM \"public\".\"tasks\" WHERE \"public\".\"tasks\".\"projectId\" IN ($1,$2,$3) ORDER BY \"public\".\"tasks\".\"id\" ASC OFFSET $4",
+            "params": [
+              1,
+              2,
+              3,
+              "0"
+            ],
+            "durationMs": 0.5633749999979045
+          },
+          {
+            "sql": "SELECT \"public\".\"comments\".\"id\", \"public\".\"comments\".\"content\", \"public\".\"comments\".\"isEdited\", \"public\".\"comments\".\"createdAt\", \"public\".\"comments\".\"updatedAt\", \"public\".\"comments\".\"taskId\", \"public\".\"comments\".\"authorId\", \"public\".\"comments\".\"parentId\" FROM \"public\".\"comments\" WHERE \"public\".\"comments\".\"taskId\" IN ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) OFFSET $16",
+            "params": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              43,
+              44,
+              45,
+              46,
+              47,
+              77,
+              78,
+              79,
+              80,
+              81,
+              "0"
+            ],
+            "durationMs": 0.18333300000085728
+          }
+        ],
+        "drizzleQueries": []
+      }
+    },
+    {
+      "name": "depth-2 high-fan",
+      "prismaMs": 1.638,
+      "extendedMs": 1.469,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.11,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-2 wide",
+      "prismaMs": 3.237,
+      "extendedMs": 1.93,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.68,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-2 unbound",
+      "prismaMs": 31.276,
+      "extendedMs": 12.774,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 2.45,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-3 unbound",
+      "prismaMs": 10.655,
+      "extendedMs": 10.526,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.01,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-3 paginated",
+      "prismaMs": 1.652,
+      "extendedMs": 1.829,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 0.9,
+      "speedupVsDrizzle": 0,
+      "regressionLog": {
+        "extendedQueries": [],
+        "prismaQueries": [
+          {
+            "sql": "SELECT \"public\".\"organizations\".\"id\", \"public\".\"organizations\".\"name\", \"public\".\"organizations\".\"slug\", \"public\".\"organizations\".\"plan\"::text, \"public\".\"organizations\".\"settings\", \"public\".\"organizations\".\"createdAt\", \"public\".\"organizations\".\"updatedAt\" FROM \"public\".\"organizations\" WHERE 1=1 ORDER BY \"public\".\"organizations\".\"id\" ASC LIMIT $1 OFFSET $2",
+            "params": [
+              "2",
+              "0"
+            ],
+            "durationMs": 0.13066600000456674
+          },
+          {
+            "sql": "SELECT \"public\".\"projects\".\"id\", \"public\".\"projects\".\"name\", \"public\".\"projects\".\"description\", \"public\".\"projects\".\"color\", \"public\".\"projects\".\"status\"::text, \"public\".\"projects\".\"isPublic\", \"public\".\"projects\".\"budget\", \"public\".\"projects\".\"startDate\", \"public\".\"projects\".\"endDate\", \"public\".\"projects\".\"metadata\", \"public\".\"projects\".\"createdAt\", \"public\".\"projects\".\"updatedAt\", \"public\".\"projects\".\"organizationId\" FROM \"public\".\"projects\" WHERE \"public\".\"projects\".\"organizationId\" IN ($1,$2) ORDER BY \"public\".\"projects\".\"id\" ASC OFFSET $3",
+            "params": [
+              1,
+              2,
+              "0"
+            ],
+            "durationMs": 0.1386659999989206
+          },
+          {
+            "sql": "SELECT \"public\".\"tasks\".\"id\", \"public\".\"tasks\".\"title\", \"public\".\"tasks\".\"description\", \"public\".\"tasks\".\"status\"::text, \"public\".\"tasks\".\"priority\"::text, \"public\".\"tasks\".\"position\", \"public\".\"tasks\".\"dueDate\", \"public\".\"tasks\".\"completedAt\", \"public\".\"tasks\".\"estimatedHours\", \"public\".\"tasks\".\"metadata\", \"public\".\"tasks\".\"createdAt\", \"public\".\"tasks\".\"updatedAt\", \"public\".\"tasks\".\"projectId\", \"public\".\"tasks\".\"assigneeId\", \"public\".\"tasks\".\"creatorId\", \"public\".\"tasks\".\"milestoneId\", \"public\".\"tasks\".\"parentId\" FROM \"public\".\"tasks\" WHERE \"public\".\"tasks\".\"projectId\" IN ($1,$2,$3,$4) ORDER BY \"public\".\"tasks\".\"id\" ASC OFFSET $5",
+            "params": [
+              1,
+              2,
+              11,
+              12,
+              "0"
+            ],
+            "durationMs": 0.6072090000016033
+          },
+          {
+            "sql": "SELECT \"public\".\"comments\".\"id\", \"public\".\"comments\".\"content\", \"public\".\"comments\".\"isEdited\", \"public\".\"comments\".\"createdAt\", \"public\".\"comments\".\"updatedAt\", \"public\".\"comments\".\"taskId\", \"public\".\"comments\".\"authorId\", \"public\".\"comments\".\"parentId\" FROM \"public\".\"comments\" WHERE \"public\".\"comments\".\"taskId\" IN ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) OFFSET $13",
+            "params": [
+              400,
+              401,
+              402,
+              437,
+              438,
+              439,
+              1,
+              2,
+              3,
+              43,
+              44,
+              45,
+              "0"
+            ],
+            "durationMs": 0.17579200000182027
+          }
+        ],
+        "drizzleQueries": []
+      }
+    },
+    {
+      "name": "depth-4 unbound",
+      "prismaMs": 7.234,
+      "extendedMs": 5.88,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.23,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "depth-4 paginated",
+      "prismaMs": 1.981,
+      "extendedMs": 1.787,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.11,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "findFirst depth-2",
+      "prismaMs": 1.297,
+      "extendedMs": 0.871,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.49,
+      "speedupVsDrizzle": 0
+    },
+    {
+      "name": "findUnique depth-2 Project→tasks→comment",
+      "prismaMs": 1.801,
+      "extendedMs": 0.961,
+      "drizzleMs": 0,
+      "speedupVsPrisma": 1.87,
+      "speedupVsDrizzle": 0
     }
   ],
-  "avgSpeedupVsPrisma": 1.9,
-  "avgSpeedupVsDrizzle": 1.32,
-  "timestamp": "2026-02-10T12:23:57.103Z"
+  "avgSpeedupVsPrisma": 1.84,
+  "avgSpeedupVsDrizzle": 1.39,
+  "timestamp": "2026-02-13T05:55:48.716Z"
 }

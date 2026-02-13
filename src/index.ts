@@ -28,6 +28,8 @@ import {
   PrismaSQLResult,
   SqlResult,
 } from './types'
+import { planQueryStrategy } from './builder/select/segment-planner'
+import { executeWhereInSegments } from './builder/where-in-executor'
 
 export function buildSQL(
   model: Model,
@@ -199,14 +201,37 @@ export {
 }
 
 export {
-  createTransactionExecutor,
   type TransactionQuery,
   type TransactionOptions,
+  type Model,
+  type PrismaMethod,
+  type PrismaSQLConfig,
+  type PrismaSQLResult,
+  type SqlResult,
 }
 
-export { transformQueryResults }
+export {
+  transformQueryResults,
+  planQueryStrategy,
+  createTransactionExecutor,
+  executeWhereInSegments,
+}
 export { buildReducerConfig, reduceFlatRows } from './builder/select/reducer'
 export type { ReducerConfig } from './builder/select/reducer'
-
-export type { Model, PrismaMethod, PrismaSQLConfig, PrismaSQLResult, SqlResult }
 export { normalizeValue } from './utils/normalize-value'
+export { createStreamingReducer } from './builder/select/streaming-reducer'
+export { createProgressiveReducer } from './builder/select/streaming-progressive-reducer'
+export { executeWhereInSegmentsStreaming } from './builder/select/streaming-where-in-executor'
+export {
+  transformAggregateRow,
+  extractCountValue,
+  getRowTransformer,
+} from './builder/select/row-transformers'
+export {
+  getOrPrepareStatement,
+  shouldSqliteUseGet,
+  normalizeParams,
+  executePostgresQuery,
+  executeSqliteQuery,
+  executeRaw,
+} from './generated-runtime'

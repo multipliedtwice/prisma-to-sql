@@ -1,4 +1,3 @@
-// src/builder/where/builder.ts
 import { isRelationField } from '../joins'
 import { buildScalarOperator } from './operators-scalar'
 import { buildArrayOperator } from './operators-array'
@@ -18,25 +17,21 @@ import {
 import { createError } from '../shared/errors'
 import { col } from '../shared/sql-utils'
 import { BuildContext, QueryResult } from '../shared/types'
-import {
-  assertFieldExists,
-  assertValidOperator,
-} from '../shared/validators/field-assertions'
-import {
-  isEmptyWhere,
-  isValidWhereClause,
-} from '../shared/validators/sql-validators'
+import { assertFieldExists } from '../shared/validators/field-assertions'
+import { isValidWhereClause } from '../shared/validators/sql-validators'
 import {
   isNonEmptyArray,
   isArrayType,
   isJsonType,
   isPlainObject,
 } from '../shared/validators/type-guards'
+import { deduplicatePreserveOrder } from '../shared/array-utils'
+import { buildNullComparison } from '../shared/null-comparison'
 
 type LogicalOperator = 'AND' | 'OR' | 'NOT'
 
 const MAX_QUERY_DEPTH = 50
-const EMPTY_JOINS: readonly string[] = Object.freeze([])
+const EMPTY_JOINS: readonly string[] = []
 const JSON_OPS = new Set([
   Ops.PATH,
   Ops.STRING_CONTAINS,
@@ -58,24 +53,11 @@ class WhereBuilder implements IWhereBuilder {
 
 export const whereBuilderInstance = new WhereBuilder()
 
-function freezeResult(
+function createResult(
   clause: string,
   joins: readonly string[] = EMPTY_JOINS,
 ): QueryResult {
-  return Object.freeze({ clause, joins })
-}
-
-function dedupePreserveOrder(items: readonly string[]): readonly string[] {
-  if (items.length <= 1) return Object.freeze([...items])
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const s of items) {
-    if (!seen.has(s)) {
-      seen.add(s)
-      out.push(s)
-    }
-  }
-  return Object.freeze(out)
+  return { clause, joins }
 }
 
 function appendResult(
@@ -173,17 +155,26 @@ function buildWhereInternal(
     )
   }
 
-  if (isEmptyWhere(where)) {
-    return freezeResult(DEFAULT_WHERE_CLAUSE, EMPTY_JOINS)
+  if (ctx.seenObjects.has(where)) {
+    throw createError('Circular reference detected in WHERE clause', {
+      path: ctx.path,
+      modelName: ctx.model.name,
+    })
   }
+
+  if (!isPlainObject(where) || Object.keys(where).length === 0) {
+    return createResult(DEFAULT_WHERE_CLAUSE, EMPTY_JOINS)
+  }
+
+  ctx.seenObjects.add(where)
 
   if (isSimpleWhere(where)) {
     const key = Object.keys(where)[0]
     const value = where[key]
-    const field = assertFieldExists(key, ctx.model, ctx.path)
+    assertFieldExists(key, ctx.model, 'WHERE', ctx.path)
     const expr = col(ctx.alias, key, ctx.model)
     const clause = buildSimpleEquality(expr, value, ctx)
-    return freezeResult(clause, EMPTY_JOINS)
+    return createResult(clause, EMPTY_JOINS)
   }
 
   const allJoins: string[] = []
@@ -201,7 +192,9 @@ function buildWhereInternal(
       ? clauses.join(SQL_SEPARATORS.CONDITION_AND)
       : DEFAULT_WHERE_CLAUSE
 
-  return freezeResult(finalClause, dedupePreserveOrder(allJoins))
+  const dedupedJoins = deduplicatePreserveOrder(allJoins)
+
+  return createResult(finalClause, dedupedJoins)
 }
 
 function normalizeLogicalValue(
@@ -260,9 +253,11 @@ function collectLogicalParts(
     }
   }
 
+  const dedupedJoins = deduplicatePreserveOrder(allJoins)
+
   return {
-    joins: dedupePreserveOrder(allJoins),
-    clauses: Object.freeze(clauses),
+    joins: dedupedJoins,
+    clauses,
   }
 }
 
@@ -290,7 +285,7 @@ function buildLogical(
 
   if (conditions.length === 0) {
     const clause = operator === 'OR' ? '0=1' : DEFAULT_WHERE_CLAUSE
-    return freezeResult(clause, EMPTY_JOINS)
+    return createResult(clause, EMPTY_JOINS)
   }
 
   const { joins, clauses } = collectLogicalParts(
@@ -300,7 +295,7 @@ function buildLogical(
     builder,
   )
   const clause = buildLogicalClause(operator, clauses)
-  return freezeResult(clause, joins)
+  return createResult(clause, joins)
 }
 
 function buildScalarField(
@@ -308,11 +303,11 @@ function buildScalarField(
   value: unknown,
   ctx: BuildContext,
 ): QueryResult {
-  const field = assertFieldExists(fieldName, ctx.model, ctx.path)
+  const field = assertFieldExists(fieldName, ctx.model, 'WHERE', ctx.path)
   const expr = col(ctx.alias, fieldName, ctx.model)
 
   if (value === null) {
-    return freezeResult(`${expr} ${SQL_TEMPLATES.IS_NULL}`, EMPTY_JOINS)
+    return createResult(`${expr} ${SQL_TEMPLATES.IS_NULL}`, EMPTY_JOINS)
   }
 
   if (isPlainObject(value)) {
@@ -322,12 +317,11 @@ function buildScalarField(
     )
 
     if (ops.length === 0) {
-      return freezeResult(DEFAULT_WHERE_CLAUSE, EMPTY_JOINS)
+      return createResult(DEFAULT_WHERE_CLAUSE, EMPTY_JOINS)
     }
 
     const parts: string[] = []
     for (const [op, val] of ops) {
-      assertValidOperator(fieldName, op, field.type, ctx.path, ctx.model.name)
       const clause = buildOperator(expr, op, val, ctx, mode, field.type)
       if (isValidWhereClause(clause)) parts.push(clause)
     }
@@ -337,7 +331,7 @@ function buildScalarField(
         ? parts.join(SQL_SEPARATORS.CONDITION_AND)
         : DEFAULT_WHERE_CLAUSE
 
-    return freezeResult(clause, EMPTY_JOINS)
+    return createResult(clause, EMPTY_JOINS)
   }
 
   const clause = buildOperator(
@@ -348,7 +342,7 @@ function buildScalarField(
     undefined,
     field.type,
   )
-  return freezeResult(clause || DEFAULT_WHERE_CLAUSE, EMPTY_JOINS)
+  return createResult(clause || DEFAULT_WHERE_CLAUSE, EMPTY_JOINS)
 }
 
 function buildOperator(

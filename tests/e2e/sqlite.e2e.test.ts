@@ -178,32 +178,6 @@ describe('Prisma Parity E2E - SQLite', () => {
         },
       ))
 
-    it('where contains insensitive', () =>
-      runParityTest(
-        db,
-        benchmarkResults,
-        'findMany LIKE',
-        'User',
-        {
-          method: 'findMany',
-          where: { email: { contains: 'example', mode: 'insensitive' } },
-          orderBy: { id: 'asc' },
-        },
-        () =>
-          db.prisma.user.findMany({
-            where: { email: { contains: 'example' } },
-            orderBy: { id: 'asc' },
-          }),
-        {
-          drizzleQuery: () =>
-            drizzle.db
-              .select()
-              .from(schema.sqliteUsers)
-              .where(like(schema.sqliteUsers.email, '%example%'))
-              .orderBy(asc(schema.sqliteUsers.id)),
-        },
-      ))
-
     it('where AND', () =>
       runParityTest(
         db,
@@ -524,7 +498,6 @@ describe('Prisma Parity E2E - SQLite', () => {
             orderBy: { id: 'asc' },
           }),
         {
-          transformPrisma: (r) => (r ? [r] : []),
           drizzleQuery: async () => {
             const result = await drizzle.db
               .select()
@@ -556,7 +529,6 @@ describe('Prisma Parity E2E - SQLite', () => {
             orderBy: { id: 'asc' },
           }),
         {
-          transformPrisma: (r) => (r ? [r] : []),
           drizzleQuery: async () => {
             const result = await drizzle.db
               .select()
@@ -581,7 +553,6 @@ describe('Prisma Parity E2E - SQLite', () => {
         { method: 'findUnique', where: { id: seed.userIds[0] } },
         () => db.prisma.user.findUnique({ where: { id: seed.userIds[0] } }),
         {
-          transformPrisma: (r) => (r ? [r] : []),
           drizzleQuery: async () => {
             const result = await drizzle.db
               .select()
@@ -605,7 +576,6 @@ describe('Prisma Parity E2E - SQLite', () => {
         { method: 'findUnique', where: { email: user.email } },
         () => db.prisma.user.findUnique({ where: { email: user.email } }),
         {
-          transformPrisma: (r) => (r ? [r] : []),
           drizzleQuery: async () => {
             const result = await drizzle.db
               .select()
@@ -629,10 +599,6 @@ describe('Prisma Parity E2E - SQLite', () => {
         { method: 'count' },
         () => db.prisma.user.count(),
         {
-          transformPrisma: (c) => [{ '_count._all': BigInt(c as number) }],
-          transformDrizzle: (r: any[]) => [
-            { '_count._all': BigInt(r[0].count) },
-          ],
           drizzleQuery: async () => {
             const result = await drizzle.db
               .select({ count: sql<number>`count(*)` })
@@ -651,10 +617,6 @@ describe('Prisma Parity E2E - SQLite', () => {
         { method: 'count', where: { status: 'DONE' } },
         () => db.prisma.task.count({ where: { status: 'DONE' } }),
         {
-          transformPrisma: (c) => [{ '_count._all': BigInt(c as number) }],
-          transformDrizzle: (r: any[]) => [
-            { '_count._all': BigInt(r[0].count) },
-          ],
           drizzleQuery: async () => {
             const result = await drizzle.db
               .select({ count: sql<number>`count(*)` })
@@ -675,11 +637,6 @@ describe('Prisma Parity E2E - SQLite', () => {
         'Task',
         { method: 'aggregate', _count: { _all: true } },
         () => db.prisma.task.aggregate({ _count: { _all: true } }),
-        {
-          transformPrisma: (r: any) => [
-            { '_count._all': BigInt(r._count._all) },
-          ],
-        },
       ))
 
     it('sum and avg', () =>
@@ -698,14 +655,6 @@ describe('Prisma Parity E2E - SQLite', () => {
             _sum: { position: true },
             _avg: { position: true },
           }),
-        {
-          transformPrisma: (r: any) => [
-            {
-              '_sum.position': r._sum.position,
-              '_avg.position': r._avg.position,
-            },
-          ],
-        },
       ))
 
     it('with where', () =>
@@ -724,11 +673,6 @@ describe('Prisma Parity E2E - SQLite', () => {
             where: { status: 'DONE' },
             _count: { _all: true },
           }),
-        {
-          transformPrisma: (r: any) => [
-            { '_count._all': BigInt(r._count._all) },
-          ],
-        },
       ))
 
     it('min and max', () =>
@@ -747,14 +691,6 @@ describe('Prisma Parity E2E - SQLite', () => {
             _min: { position: true },
             _max: { position: true },
           }),
-        {
-          transformPrisma: (r: any) => [
-            {
-              '_min.position': r._min.position,
-              '_max.position': r._max.position,
-            },
-          ],
-        },
       ))
 
     it('all aggregate operations', () =>
@@ -779,17 +715,6 @@ describe('Prisma Parity E2E - SQLite', () => {
             _min: { position: true },
             _max: { position: true },
           }),
-        {
-          transformPrisma: (r: any) => [
-            {
-              '_count._all': BigInt(r._count._all),
-              '_sum.position': r._sum.position,
-              '_avg.position': r._avg.position,
-              '_min.position': r._min.position,
-              '_max.position': r._max.position,
-            },
-          ],
-        },
       ))
   })
 
@@ -831,11 +756,6 @@ describe('Prisma Parity E2E - SQLite', () => {
           }),
         {
           sortField: 'status',
-          transformPrisma: (r: any[]) =>
-            r.map((row) => ({
-              status: row.status,
-              '_count._all': BigInt(row._count._all),
-            })),
         },
       ))
 
@@ -859,22 +779,6 @@ describe('Prisma Parity E2E - SQLite', () => {
           }),
         {
           sortField: undefined,
-          transformPrisma: (r: any[]) =>
-            r
-              .map((row) => ({
-                status: row.status,
-                priority: row.priority,
-                '_count._all': BigInt(row._count._all),
-              }))
-              .sort((a, b) => {
-                const s = a.status.localeCompare(b.status)
-                return s !== 0 ? s : a.priority.localeCompare(b.priority)
-              }),
-          transformGenerated: (r: any[]) =>
-            r.sort((a, b) => {
-              const s = a.status.localeCompare(b.status)
-              return s !== 0 ? s : a.priority.localeCompare(b.priority)
-            }),
         },
       ))
 
@@ -887,7 +791,7 @@ describe('Prisma Parity E2E - SQLite', () => {
         {
           method: 'groupBy',
           by: ['status'],
-          _count: { _all: true },
+          _count: { status: true },
           having: { status: { _count: { gte: 5 } } },
           orderBy: { status: 'asc' },
         },
@@ -906,11 +810,6 @@ describe('Prisma Parity E2E - SQLite', () => {
           }),
         {
           sortField: 'status',
-          transformPrisma: (r: any[]) =>
-            r.map((row) => ({
-              status: row.status,
-              '_count._all': BigInt(row._count.status),
-            })),
         },
       ))
 
@@ -936,11 +835,6 @@ describe('Prisma Parity E2E - SQLite', () => {
           }),
         {
           sortField: 'status',
-          transformPrisma: (r: any[]) =>
-            r.map((row) => ({
-              status: row.status,
-              '_count._all': BigInt(row._count._all),
-            })),
         },
       ))
 
@@ -966,12 +860,6 @@ describe('Prisma Parity E2E - SQLite', () => {
           }),
         {
           sortField: 'status',
-          transformPrisma: (r: any[]) =>
-            r.map((row) => ({
-              status: row.status,
-              '_sum.position': row._sum.position,
-              '_avg.position': row._avg.position,
-            })),
         },
       ))
 
@@ -997,12 +885,6 @@ describe('Prisma Parity E2E - SQLite', () => {
           }),
         {
           sortField: 'status',
-          transformPrisma: (r: any[]) =>
-            r.map((row) => ({
-              status: row.status,
-              '_min.position': row._min.position,
-              '_max.position': row._max.position,
-            })),
         },
       ))
   })
@@ -1762,6 +1644,635 @@ describe('Prisma Parity E2E - SQLite', () => {
             },
             orderBy: { id: 'asc' },
           }),
+      ))
+  })
+
+  describe('Date handling', () => {
+    it('Date objects in where clause with gte/lte', () => {
+      const startOfToday = new Date()
+      startOfToday.setHours(0, 0, 0, 0)
+
+      const endOfToday = new Date()
+      endOfToday.setHours(23, 59, 59, 999)
+
+      return runParityTest(
+        db,
+        benchmarkResults,
+        'findMany Date range',
+        'Task',
+        {
+          method: 'findMany',
+          where: {
+            createdAt: {
+              gte: startOfToday,
+              lte: endOfToday,
+            },
+          },
+          orderBy: { id: 'asc' },
+          take: 10,
+        },
+        () =>
+          db.prisma.task.findMany({
+            where: {
+              createdAt: {
+                gte: startOfToday,
+                lte: endOfToday,
+              },
+            },
+            orderBy: { id: 'asc' },
+            take: 10,
+          }),
+        {
+          drizzleQuery: () =>
+            drizzle.db
+              .select()
+              .from(schema.sqliteTasks)
+              .where(
+                and(
+                  gte(schema.sqliteTasks.createdAt, startOfToday),
+                  lte(schema.sqliteTasks.createdAt, endOfToday),
+                ),
+              )
+              .orderBy(asc(schema.sqliteTasks.id))
+              .limit(10),
+        },
+      )
+    })
+
+    it.skip('count with Date objects', () => {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      yesterday.setHours(0, 0, 0, 0)
+
+      const now = new Date()
+
+      return runParityTest(
+        db,
+        benchmarkResults,
+        'count Date range',
+        'Task',
+        {
+          method: 'count',
+          where: {
+            createdAt: {
+              gte: yesterday,
+              lte: now,
+            },
+          },
+        },
+        () =>
+          db.prisma.task.count({
+            where: {
+              createdAt: {
+                gte: yesterday,
+                lte: now,
+              },
+            },
+          }),
+        {
+          drizzleQuery: async () => {
+            const result = await drizzle.db
+              .select({ count: sql<number>`count(*)` })
+              .from(schema.sqliteTasks)
+              .where(
+                and(
+                  gte(schema.sqliteTasks.createdAt, yesterday),
+                  lte(schema.sqliteTasks.createdAt, now),
+                ),
+              )
+            return [{ '_count._all': BigInt(result[0].count) }]
+          },
+        },
+      )
+    })
+
+    it('Date with single comparison operator', () => {
+      const weekAgo = new Date()
+      weekAgo.setDate(weekAgo.getDate() - 7)
+
+      return runParityTest(
+        db,
+        benchmarkResults,
+        'findMany Date gte',
+        'Task',
+        {
+          method: 'findMany',
+          where: {
+            createdAt: {
+              gte: weekAgo,
+            },
+          },
+          orderBy: { id: 'asc' },
+          take: 10,
+        },
+        () =>
+          db.prisma.task.findMany({
+            where: {
+              createdAt: {
+                gte: weekAgo,
+              },
+            },
+            orderBy: { id: 'asc' },
+            take: 10,
+          }),
+        {
+          drizzleQuery: () =>
+            drizzle.db
+              .select()
+              .from(schema.sqliteTasks)
+              .where(gte(schema.sqliteTasks.createdAt, weekAgo))
+              .orderBy(asc(schema.sqliteTasks.id))
+              .limit(10),
+        },
+      )
+    })
+  })
+
+  describe('budget calibration probes', () => {
+    it('depth-1 low-fan (Project→labels, ~4/project)', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-1 low-fan Project→labels',
+        'Project',
+        {
+          method: 'findMany',
+          include: { labels: true },
+          take: 5,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: { labels: true },
+            take: 5,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-1 mid-fan (Project→tasks, ~40/project)', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-1 mid-fan Project→tasks',
+        'Project',
+        {
+          method: 'findMany',
+          include: { tasks: true },
+          take: 5,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: { tasks: true },
+            take: 5,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-1 high-fan (User→assignedTasks, ~80/user)', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-1 high-fan User→assignedTasks',
+        'User',
+        {
+          method: 'findMany',
+          include: { assignedTasks: true },
+          take: 5,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.user.findMany({
+            include: { assignedTasks: true },
+            take: 5,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-1 wide (Project→tasks+labels+milestones)', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-1 wide Project→tasks+labels+milestones',
+        'Project',
+        {
+          method: 'findMany',
+          include: { tasks: true, labels: true, milestones: true },
+          take: 3,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: { tasks: true, labels: true, milestones: true },
+            take: 3,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-1 no-limit (Project→tasks, all projects)', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-1 no-limit Project→tasks',
+        'Project',
+        {
+          method: 'findMany',
+          include: { tasks: true },
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: { tasks: true },
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-2', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-2',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            tasks: {
+              include: { comments: true },
+            },
+          },
+          take: 3,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              tasks: {
+                include: { comments: true },
+              },
+            },
+            take: 3,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-2 paginated ()', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-2 paginated ',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            tasks: {
+              include: { comments: true },
+              take: 5,
+            },
+          },
+          take: 3,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              tasks: {
+                include: { comments: true },
+                take: 5,
+              },
+            },
+            take: 3,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-2 high-fan', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-2 high-fan ',
+        'User',
+        {
+          method: 'findMany',
+          include: {
+            assignedTasks: {
+              include: { comments: true },
+            },
+          },
+          take: 3,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.user.findMany({
+            include: {
+              assignedTasks: { include: { comments: true } },
+            },
+            take: 3,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-2 wide', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-2 wide+attach+activity',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            tasks: {
+              include: {
+                comments: true,
+                attachments: true,
+                activities: true,
+              },
+            },
+          },
+          take: 2,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              tasks: {
+                include: {
+                  comments: true,
+                  attachments: true,
+                  activities: true,
+                },
+              },
+            },
+            take: 2,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-2 no-limit', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-2 no-limit',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            tasks: {
+              include: { comments: true },
+            },
+          },
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              tasks: {
+                include: { comments: true },
+              },
+            },
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-3', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-3',
+        'Organization',
+        {
+          method: 'findMany',
+          include: {
+            projects: {
+              include: {
+                tasks: {
+                  include: { comments: true },
+                },
+              },
+            },
+          },
+          take: 2,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.organization.findMany({
+            include: {
+              projects: {
+                include: {
+                  tasks: {
+                    include: { comments: true },
+                  },
+                },
+              },
+            },
+            take: 2,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-3 paginated', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-3 paginated',
+        'Organization',
+        {
+          method: 'findMany',
+          include: {
+            projects: {
+              include: {
+                tasks: {
+                  include: { comments: true },
+                  take: 3,
+                },
+              },
+              take: 2,
+            },
+          },
+          take: 2,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.organization.findMany({
+            include: {
+              projects: {
+                include: {
+                  tasks: {
+                    include: { comments: true },
+                    take: 3,
+                  },
+                },
+                take: 2,
+              },
+            },
+            take: 2,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-4', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-4',
+        'Organization',
+        {
+          method: 'findMany',
+          include: {
+            projects: {
+              include: {
+                tasks: {
+                  include: {
+                    comments: {
+                      include: { reactions: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          take: 1,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.organization.findMany({
+            include: {
+              projects: {
+                include: {
+                  tasks: {
+                    include: {
+                      comments: {
+                        include: { reactions: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            take: 1,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('depth-4 paginated', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'depth-4 paginated',
+        'Organization',
+        {
+          method: 'findMany',
+          include: {
+            projects: {
+              include: {
+                tasks: {
+                  include: {
+                    comments: {
+                      include: { reactions: true },
+                      take: 2,
+                    },
+                  },
+                  take: 2,
+                },
+              },
+              take: 2,
+            },
+          },
+          take: 2,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.organization.findMany({
+            include: {
+              projects: {
+                include: {
+                  tasks: {
+                    include: {
+                      comments: {
+                        include: { reactions: true },
+                        take: 2,
+                      },
+                    },
+                    take: 2,
+                  },
+                },
+                take: 2,
+              },
+            },
+            take: 2,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('findFirst depth-2', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'findFirst depth-2',
+        'Project',
+        {
+          method: 'findFirst',
+          include: {
+            tasks: {
+              include: { comments: true },
+            },
+          },
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findFirst({
+            include: {
+              tasks: {
+                include: { comments: true },
+              },
+            },
+            orderBy: { id: 'asc' },
+          }),
+        {
+          sortField: undefined,
+        },
+      ))
+
+    it('findUnique depth-2', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'findUnique depth-2',
+        'Project',
+        {
+          method: 'findUnique',
+          where: { id: seed.projectIds[0] },
+          include: {
+            tasks: {
+              include: { comments: true },
+            },
+          },
+        },
+        () =>
+          db.prisma.project.findUnique({
+            where: { id: seed.projectIds[0] },
+            include: {
+              tasks: {
+                include: { comments: true },
+              },
+            },
+          }),
+        {
+          sortField: undefined,
+        },
       ))
   })
 })

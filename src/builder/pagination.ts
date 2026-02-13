@@ -16,7 +16,10 @@ import {
 import { normalizeIntLike } from './shared/int-like'
 import { addAutoScoped } from './shared/dynamic-params'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
-import { normalizeOrderByInput } from './shared/order-by-utils'
+import {
+  normalizeAndValidateOrderBy,
+  normalizeOrderByInput,
+} from './shared/order-by-utils'
 import { ensureDeterministicOrderByInput } from './shared/order-by-determinism'
 import { assertScalarField } from './shared/validators/field-assertions'
 
@@ -112,10 +115,11 @@ function normalizeNonNegativeInt(name: 'skip', v: unknown): IntOrDynamic {
   return result
 }
 
+const MIN_NEGATIVE_TAKE = -10000
 function normalizeIntAllowNegative(name: 'take', v: unknown): IntOrDynamic {
   if (isDynamicParameter(v)) return v as string
   const result = normalizeIntLike(name, v, {
-    min: Number.MIN_SAFE_INTEGER,
+    min: MIN_NEGATIVE_TAKE,
     max: MAX_LIMIT_OFFSET,
     allowZero: true,
   })
@@ -238,6 +242,9 @@ function buildCursorFilterParts(
     if (!Object.prototype.hasOwnProperty.call(cursor, field)) continue
 
     const value = cursor[field]
+
+    if (value === undefined) continue
+
     const c = cursorAlias + '.' + quoteColumn(model, field)
 
     if (value === null) {
@@ -247,6 +254,10 @@ function buildCursorFilterParts(
 
     const ph = addAutoScoped(params, value, `cursor.filter.${field}`)
     parts.push(c + ' = ' + ph)
+  }
+
+  if (parts.length === 0) {
+    throw new Error('cursor must have at least one field with defined value')
   }
 
   return {
@@ -361,12 +372,15 @@ export function buildCursorCondition(
   const cursorEntries: Array<[string, unknown]> = []
   for (const k in cursor) {
     if (Object.prototype.hasOwnProperty.call(cursor, k)) {
-      cursorEntries.push([k, cursor[k]])
+      const value = cursor[k]
+      if (value !== undefined) {
+        cursorEntries.push([k, value])
+      }
     }
   }
 
   if (cursorEntries.length === 0)
-    throw new Error('cursor must have at least one field')
+    throw new Error('cursor must have at least one field with defined value')
 
   const { cteName, srcAlias } = buildCursorNames(alias)
   assertSafeAlias(cteName)
@@ -378,7 +392,11 @@ export function buildCursorCondition(
     parseValue: parseOrderByValue,
   })
 
-  let orderEntries = buildOrderEntries(deterministicOrderBy)
+  let orderEntries = normalizeAndValidateOrderBy(
+    orderBy,
+    model!,
+    parseOrderByValue,
+  )
   if (orderEntries.length === 0) {
     orderEntries = cursorEntries.map(([field]) => ({
       field,
@@ -491,7 +509,11 @@ export function buildOrderBy(
 ): string {
   assertSafeAlias(alias)
 
-  const entries = buildOrderEntries(orderBy)
+  const entries = normalizeAndValidateOrderBy(
+    orderBy,
+    model!,
+    parseOrderByValue,
+  )
   if (entries.length === 0) return ''
 
   const d = dialect ?? getGlobalDialect()
@@ -561,24 +583,6 @@ export function getPaginationParams(
   return {}
 }
 
-function buildOrderEntries(orderBy: unknown): OrderByEntry[] {
-  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue) as Array<
-    Record<string, string | OrderByValueObject>
-  >
-  const entries: OrderByEntry[] = []
-
-  for (const item of normalized) {
-    for (const field in item) {
-      if (!Object.prototype.hasOwnProperty.call(item, field)) continue
-
-      const value = item[field]
-      if (typeof value === 'string') {
-        entries.push({ field, direction: value as OrderByDirection })
-      } else {
-        entries.push({ field, direction: value.direction, nulls: value.nulls })
-      }
-    }
-  }
-
-  return entries
+function buildOrderEntries(orderBy: unknown, model: Model): OrderByEntry[] {
+  return normalizeAndValidateOrderBy(orderBy, model, parseOrderByValue)
 }

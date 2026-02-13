@@ -19,6 +19,7 @@ import {
 import { createError } from '../shared/errors'
 import { ParamStore } from '../shared/param-store'
 import { isEmptyArray, isPlainObject } from '../shared/validators/type-guards'
+import { tryBuildNullComparison } from '../shared/null-comparison'
 
 function buildArrayParam(
   val: unknown,
@@ -31,6 +32,13 @@ function buildArrayParam(
 
   if (!Array.isArray(val)) {
     throw createError(`Array operation requires array value`, { value: val })
+  }
+
+  if (val.length > LIMITS.MAX_ARRAY_SIZE) {
+    throw createError(
+      `Array too large (${val.length} elements, max ${LIMITS.MAX_ARRAY_SIZE})`,
+      { value: `[${val.length} items]` },
+    )
   }
 
   const paramValue = prepareArrayParam(val as unknown[], dialect)
@@ -47,10 +55,8 @@ export function buildArrayOperator(
 ): string {
   if (val === undefined) return ''
 
-  if (val === null) {
-    if (op === Ops.EQUALS) return `${expr} ${SQL_TEMPLATES.IS_NULL}`
-    if (op === Ops.NOT) return `${expr} ${SQL_TEMPLATES.IS_NOT_NULL}`
-  }
+  const nullCheck = tryBuildNullComparison(expr, op, val, 'array operators')
+  if (nullCheck) return nullCheck
 
   const cast = getArrayType(fieldType, dialect)
 

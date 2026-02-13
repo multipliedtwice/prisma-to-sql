@@ -25,13 +25,7 @@ import {
   isNonEmptyArray,
   isPlainObject,
 } from './shared/validators/type-guards'
-import {
-  SqlDialect,
-  getGlobalDialect,
-  inArray,
-  notInArray,
-  prepareArrayParam,
-} from '../sql-builder-dialect'
+import { SqlDialect, getGlobalDialect } from '../sql-builder-dialect'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
 import { addAutoScoped } from './shared/dynamic-params'
 import { buildNotComposite } from './where/operators-scalar'
@@ -42,6 +36,9 @@ import {
 import { buildComparisons } from './shared/comparison-builder'
 import { buildOrderBy } from './pagination'
 import { buildSelectSql } from './select'
+import { getPrimaryKeyFields } from './shared/primary-key-utils'
+import { tryBuildNullComparison } from './shared/null-comparison'
+import { buildInCondition } from './shared/in-operator-builder'
 
 type AggregateKey = '_count' | '_sum' | '_avg' | '_min' | '_max'
 type LogicalKey = 'AND' | 'OR' | 'NOT'
@@ -174,50 +171,6 @@ function normalizeLogicalValue(
   throw new Error(`${operator} must be an object or array of objects in HAVING`)
 }
 
-function buildNullComparison(expr: string, op: string): string {
-  if (op === Ops.EQUALS) return expr + ' ' + SQL_TEMPLATES.IS_NULL
-  if (op === Ops.NOT) return expr + ' ' + SQL_TEMPLATES.IS_NOT_NULL
-  throw new Error(`Operator '${op}' doesn't support null in HAVING`)
-}
-
-function buildInComparison(
-  expr: string,
-  op: string,
-  val: unknown,
-  params: ParamStore,
-  dialect: SqlDialect,
-): string {
-  if (isDynamicParameter(val)) {
-    const placeholder = addHavingParam(params, op, val)
-    return op === Ops.IN
-      ? inArray(expr, placeholder, dialect)
-      : notInArray(expr, placeholder, dialect)
-  }
-
-  if (!Array.isArray(val)) {
-    throw new Error(`HAVING '${op}' requires array value`)
-  }
-
-  if (val.length === 0) {
-    return op === Ops.IN ? '0=1' : '1=1'
-  }
-
-  if (dialect === 'sqlite' && val.length <= 30) {
-    const placeholders: string[] = []
-    for (const item of val) {
-      placeholders.push(params.add(item))
-    }
-    const list = placeholders.join(', ')
-    return op === Ops.IN ? `${expr} IN (${list})` : `${expr} NOT IN (${list})`
-  }
-
-  const paramValue = prepareArrayParam(val, dialect)
-  const placeholder = params.add(paramValue)
-  return op === Ops.IN
-    ? inArray(expr, placeholder, dialect)
-    : notInArray(expr, placeholder, dialect)
-}
-
 function buildBinaryComparison(
   expr: string,
   op: string,
@@ -245,7 +198,8 @@ function buildSimpleComparison(
     )
   }
 
-  if (val === null) return buildNullComparison(expr, op)
+  const nullCheck = tryBuildNullComparison(expr, op, val, 'HAVING')
+  if (nullCheck) return nullCheck
 
   if (op === Ops.NOT && isPlainObject(val)) {
     return buildNotComposite(
@@ -260,7 +214,14 @@ function buildSimpleComparison(
   }
 
   if (op === Ops.IN || op === Ops.NOT_IN) {
-    return buildInComparison(expr, op, val, params, dialect)
+    return buildInCondition(
+      expr,
+      op === Ops.IN ? 'in' : 'notIn',
+      val,
+      params,
+      dialect,
+      'HAVING',
+    )
   }
 
   return buildBinaryComparison(expr, op, val, params)
@@ -366,6 +327,103 @@ function buildHavingOpsForExpr(
   return buildComparisons(expr, filter, params, dialect, buildSimpleComparison)
 }
 
+type HavingShape = 'aggregate-first' | 'field-first'
+
+interface NormalizedHavingEntry {
+  aggKey: AggregateKey
+  fieldName: string
+  filter: Record<string, unknown>
+}
+
+function normalizeHavingTarget(
+  target: Record<string, unknown>,
+  shape: HavingShape,
+  model: Model,
+): NormalizedHavingEntry[] {
+  const entries: NormalizedHavingEntry[] = []
+
+  if (shape === 'aggregate-first') {
+    for (const aggKey in target) {
+      if (!Object.prototype.hasOwnProperty.call(target, aggKey)) continue
+      if (!isAggregateKey(aggKey)) continue
+
+      const aggTarget = target[aggKey]
+      if (!isPlainObject(aggTarget)) continue
+
+      for (const fieldName in aggTarget) {
+        if (!Object.prototype.hasOwnProperty.call(aggTarget, fieldName))
+          continue
+
+        const filter = aggTarget[fieldName]
+        if (!isPlainObject(filter)) continue
+        if (!hasAnyOwnKey(filter)) continue
+
+        entries.push({ aggKey: aggKey as AggregateKey, fieldName, filter })
+      }
+    }
+  } else {
+    for (const fieldName in target) {
+      if (!Object.prototype.hasOwnProperty.call(target, fieldName)) continue
+
+      const fieldTarget = target[fieldName]
+      if (!isPlainObject(fieldTarget)) continue
+
+      for (const aggKey of HAVING_FIELD_FIRST_AGG_KEYS) {
+        const aggFilter = (fieldTarget as any)[aggKey]
+        if (!isPlainObject(aggFilter)) continue
+        if (!hasAnyOwnKey(aggFilter)) continue
+
+        entries.push({ aggKey, fieldName, filter: aggFilter })
+      }
+    }
+  }
+
+  return entries
+}
+
+function validateHavingTarget(
+  aggKey: AggregateKey,
+  fieldName: string,
+  model: Model,
+): void {
+  if (fieldName === '_all') {
+    if (aggKey !== '_count')
+      throw new Error(`HAVING '${aggKey}' does not support '_all'`)
+    return
+  }
+
+  if (aggKey === '_sum' || aggKey === '_avg') {
+    assertNumericField(model, fieldName, 'HAVING')
+  } else {
+    assertScalarField(model, fieldName, 'HAVING')
+  }
+}
+
+function buildHavingForShape(
+  shape: HavingShape,
+  target: unknown,
+  alias: string,
+  params: ParamStore,
+  dialect: SqlDialect,
+  model: Model,
+): string[] {
+  if (!isPlainObject(target)) {
+    const shapeLabel = shape === 'aggregate-first' ? 'aggregate key' : 'field'
+    throw new Error(`HAVING '${shapeLabel}' must be an object`)
+  }
+
+  const entries = normalizeHavingTarget(target, shape, model)
+  const out: string[] = []
+
+  for (const { aggKey, fieldName, filter } of entries) {
+    validateHavingTarget(aggKey, fieldName, model)
+    const expr = aggExprForField(aggKey, fieldName, alias, model)
+    out.push(...buildHavingOpsForExpr(expr, filter, params, dialect))
+  }
+
+  return out
+}
+
 function buildHavingForAggregateFirstShape(
   aggKey: AggregateKey,
   target: unknown,
@@ -374,64 +432,14 @@ function buildHavingForAggregateFirstShape(
   dialect: SqlDialect,
   model: Model,
 ): string[] {
-  if (!isPlainObject(target)) {
-    throw new Error(`HAVING '${aggKey}' must be an object`)
-  }
-
-  const out: string[] = []
-  const targetObj = target
-
-  for (const field in targetObj) {
-    if (!Object.prototype.hasOwnProperty.call(targetObj, field)) continue
-
-    assertHavingAggTarget(aggKey, field, model)
-
-    const filter = targetObj[field]
-    if (!isPlainObject(filter)) continue
-
-    const filterObj = filter
-    if (!hasAnyOwnKey(filterObj)) continue
-
-    const expr = aggExprForField(aggKey, field, alias, model)
-    out.push(...buildHavingOpsForExpr(expr, filterObj, params, dialect))
-  }
-
-  return out
-}
-
-function buildHavingForFieldFirstShape(
-  fieldName: string,
-  target: unknown,
-  alias: string,
-  params: ParamStore,
-  dialect: SqlDialect,
-  model: Model,
-): string[] {
-  if (!isPlainObject(target)) {
-    throw new Error(`HAVING '${fieldName}' must be an object`)
-  }
-
-  assertScalarField(model, fieldName, 'HAVING')
-
-  const out: string[] = []
-  const obj = target
-
-  for (const aggKey of HAVING_FIELD_FIRST_AGG_KEYS) {
-    const aggFilter = obj[aggKey]
-    if (!isPlainObject(aggFilter)) continue
-
-    const aggFilterObj = aggFilter
-    if (!hasAnyOwnKey(aggFilterObj)) continue
-
-    if (aggKey === '_sum' || aggKey === '_avg') {
-      assertNumericField(model, fieldName, 'HAVING')
-    }
-
-    const expr = aggExprForField(aggKey, fieldName, alias, model)
-    out.push(...buildHavingOpsForExpr(expr, aggFilterObj, params, dialect))
-  }
-
-  return out
+  return buildHavingForShape(
+    'aggregate-first',
+    { [aggKey]: target },
+    alias,
+    params,
+    dialect,
+    model,
+  )
 }
 
 function buildHavingEntry(
@@ -467,9 +475,9 @@ function buildHavingEntry(
     )
   }
 
-  return buildHavingForFieldFirstShape(
-    key,
-    value,
+  return buildHavingForShape(
+    'field-first',
+    { [key]: value },
     alias,
     params,
     dialect,
@@ -539,7 +547,9 @@ function addCountFields(
     return
   }
 
-  if (!isPlainObject(countArg)) return
+  if (!isPlainObject(countArg)) {
+    throw new Error(`_count must be true or an object, got ${typeof countArg}`)
+  }
 
   if (countArg._all === true) {
     pushCountAllField(fields)
@@ -677,8 +687,8 @@ export function buildAggregateSql(
 
   return {
     sql,
-    params: whereResult.params,
-    paramMappings: whereResult.paramMappings,
+    params: [...whereResult.params],
+    paramMappings: [...whereResult.paramMappings],
   }
 }
 
@@ -747,7 +757,7 @@ export function buildGroupBySql(
   const byFields = assertGroupByBy(args, model)
 
   const d = dialect ?? getGlobalDialect()
-  const params = createParamStore(whereResult.nextParamIndex)
+  const params = createParamStore(whereResult.nextParamIndex, d)
 
   const { groupFields, selectFields } = buildGroupBySelectParts(
     args,
@@ -813,16 +823,6 @@ export function buildGroupBySql(
   }
 }
 
-function findPrimaryKeyFields(model: Model): string[] {
-  const pkFields = model.fields.filter((f) => f.isId && !f.isRelation)
-  if (pkFields.length > 0) return pkFields.map((f) => f.name)
-
-  const defaultId = model.fields.find((f) => f.name === 'id' && !f.isRelation)
-  if (defaultId) return ['id']
-
-  return []
-}
-
 function normalizeCountArgs(argsOrSkip: unknown): PrismaQueryArgs {
   if (isPlainObject(argsOrSkip)) return argsOrSkip as PrismaQueryArgs
   if (argsOrSkip === undefined || argsOrSkip === null) return {}
@@ -830,7 +830,7 @@ function normalizeCountArgs(argsOrSkip: unknown): PrismaQueryArgs {
 }
 
 function assertNoNegativeTake(args: PrismaQueryArgs): void {
-  if (typeof (args as any).take === 'number' && (args as any).take < 0) {
+  if (typeof args.take === 'number' && args.take < 0) {
     throw new Error('Negative take is not supported for count()')
   }
 }
@@ -868,8 +868,8 @@ function buildSimpleCountSql(
 
   return {
     sql,
-    params: whereResult.params,
-    paramMappings: whereResult.paramMappings,
+    params: [...whereResult.params],
+    paramMappings: [...whereResult.paramMappings],
   }
 }
 
@@ -892,7 +892,7 @@ export function buildCountSql(
     return buildSimpleCountSql(whereResult, tableName, alias)
   }
 
-  const pkFields = findPrimaryKeyFields(model)
+  const pkFields = getPrimaryKeyFields(model)
   const distinctFields = isNonEmptyArray((args as any).distinct)
     ? (args as any).distinct.map((x: any) => String(x)).filter((x: string) => x)
     : []

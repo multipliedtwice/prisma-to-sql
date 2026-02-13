@@ -162,3 +162,11 @@ export const LIMITS = Object.freeze({
   MAX_STRING_LENGTH: 10000,
   MAX_HAVING_DEPTH: 50,
 } as const)
+
+export const AGGREGATE_PREFIXES = new Set([
+  '_count',
+  '_sum',
+  '_avg',
+  '_min',
+  '_max',
+]) as ReadonlySet<string>

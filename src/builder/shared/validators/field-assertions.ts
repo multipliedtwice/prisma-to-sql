@@ -1,21 +1,22 @@
-// src/builder/shared/validators/field-assertions.ts
 import { Model, Field } from '../../../types'
 import { createError } from '../errors'
-import { getFieldByName } from '../model-field-cache'
+import { getFieldByName } from '../primary-key-utils'
 
 export function assertFieldExists(
   fieldName: string,
   model: Model,
-  path: readonly string[],
+  context: string,
+  path: readonly string[] = [],
 ): Field {
   const field = getFieldByName(model, fieldName)
   if (!field) {
     throw createError(
-      `Field '${fieldName}' does not exist on model ${model.name}`,
+      `${context}: field '${fieldName}' does not exist on model '${model.name}'`,
       {
         field: fieldName,
         modelName: model.name,
         path,
+        availableFields: model.fields.map((f) => f.name),
       },
     )
   }
@@ -26,31 +27,25 @@ export function assertScalarField(
   model: Model,
   fieldName: string,
   context: string,
-): void {
-  const field = getFieldByName(model, fieldName)
-
-  if (!field) {
-    throw new Error(
-      `${context}: field '${fieldName}' does not exist on model '${model.name}'`,
-    )
-  }
+): Field {
+  const field = assertFieldExists(fieldName, model, context)
 
   if (field.isRelation) {
-    throw new Error(
+    throw createError(
       `${context}: field '${fieldName}' is a relation field, expected scalar field`,
+      { field: fieldName, modelName: model.name },
     )
   }
+
+  return field
 }
 
 export function assertNumericField(
   model: Model,
   fieldName: string,
   context: string,
-): void {
-  assertScalarField(model, fieldName, context)
-
-  const field = getFieldByName(model, fieldName)
-  if (!field) return
+): Field {
+  const field = assertScalarField(model, fieldName, context)
 
   const numericTypes = new Set([
     'Int',
@@ -64,10 +59,13 @@ export function assertNumericField(
   ])
 
   if (!numericTypes.has(field.type)) {
-    throw new Error(
+    throw createError(
       `${context}: field '${fieldName}' must be numeric (Int, BigInt, Float, Decimal), got '${field.type}'`,
+      { field: fieldName, modelName: model.name },
     )
   }
+
+  return field
 }
 
 export function assertValidOperator(

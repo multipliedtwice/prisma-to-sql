@@ -176,7 +176,7 @@ describe('SQL Injection - Special Fields', () => {
         toSQL('User', 'findMany', {
           distinct: ["'; DROP TABLE--" as any],
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject duplicate fields in distinct', () => {
@@ -192,7 +192,7 @@ describe('SQL Injection - Special Fields', () => {
         toSQL('User', 'findMany', {
           distinct: ['memberships' as any],
         })
-      }).toThrow(/does not support relation/i)
+      }).toThrow(/is a relation field/i)
     })
   })
 

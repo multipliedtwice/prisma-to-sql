@@ -1,4 +1,6 @@
 import { isNotNullish, isPlainObject } from './validators/type-guards'
+import { Model } from '../../types'
+import { getScalarFieldSet } from './model-field-cache'
 
 type OrderByObject = Record<string, unknown>
 type OrderByArray = Array<Record<string, unknown>>
@@ -25,6 +27,12 @@ type ParseOrderByValue = (
   v: unknown,
   field?: string,
 ) => { direction: OrderByDirection; nulls?: OrderByNulls }
+
+export interface OrderByEntry {
+  field: string
+  direction: OrderByDirection
+  nulls?: OrderByNulls
+}
 
 const flipNulls = (v: unknown): unknown => {
   const s = String(v).toLowerCase()
@@ -153,4 +161,38 @@ export function normalizeOrderByInput(
   }
 
   throw new Error('orderBy must be an object or array of objects')
+}
+
+export function normalizeAndValidateOrderBy(
+  orderBy: unknown,
+  model: Model,
+  parseValue: ParseOrderByValue,
+): OrderByEntry[] {
+  if (!isNotNullish(orderBy)) return []
+
+  const normalized = normalizeOrderByInput(orderBy, parseValue)
+  const entries: OrderByEntry[] = []
+  const scalarSet = getScalarFieldSet(model)
+
+  for (const item of normalized) {
+    const [[field, value]] = Object.entries(item)
+
+    if (!scalarSet.has(field)) {
+      throw new Error(
+        `orderBy field '${field}' not found on model ${model.name}`,
+      )
+    }
+
+    if (typeof value === 'string') {
+      entries.push({ field, direction: value as OrderByDirection })
+    } else {
+      entries.push({
+        field,
+        direction: (value as OrderBySortObject).direction,
+        nulls: (value as OrderBySortObject).nulls,
+      })
+    }
+  }
+
+  return entries
 }

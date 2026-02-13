@@ -1,6 +1,20 @@
 import { Model } from '../../types'
-import { getRelationFieldSet } from '../shared/model-field-cache'
+import {
+  getJsonFieldSet,
+  getRelationFieldSet,
+  maybeParseJson,
+  parseJsonIfNeeded,
+} from '../shared/model-field-cache'
+import { getPrimaryKeyFields } from '../shared/primary-key-utils'
+import { extractRelationEntries } from '../shared/relation-extraction-utils'
 import { isPlainObject } from '../shared/validators/type-guards'
+import { buildCompositeKey } from '../shared/key-utils'
+
+import { getScalarFieldNames } from '../shared/model-field-cache'
+import {
+  extractScalarSelection,
+  extractNestedIncludeSpec,
+} from '../shared/relation-utils'
 
 export interface ReducerConfig {
   parentModel: Model
@@ -14,7 +28,7 @@ interface ScalarColSpec {
   isJson: boolean
 }
 
-interface RelationMetadata {
+export interface RelationMetadata {
   name: string
   cardinality: 'one' | 'many'
   relatedModel: Model
@@ -28,144 +42,15 @@ interface RelationMetadata {
   scalarCols: ScalarColSpec[]
 }
 
-const PK_FIELDS_CACHE = new WeakMap<Model, string[]>()
-const SCALAR_FIELDS_CACHE = new WeakMap<Model, string[]>()
-const JSON_FIELD_SET_CACHE = new WeakMap<Model, ReadonlySet<string>>()
-
-function findPrimaryKeyFieldsCached(model: Model): string[] {
-  const cached = PK_FIELDS_CACHE.get(model)
-  if (cached) return cached
-
-  const pkFields = model.fields.filter((f) => f.isId && !f.isRelation)
-  if (pkFields.length > 0) {
-    const out = pkFields.map((f) => f.name)
-    PK_FIELDS_CACHE.set(model, out)
-    return out
-  }
-
-  const defaultId = model.fields.find((f) => f.name === 'id' && !f.isRelation)
-  if (defaultId) {
-    const out = ['id']
-    PK_FIELDS_CACHE.set(model, out)
-    return out
-  }
-
-  throw new Error(
-    `Model ${model.name} has no primary key field. Models must have either fields with isId=true or a field named 'id'.`,
-  )
-}
-
-function scalarFieldNamesCached(model: Model): string[] {
-  const cached = SCALAR_FIELDS_CACHE.get(model)
-  if (cached) return cached
-  const out = model.fields.filter((f) => !f.isRelation).map((f) => f.name)
-  SCALAR_FIELDS_CACHE.set(model, out)
-  return out
-}
-
-function jsonFieldSetCached(model: Model): ReadonlySet<string> {
-  const cached = JSON_FIELD_SET_CACHE.get(model)
-  if (cached) return cached
-
-  const s = new Set<string>()
-  for (const f of model.fields) {
-    if (f.isRelation) continue
-    const t = String((f as any).type ?? '').toLowerCase()
-    if (t === 'json') s.add(f.name)
-  }
-
-  JSON_FIELD_SET_CACHE.set(model, s)
-  return s
-}
-
-function maybeParseJsonScalarFast(isJson: boolean, value: any): any {
-  if (!isJson) return value
-  if (value == null) return value
-  if (typeof value !== 'string') return value
-  try {
-    return JSON.parse(value)
-  } catch {
-    return value
-  }
-}
-
-function extractIncludeSpecFromRelArgs(
-  relArgs: unknown,
-  relModel: Model,
-): Record<string, any> {
-  const relationSet = getRelationFieldSet(relModel)
-  const out: Record<string, any> = {}
-
-  if (!isPlainObject(relArgs)) return out
-  const obj = relArgs as Record<string, unknown>
-
-  if (isPlainObject(obj.include)) {
-    for (const [k, v] of Object.entries(
-      obj.include as Record<string, unknown>,
-    )) {
-      if (!relationSet.has(k)) continue
-      if (v === false) continue
-      out[k] = v
-    }
-  }
-
-  if (isPlainObject(obj.select)) {
-    for (const [k, v] of Object.entries(
-      obj.select as Record<string, unknown>,
-    )) {
-      if (!relationSet.has(k)) continue
-      if (v === false) continue
-      if (v === true) {
-        out[k] = true
-        continue
-      }
-      if (isPlainObject(v)) {
-        const vv = v as Record<string, unknown>
-        if (isPlainObject(vv.include) || isPlainObject(vv.select)) {
-          out[k] = v
-        }
-      }
-    }
-  }
-
-  return out
-}
-
-function extractScalarSelection(
-  relArgs: unknown,
-  relModel: Model,
-): { includeAllScalars: boolean; selectedScalarFields: string[] } {
-  const scalars = scalarFieldNamesCached(relModel)
-  const scalarSet = new Set(scalars)
-
-  if (relArgs === true || !isPlainObject(relArgs)) {
-    return { includeAllScalars: true, selectedScalarFields: scalars }
-  }
-
-  const obj = relArgs as Record<string, unknown>
-  if (!isPlainObject(obj.select)) {
-    return { includeAllScalars: true, selectedScalarFields: scalars }
-  }
-
-  const sel = obj.select as Record<string, unknown>
-  const selected: string[] = []
-  for (const [k, v] of Object.entries(sel)) {
-    if (!scalarSet.has(k)) continue
-    if (v === true) selected.push(k)
-  }
-
-  return { includeAllScalars: false, selectedScalarFields: selected }
-}
-
 function buildRelationScalarCols(
   relModel: Model,
   relPath: string,
   includeAllScalars: boolean,
   selectedScalarFields: string[],
 ): ScalarColSpec[] {
-  const jsonSet = jsonFieldSetCached(relModel)
+  const jsonSet = getJsonFieldSet(relModel)
   const scalarFields = includeAllScalars
-    ? scalarFieldNamesCached(relModel)
+    ? getScalarFieldNames(relModel)
     : selectedScalarFields
 
   const out: ScalarColSpec[] = []
@@ -213,13 +98,13 @@ export function buildReducerConfig(
     }
 
     const isList = typeof field.type === 'string' && field.type.endsWith('[]')
-    const primaryKeyFields = findPrimaryKeyFieldsCached(relatedModel)
+    const primaryKeyFields = getPrimaryKeyFields(relatedModel)
     const scalarSel = extractScalarSelection(incValue, relatedModel)
 
     const relPath = prefix ? `${prefix}.${incName}` : incName
 
     let nestedIncludes: ReducerConfig | null = null
-    const nestedSpec = extractIncludeSpecFromRelArgs(incValue, relatedModel)
+    const nestedSpec = extractNestedIncludeSpec(incValue, relatedModel)
     if (Object.keys(nestedSpec).length > 0) {
       nestedIncludes = buildReducerConfig(
         relatedModel,
@@ -261,33 +146,6 @@ export function buildReducerConfig(
   }
 }
 
-function typedKeyPart(v: any): string {
-  const t = typeof v
-  if (t === 'string') return `s:${v}`
-  if (t === 'number') return `n:${v}`
-  if (t === 'boolean') return `b:${v ? 1 : 0}`
-  return `o:${String(v)}`
-}
-
-function keyFromRowByCols(row: any, cols: string[]): string | null {
-  if (cols.length === 0) return null
-
-  if (cols.length === 1) {
-    const v = row[cols[0]]
-    if (v == null) return null
-    return typedKeyPart(v)
-  }
-
-  let out = ''
-  for (let i = 0; i < cols.length; i++) {
-    const v = row[cols[i]]
-    if (v == null) return null
-    if (i > 0) out += '\u001f'
-    out += typedKeyPart(v)
-  }
-  return out
-}
-
 type ManyIndex = Map<string, any>
 type IndexByPath = Map<string, ManyIndex>
 
@@ -325,16 +183,28 @@ function materializeRelationObject(
   row: any,
   rel: RelationMetadata,
 ): any | null {
-  const relKey = keyFromRowByCols(row, rel.keyCols)
+  const relKey = buildCompositeKey(row, rel.keyCols)
   if (relKey == null) return null
 
   const obj: any = {}
   for (const c of rel.scalarCols) {
-    obj[c.fieldName] = maybeParseJsonScalarFast(c.isJson, row[c.colName])
+    obj[c.fieldName] = parseJsonIfNeeded(c.isJson, row[c.colName])
   }
 
   initNestedPlaceholders(obj, rel.nestedIncludes)
   return obj
+}
+
+function processNestedRelations(
+  obj: any,
+  rel: RelationMetadata,
+  row: any,
+  manyStore: WeakMap<object, IndexByPath>,
+): void {
+  if (!rel.nestedIncludes) return
+  for (const nestedRel of rel.nestedIncludes.includedRelations) {
+    processRelation(obj, nestedRel, row, manyStore)
+  }
 }
 
 function processRelation(
@@ -343,7 +213,7 @@ function processRelation(
   row: any,
   manyStore: WeakMap<object, IndexByPath>,
 ): void {
-  const relKey = keyFromRowByCols(row, rel.keyCols)
+  const relKey = buildCompositeKey(row, rel.keyCols)
   if (relKey == null) return
 
   if (rel.cardinality === 'one') {
@@ -355,11 +225,7 @@ function processRelation(
       current = created
     }
 
-    if (rel.nestedIncludes) {
-      for (const nestedRel of rel.nestedIncludes.includedRelations) {
-        processRelation(current, nestedRel, row, manyStore)
-      }
-    }
+    processNestedRelations(current, rel, row, manyStore)
     return
   }
 
@@ -368,11 +234,7 @@ function processRelation(
 
   const existing = idx.get(relKey)
   if (existing) {
-    if (rel.nestedIncludes) {
-      for (const nestedRel of rel.nestedIncludes.includedRelations) {
-        processRelation(existing, nestedRel, row, manyStore)
-      }
-    }
+    processNestedRelations(existing, rel, row, manyStore)
     return
   }
 
@@ -382,18 +244,14 @@ function processRelation(
   arr.push(created)
   idx.set(relKey, created)
 
-  if (rel.nestedIncludes) {
-    for (const nestedRel of rel.nestedIncludes.includedRelations) {
-      processRelation(created, nestedRel, row, manyStore)
-    }
-  }
+  processNestedRelations(created, rel, row, manyStore)
 }
 
 function pickParentScalarFieldsFromRows(
   parentModel: Model,
   rows: any[],
 ): string[] {
-  const all = scalarFieldNamesCached(parentModel)
+  const all = getScalarFieldNames(parentModel)
   if (rows.length === 0) return all
 
   const row0 = rows[0]
@@ -408,26 +266,29 @@ export function reduceFlatRows(rows: any[], config: ReducerConfig): any[] {
   if (rows.length === 0) return []
 
   const { parentModel, includedRelations } = config
-  const parentPkFields = findPrimaryKeyFieldsCached(parentModel)
+  const parentPkFields = getPrimaryKeyFields(parentModel)
 
   const parentKeyCols = parentPkFields
   const parentScalarFields = pickParentScalarFieldsFromRows(parentModel, rows)
-  const parentJsonSet = jsonFieldSetCached(parentModel)
+  const parentJsonSet = getJsonFieldSet(parentModel)
 
   const resultMap = new Map<string, any>()
   const manyStore = new WeakMap<object, IndexByPath>()
 
-  for (const row of rows) {
-    const parentKey = keyFromRowByCols(row, parentKeyCols)
+  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+    const row = rows[rowIdx]
+    const parentKey = buildCompositeKey(row, parentKeyCols)
+
     if (parentKey == null) continue
 
     let record = resultMap.get(parentKey)
     if (!record) {
       record = {}
       for (const fieldName of parentScalarFields) {
-        record[fieldName] = maybeParseJsonScalarFast(
-          parentJsonSet.has(fieldName),
+        record[fieldName] = maybeParseJson(
           row[fieldName],
+          parentJsonSet,
+          fieldName,
         )
       }
       for (const rel of includedRelations) {

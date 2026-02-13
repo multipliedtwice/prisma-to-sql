@@ -5,6 +5,9 @@ import type { Model } from '../../types'
 import { getColumnMap, getQuotedColumn } from './model-field-cache'
 import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
+const COL_EXPR_CACHE = new WeakMap<Model, Map<string, string>>()
+const COL_WITH_ALIAS_CACHE = new WeakMap<Model, Map<string, string>>()
+
 function containsControlChars(s: string): boolean {
   for (let i = 0; i < s.length; i++) {
     const code = s.charCodeAt(i)
@@ -40,12 +43,19 @@ function isIdentStartCharCode(c: number): boolean {
   return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95
 }
 
+const MAX_PARSE_ITERATIONS = 10000
+
 function parseQuotedPart(input: string, start: number): number {
   const n = input.length
   let i = start + 1
   let sawAny = false
+  let iterations = 0
 
   while (i < n) {
+    if (++iterations > MAX_PARSE_ITERATIONS) {
+      throw new Error('Table name parsing exceeded complexity limit')
+    }
+
     const c = input.charCodeAt(i)
     if (c === 34) {
       const next = i + 1
@@ -206,15 +216,6 @@ export function quote(id: string): string {
   return id
 }
 
-function resolveColumnName(
-  model: Model | undefined,
-  fieldName: string,
-): string {
-  if (!model) return fieldName
-  const columnMap = getColumnMap(model)
-  return columnMap.get(fieldName) || fieldName
-}
-
 export function quoteColumn(
   model: Model | undefined,
   fieldName: string,
@@ -224,12 +225,31 @@ export function quoteColumn(
   return cached || quote(fieldName)
 }
 
+function getOrCreateCache<K extends object, V>(
+  weakMap: WeakMap<K, Map<string, V>>,
+  key: K,
+): Map<string, V> {
+  let cache = weakMap.get(key)
+  if (!cache) {
+    cache = new Map()
+    weakMap.set(key, cache)
+  }
+  return cache
+}
+
 export function col(alias: string, field: string, model?: Model): string {
-  const columnName = model ? getColumnMap(model).get(field) || field : field
-  const quoted = model
-    ? getQuotedColumn(model, field) || quote(columnName)
-    : quote(columnName)
-  return alias + '.' + quoted
+  if (!model) return `${alias}.${quote(field)}`
+
+  const cache = getOrCreateCache(COL_EXPR_CACHE, model)
+  const cacheKey = `${alias}.${field}`
+
+  let cached = cache.get(cacheKey)
+  if (cached) return cached
+
+  const quotedCol = getQuotedColumn(model, field) || quote(field)
+  cached = `${alias}.${quotedCol}`
+  cache.set(cacheKey, cached)
+  return cached
 }
 
 export function colWithAlias(
@@ -245,19 +265,29 @@ export function colWithAlias(
     throw new Error('colWithAlias: field is required and cannot be empty')
   }
 
-  const columnName = resolveColumnName(model, field)
-  const columnRef =
-    alias +
-    '.' +
-    (model
-      ? getQuotedColumn(model, field) || quote(columnName)
-      : quote(columnName))
-
-  if (columnName !== field) {
-    return columnRef + ' AS ' + quote(field)
+  if (!model) {
+    return `${alias}.${quote(field)} AS ${quote(field)}`
   }
 
-  return columnRef
+  const cache = getOrCreateCache(COL_WITH_ALIAS_CACHE, model)
+  const cacheKey = `${alias}.${field}`
+
+  let cached = cache.get(cacheKey)
+  if (cached) return cached
+
+  const columnMap = getColumnMap(model)
+  const columnName = columnMap.get(field) || field
+  const quotedCol = getQuotedColumn(model, field) || quote(columnName)
+  const columnRef = `${alias}.${quotedCol}`
+
+  if (columnName !== field) {
+    cached = `${columnRef} AS ${quote(field)}`
+  } else {
+    cached = columnRef
+  }
+
+  cache.set(cacheKey, cached)
+  return cached
 }
 
 export function sqlStringLiteral(value: string): string {

@@ -4,12 +4,23 @@ import { quote, buildTableReference, quoteColumn } from '../shared/sql-utils'
 import { joinCondition, isValidRelationField } from '../joins'
 import { SelectQuerySpec } from '../shared/types'
 import {
-  getScalarFieldSet,
+  getFieldIndices,
   getRelationFieldSet,
 } from '../shared/model-field-cache'
 import { appendPagination } from './assembly'
 import { isPlainObject } from '../shared/validators/type-guards'
 import { SqlDialect } from '../../sql-builder-dialect'
+import {
+  getPrimaryKeyField,
+  getPrimaryKeyFields,
+} from '../shared/primary-key-utils'
+import { extractRelationEntries } from '../shared/relation-extraction-utils'
+import {
+  hasChildPagination,
+  extractScalarSelection,
+  extractNestedIncludeSpec,
+} from '../shared/relation-utils'
+import { deduplicatePreserveOrder } from '../shared/array-utils'
 
 export interface FlatJoinBuildResult {
   sql: string
@@ -17,30 +28,26 @@ export interface FlatJoinBuildResult {
   includeSpec: Record<string, any>
 }
 
-function getPrimaryKeyField(model: Model): string {
-  const scalarSet = getScalarFieldSet(model)
-
-  for (const f of model.fields) {
-    if (f.isId && !f.isRelation && scalarSet.has(f.name)) {
-      return f.name
-    }
-  }
-
-  if (scalarSet.has('id')) return 'id'
-
-  throw new Error(
-    `Model ${model.name} has no primary key field. Models must have either a field with isId=true or a field named 'id'.`,
-  )
+interface AliasCounter {
+  count: number
+  next(): number
 }
 
-function findPrimaryKeyFields(model: Model): string[] {
-  const pkFields = model.fields.filter((f) => f.isId && !f.isRelation)
-  if (pkFields.length > 0) return pkFields.map((f) => f.name)
-
-  const idField = model.fields.find((f) => f.name === 'id' && !f.isRelation)
-  if (idField) return ['id']
-
-  throw new Error(`Model ${model.name} has no primary key field`)
+function createAliasCounter(): AliasCounter {
+  return {
+    count: 0,
+    next(): number {
+      if (this.count >= Number.MAX_SAFE_INTEGER - 1000) {
+        throw new Error(
+          'Alias counter overflow. This indicates an extremely complex query ' +
+            'or a potential infinite loop in relation traversal.',
+        )
+      }
+      const current = this.count
+      this.count++
+      return current
+    },
+  }
 }
 
 function getRelationModel(
@@ -61,128 +68,6 @@ function getRelationModel(
   return relModel
 }
 
-function extractIncludeSpecFromArgs(
-  args: SelectQuerySpec['args'],
-  model: Model,
-): Record<string, any> {
-  const includeSpec: Record<string, any> = {}
-  const relationSet = getRelationFieldSet(model)
-
-  if (args.include && isPlainObject(args.include)) {
-    for (const [key, value] of Object.entries(args.include)) {
-      if (value !== false) includeSpec[key] = value
-    }
-  }
-
-  if (args.select && isPlainObject(args.select)) {
-    for (const [key, value] of Object.entries(args.select)) {
-      if (!relationSet.has(key)) continue
-      if (value === false) continue
-      if (value === true) {
-        includeSpec[key] = true
-        continue
-      }
-      if (isPlainObject(value)) {
-        const v = value as Record<string, unknown>
-        if (isPlainObject(v.include) || isPlainObject(v.select)) {
-          includeSpec[key] = value
-        }
-      }
-    }
-  }
-
-  return includeSpec
-}
-
-function hasChildPagination(relArgs: unknown): boolean {
-  if (!isPlainObject(relArgs)) return false
-  const args = relArgs as Record<string, unknown>
-  if (args.take !== undefined && args.take !== null) return true
-  if (args.skip !== undefined && args.skip !== null) return true
-  return false
-}
-
-function extractNestedIncludeSpec(
-  relArgs: unknown,
-  relModel: Model,
-): Record<string, any> {
-  const relationSet = getRelationFieldSet(relModel)
-  const out: Record<string, any> = {}
-
-  if (!isPlainObject(relArgs)) return out
-  const obj = relArgs as Record<string, unknown>
-
-  if (isPlainObject(obj.include)) {
-    for (const [k, v] of Object.entries(
-      obj.include as Record<string, unknown>,
-    )) {
-      if (!relationSet.has(k)) continue
-      if (v === false) continue
-      out[k] = v
-    }
-  }
-
-  if (isPlainObject(obj.select)) {
-    for (const [k, v] of Object.entries(
-      obj.select as Record<string, unknown>,
-    )) {
-      if (!relationSet.has(k)) continue
-      if (v === false) continue
-      if (v === true) {
-        out[k] = true
-        continue
-      }
-      if (isPlainObject(v)) {
-        const vv = v as Record<string, unknown>
-        if (isPlainObject(vv.include) || isPlainObject(vv.select)) {
-          out[k] = v
-        }
-      }
-    }
-  }
-
-  return out
-}
-
-function extractSelectedScalarFields(
-  relArgs: unknown,
-  relModel: Model,
-): { includeAllScalars: boolean; selected: string[] } {
-  const scalarFields = relModel.fields
-    .filter((f) => !f.isRelation)
-    .map((f) => f.name)
-  const scalarSet = new Set(scalarFields)
-
-  if (relArgs === true || !isPlainObject(relArgs)) {
-    return { includeAllScalars: true, selected: scalarFields }
-  }
-
-  const obj = relArgs as Record<string, unknown>
-  if (!isPlainObject(obj.select)) {
-    return { includeAllScalars: true, selected: scalarFields }
-  }
-
-  const sel = obj.select as Record<string, unknown>
-  const selected: string[] = []
-  for (const [k, v] of Object.entries(sel)) {
-    if (!scalarSet.has(k)) continue
-    if (v === true) selected.push(k)
-  }
-
-  return { includeAllScalars: false, selected }
-}
-
-function uniqPreserveOrder(items: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const it of items) {
-    if (seen.has(it)) continue
-    seen.add(it)
-    out.push(it)
-  }
-  return out
-}
-
 function buildChildColumns(args: {
   relModel: Model
   relationName: string
@@ -193,25 +78,30 @@ function buildChildColumns(args: {
   const { relModel, relationName, childAlias, prefix, relArgs } = args
   const fullPrefix = prefix ? `${prefix}.${relationName}` : relationName
 
-  const pkFields = findPrimaryKeyFields(relModel)
-  const scalarSelection = extractSelectedScalarFields(relArgs, relModel)
-  const selectedScalar = scalarSelection.selected
+  const indices = getFieldIndices(relModel)
+  const scalarSelection = extractScalarSelection(relArgs, relModel)
 
-  const required = uniqPreserveOrder([...pkFields, ...selectedScalar])
+  const required = indices.pkFields.concat(
+    scalarSelection.selectedScalarFields.filter(
+      (f) => !indices.pkFields.includes(f),
+    ),
+  )
 
-  const columns: string[] = []
+  const columns = new Array<string>(required.length)
+  let idx = 0
+
   for (const fieldName of required) {
-    const field = relModel.fields.find(
-      (f) => f.name === fieldName && !f.isRelation,
-    )
+    const field = indices.scalarFields.get(fieldName)
     if (!field) continue
 
     const colName = field.dbName || field.name
     const quotedCol = quote(colName)
 
-    columns.push(`${childAlias}.${quotedCol} AS "${fullPrefix}.${field.name}"`)
+    columns[idx++] =
+      `${childAlias}.${quotedCol} AS "${fullPrefix}.${field.name}"`
   }
 
+  columns.length = idx
   return columns
 }
 
@@ -260,7 +150,7 @@ function buildNestedJoins(
   schemas: readonly Model[],
   dialect: SqlDialect,
   prefix: string,
-  aliasCounter: { count: number },
+  aliasCounter: AliasCounter,
   depth: number = 0,
 ): { joins: string[]; selects: string[]; orderBy: string[] } {
   if (depth > 10) {
@@ -286,7 +176,7 @@ function buildNestedJoins(
       dialect,
     )
 
-    const childAlias = `fj_${aliasCounter.count++}`
+    const childAlias = `fj_${aliasCounter.next()}`
     const joinCond = joinCondition(
       field,
       parentModel,
@@ -306,7 +196,7 @@ function buildNestedJoins(
       }),
     )
 
-    const childPkFields = findPrimaryKeyFields(relModel)
+    const childPkFields = getPrimaryKeyFields(relModel)
     for (const pkField of childPkFields) {
       orderBy.push(
         `${childAlias}.${quoteColumn(relModel, pkField)} ASC NULLS LAST`,
@@ -336,6 +226,15 @@ function buildNestedJoins(
   return { joins, selects, orderBy }
 }
 
+function buildSubqueryRawSelect(model: Model, alias: string): string {
+  const cols: string[] = []
+  for (const f of model.fields) {
+    if (f.isRelation) continue
+    cols.push(`${alias}.${quoteColumn(model, f.name)}`)
+  }
+  return cols.length > 0 ? cols.join(SQL_SEPARATORS.FIELD_LIST) : '*'
+}
+
 export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
   const {
     select,
@@ -349,7 +248,13 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     args,
   } = spec
 
-  const includeSpec = extractIncludeSpecFromArgs(args, model)
+  const includeSpec = extractRelationEntries(args, model).reduce(
+    (acc, { name, value }) => {
+      acc[name] = value
+      return acc
+    },
+    {} as Record<string, any>,
+  )
 
   if (Object.keys(includeSpec).length === 0) {
     return { sql: '', requiresReduction: false, includeSpec: {} }
@@ -364,16 +269,16 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     whereClause && whereClause !== '1=1' ? `WHERE ${whereClause}` : ''
   const baseOrderBy = orderBy ? `ORDER BY ${orderBy}` : ''
 
+  const subqueryScalarCols = buildSubqueryRawSelect(model, from.alias)
   let baseSubquery = `
-    SELECT * FROM ${from.table} ${from.alias}
+    SELECT ${subqueryScalarCols} FROM ${from.table} ${from.alias}
     ${baseJoins}
     ${baseWhere}
     ${baseOrderBy}
   `.trim()
-
   baseSubquery = appendPagination(baseSubquery, spec)
 
-  const aliasCounter = { count: 0 }
+  const aliasCounter = createAliasCounter()
   const built = buildNestedJoins(
     model,
     from.alias,
@@ -401,7 +306,6 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
   const pkField = getPrimaryKeyField(model)
 
   const orderByParts: string[] = []
-  if (orderBy) orderByParts.push(orderBy)
   orderByParts.push(`${from.alias}.${quoteColumn(model, pkField)} ASC`)
   orderByParts.push(...built.orderBy)
 

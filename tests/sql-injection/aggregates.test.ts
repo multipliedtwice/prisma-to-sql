@@ -1,3 +1,4 @@
+// tests/sql-injection/aggregates.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Prisma, PrismaClient } from '../generated/client'
 import { createToSQL } from '../../src'
@@ -28,7 +29,7 @@ describe('SQL Injection - Aggregates', () => {
             ["'; DROP TABLE--" as any]: true,
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject malicious field names in _sum', () => {
@@ -38,7 +39,7 @@ describe('SQL Injection - Aggregates', () => {
             ["'; TRUNCATE--" as any]: true,
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject malicious field names in _avg', () => {
@@ -48,7 +49,7 @@ describe('SQL Injection - Aggregates', () => {
             ["'; DELETE--" as any]: true,
           },
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject non-numeric fields in _sum', () => {
@@ -58,7 +59,7 @@ describe('SQL Injection - Aggregates', () => {
             email: true,
           },
         })
-      }).toThrow(/numeric field/i)
+      }).toThrow(/must be numeric/i)
     })
   })
 
@@ -141,7 +142,7 @@ describe('SQL Injection - Aggregates', () => {
         toSQL('Task', 'groupBy', {
           by: ["'; DROP--" as any],
         })
-      }).toThrow(/unknown field/i)
+      }).toThrow(/does not exist/i)
     })
 
     it('should reject relation fields in groupBy', () => {
@@ -149,7 +150,7 @@ describe('SQL Injection - Aggregates', () => {
         toSQL('User', 'groupBy', {
           by: ['memberships' as any],
         })
-      }).toThrow(/does not support relation/i)
+      }).toThrow(/is a relation field/i)
     })
   })
 })
