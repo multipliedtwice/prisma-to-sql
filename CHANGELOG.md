@@ -1,3 +1,15 @@
+# [1.66.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.65.0...v1.66.0) (2026-02-13)
+
+
+### Bug Fixes
+
+* **flat-join.ts:** cast field to any type to resolve TypeScript type issues ([a1975cc](https://github.com/multipliedtwice/prisma-to-sql/commit/a1975cc3345c92ac61304d3e6629b342dee602c1))
+
+
+### Features
+
+* row by row reduce ([b01515d](https://github.com/multipliedtwice/prisma-to-sql/commit/b01515d562431c4b35b5728130ddff05cda5166c))
+
 # [1.65.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.64.0...v1.65.0) (2026-02-10)
 
 
