@@ -19,7 +19,7 @@ function findTiebreakerField(model?: Model): string | null {
   const scalarSet = getScalarFieldSet(model)
 
   for (const f of model.fields) {
-    if (f.isId && !f.isRelation && scalarSet.has(f.name)) return f.name
+    if ((f as any).isId && !f.isRelation && scalarSet.has(f.name)) return f.name
   }
 
   if (scalarSet.has('id')) return 'id'

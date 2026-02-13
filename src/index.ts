@@ -38,7 +38,7 @@ export function buildSQL(
   args: Record<string, unknown>,
   dialect: SqlDialect,
 ): SqlResult {
-  return buildSQLWithCache(model, models, method, args, dialect)
+  return buildSQLWithCache(model, models, method, args, dialect) as any
 }
 
 function createToSQLFunction(

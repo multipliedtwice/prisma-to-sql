@@ -321,7 +321,7 @@ function buildAndNormalizeSql(args: {
 
   const normalized = normalizeSqlAndMappingsForDialect(
     sqlResult.sql,
-    sqlResult.paramMappings,
+    sqlResult.paramMappings!,
     dialect,
   )
 

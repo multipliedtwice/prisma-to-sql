@@ -21,6 +21,7 @@ import {
   extractNestedIncludeSpec,
 } from '../shared/relation-utils'
 import { deduplicatePreserveOrder } from '../shared/array-utils'
+import { Field } from '@dee-wan/schema-parser'
 
 export interface FlatJoinBuildResult {
   sql: string
@@ -167,7 +168,7 @@ function buildNestedJoins(
     if (relValue === false) continue
 
     const field = parentModel.fields.find((f) => f.name === relName)
-    if (!isValidRelationField(field)) continue
+    if (!isValidRelationField(field as any)) continue
 
     const relModel = getRelationModel(parentModel, relName, schemas)
     const relTable = buildTableReference(
@@ -178,7 +179,7 @@ function buildNestedJoins(
 
     const childAlias = `fj_${aliasCounter.next()}`
     const joinCond = joinCondition(
-      field,
+      field as any,
       parentModel,
       relModel,
       parentAlias,

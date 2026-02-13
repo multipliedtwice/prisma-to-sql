@@ -36,15 +36,6 @@ function getDatasourceUrl(options: GeneratorOptions): string | undefined {
     return configUrl
   }
 
-  const datasource = options.datasources?.[0]
-  if (datasource?.url?.value) {
-    return datasource.url.value
-  }
-  if (datasource?.url?.fromEnvVar) {
-    const fromEnv = process.env[datasource.url.fromEnvVar]
-    if (fromEnv) return fromEnv
-  }
-
   return process.env.DATABASE_URL || undefined
 }
 

@@ -22,7 +22,7 @@ export function getOrPrepareStatement(client: any, sql: string): any {
 
     if (cache.size > 1000) {
       const firstKey = cache.keys().next().value
-      cache.delete(firstKey)
+      cache.delete(firstKey!)
     }
   }
 
