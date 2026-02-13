@@ -1,15 +1,18 @@
 import type { Model } from '../../types'
 import { getPrimaryKeyField } from '../shared/primary-key-utils'
-import {
-  ExecuteWhereInParams,
-  buildChildArgs,
-} from '../shared/where-in-executor-base'
+import type { WhereInSegment } from '../select/segment-planner'
 import { buildSQL } from '../..'
 import { buildReducerConfig, reduceFlatRows } from './reducer'
 
-interface StreamingWhereInParams extends ExecuteWhereInParams {
+interface StreamingWhereInParams {
+  segments: WhereInSegment[]
   parentSql: string
   parentParams: unknown[]
+  parentModel: Model
+  allModels: readonly Model[]
+  modelMap: Map<string, Model>
+  dialect: 'postgres' | 'sqlite'
+  execute: (sql: string, params: unknown[]) => Promise<any[]>
   batchSize?: number
   maxConcurrency?: number
 }
@@ -162,4 +165,25 @@ async function fetchAndAttachChildren(
       parent[segment.relationName] = child
     }
   }
+}
+
+function buildChildArgs(
+  relArgs: unknown,
+  fkFieldName: string,
+  parentIds: unknown[],
+): any {
+  const base: any =
+    relArgs === true || typeof relArgs !== 'object' || relArgs === null
+      ? {}
+      : { ...(relArgs as any) }
+
+  const existingWhere = base.where
+
+  const inCondition = { [fkFieldName]: { in: parentIds } }
+
+  base.where = existingWhere
+    ? { AND: [existingWhere, inCondition] }
+    : inCondition
+
+  return base
 }

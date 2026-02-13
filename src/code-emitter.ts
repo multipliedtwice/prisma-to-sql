@@ -1046,25 +1046,25 @@ function generateExtension(runtimeImportPath: string): string {
       },
       model: {
         $allModels: {
-          async findMany(args: any) {
+          async findMany(this: ModelContext, args: any) {
             return handleMethod.call(this, 'findMany', args)
           },
-          async findFirst(args: any) {
+          async findFirst(this: ModelContext, args: any) {
             return handleMethod.call(this, 'findFirst', args)
           },
-          async findUnique(args: any) {
+          async findUnique(this: ModelContext, args: any) {
             return handleMethod.call(this, 'findUnique', args)
           },
-          async count(args: any) {
+          async count(this: ModelContext, args: any) {
             return handleMethod.call(this, 'count', args)
           },
-          async aggregate(args: any) {
+          async aggregate(this: ModelContext, args: any) {
             return handleMethod.call(this, 'aggregate', args)
           },
-          async groupBy(args: any) {
+          async groupBy(this: ModelContext, args: any) {
             return handleMethod.call(this, 'groupBy', args)
           },
-          findManyStream(args?: any): AsyncIterableIterator<any> {
+          findManyStream(this: ModelContext, args?: any): AsyncIterableIterator<any> {
             return findManyStream.call(this, args)
           },
         },
