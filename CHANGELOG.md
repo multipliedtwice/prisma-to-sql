@@ -1,3 +1,10 @@
+## [1.66.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.66.0...v1.66.1) (2026-02-13)
+
+
+### Bug Fixes
+
+* typescript in generated file ([561964d](https://github.com/multipliedtwice/prisma-to-sql/commit/561964d87828b7b2d57f1722f7942f590d32b37b))
+
 # [1.66.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.65.0...v1.66.0) (2026-02-13)
 
 
