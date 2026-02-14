@@ -57,8 +57,8 @@ async function switchPrismaVersion(version: 6 | 7) {
   const packageJsonPath = path.join(process.cwd(), 'package.json')
   const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
 
-  const prismaVersion = version === 6 ? '6.16.3' : '7.2.0'
-  const adapterVersion = version === 6 ? '^6.16.3' : '^7.2.0'
+  const prismaVersion = version === 6 ? '6.19.2' : '7.4.0'
+  const adapterVersion = version === 6 ? '^6.19.2' : '^7.4.0'
 
   delete pkg.dependencies?.['@prisma/client']
   delete pkg.dependencies?.prisma
@@ -75,8 +75,8 @@ async function switchPrismaVersion(version: 6 | 7) {
 
   pkg.dependencies = pkg.dependencies || {}
   pkg.dependencies['@prisma/generator-helper'] =
-    version === 6 ? '^6.16.3' : '^7.2.0'
-  pkg.dependencies['@prisma/internals'] = version === 6 ? '^6.16.3' : '^7.2.0'
+    version === 6 ? '^6.19.2' : '^7.4.0'
+  pkg.dependencies['@prisma/internals'] = version === 6 ? '^6.19.2' : '^7.4.0'
 
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n')
 

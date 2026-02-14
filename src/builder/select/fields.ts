@@ -19,6 +19,7 @@ const DEFAULT_SELECT_CACHE = new WeakMap<Model, Map<string, string>>()
 function toSelectEntries(select: Record<string, unknown>): SelectEntry[] {
   const out: SelectEntry[] = []
   for (const [k, v] of Object.entries(select)) {
+    if (k === '_count') continue
     if (v !== false && v !== undefined) out.push([k, v])
   }
   return out
@@ -194,7 +195,7 @@ export function buildRelationSelect(
     const relationNames = getRelationFieldSet(relModel)
 
     const entries = toSelectEntries(sel)
-    validateFieldKeys(entries, scalarNames, relationNames, false)
+    validateFieldKeys(entries, scalarNames, relationNames, true)
 
     return buildSelectedScalarParts(
       entries,

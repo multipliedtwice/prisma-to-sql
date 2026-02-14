@@ -155,18 +155,9 @@ function buildWhereInternal(
     )
   }
 
-  if (ctx.seenObjects.has(where)) {
-    throw createError('Circular reference detected in WHERE clause', {
-      path: ctx.path,
-      modelName: ctx.model.name,
-    })
-  }
-
   if (!isPlainObject(where) || Object.keys(where).length === 0) {
     return createResult(DEFAULT_WHERE_CLAUSE, EMPTY_JOINS)
   }
-
-  ctx.seenObjects.add(where)
 
   if (isSimpleWhere(where)) {
     const key = Object.keys(where)[0]

@@ -1,4 +1,4 @@
-import { describe, it, beforeAll, afterAll } from 'vitest'
+import { describe, it, beforeAll, afterAll, expect } from 'vitest'
 import { createTestDB, type TestDB } from '../helpers/db'
 import { seedDatabase, type SeedResult } from '../helpers/seed-db'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
@@ -27,6 +27,7 @@ import {
   outputBenchmarkResults,
   type BenchmarkResult,
 } from '../helpers/benchmark-utils'
+import { normalizeValue } from '../helpers/compare'
 
 const SHOULD_OUTPUT_JSON = process.env.BENCHMARK_JSON_OUTPUT === '1'
 const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
@@ -2340,5 +2341,266 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           sortField: undefined,
         },
       ))
+  })
+
+  describe('Dense API coverage', () => {
+    it('complex query with nested relations and counts', async () => {
+      const search = 'task'
+      const statuses = ['TODO', 'IN_PROGRESS']
+
+      const where = {
+        OR: [
+          { title: { contains: search, mode: 'insensitive' as const } },
+          { description: { contains: search, mode: 'insensitive' as const } },
+        ],
+        status: { in: statuses },
+        assigneeId: { not: null },
+      }
+
+      const select = {
+        id: true,
+        title: true,
+        status: true,
+        assignee: {
+          select: {
+            email: true,
+            memberships: {
+              select: {
+                role: true,
+                organization: { select: { name: true, plan: true } },
+              },
+              take: 1,
+            },
+          },
+        },
+        project: {
+          select: {
+            name: true,
+          },
+        },
+        comments: {
+          where: { isEdited: false },
+          select: {
+            content: true,
+            author: { select: { name: true } },
+          },
+          orderBy: { createdAt: 'desc' as const },
+          take: 3,
+        },
+      }
+
+      const extResult = await runParityTest(
+        db,
+        benchmarkResults,
+        'complex nested select',
+        'Task',
+        {
+          method: 'findMany',
+          where,
+          select,
+          orderBy: [
+            { status: 'asc' },
+            { priority: 'desc' },
+            { createdAt: 'desc' },
+          ],
+          take: 10,
+        },
+        () =>
+          db.prisma.task.findMany({
+            where,
+            select,
+            orderBy: [
+              { status: 'asc' },
+              { priority: 'desc' },
+              { createdAt: 'desc' },
+            ],
+            take: 10,
+          }),
+        { sortField: undefined },
+      )
+    })
+
+    it('deep nested: 5-level select + some/every/none + dynamic filters', () => {
+      const planFilter = ['PRO', 'ENTERPRISE']
+      const statusFilter = ['ACTIVE', 'ON_HOLD']
+      const priority = 'HIGH'
+      const daysBack = 90
+
+      const args = {
+        where: {
+          plan: { in: planFilter },
+          projects: {
+            some: {
+              status: { in: statusFilter },
+              tasks: {
+                some: {
+                  AND: [
+                    { priority },
+                    { comments: { some: { replies: { some: {} } } } },
+                    {
+                      createdAt: {
+                        gte: new Date(
+                          Date.now() - daysBack * 24 * 60 * 60 * 1000,
+                        ),
+                      },
+                    },
+                  ],
+                },
+                every: { status: { not: 'CANCELLED' } },
+              },
+              labels: { some: { name: { contains: 'bug' } } },
+            },
+            every: { isPublic: false },
+          },
+          members: {
+            some: {
+              role: { in: ['ADMIN', 'OWNER'] },
+              user: {
+                assignedTasks: {
+                  some: { priority: 'URGENT', completedAt: null },
+                  none: { status: 'CANCELLED' },
+                },
+              },
+            },
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          plan: true,
+          projects: {
+            where: { status: 'ACTIVE' },
+            select: {
+              id: true,
+              name: true,
+              tasks: {
+                where: { status: { not: 'CANCELLED' } },
+                select: {
+                  id: true,
+                  title: true,
+                  priority: true,
+                  assignee: {
+                    select: {
+                      email: true,
+                      _count: {
+                        select: { assignedTasks: true, comments: true },
+                      },
+                    },
+                  },
+                  labels: {
+                    select: {
+                      label: { select: { name: true, color: true } },
+                    },
+                    take: 2,
+                  },
+                  comments: {
+                    where: { isEdited: false },
+                    select: {
+                      content: true,
+                      author: { select: { name: true } },
+                      replies: { select: { content: true }, take: 1 },
+                    },
+                    take: 2,
+                  },
+                  _count: { select: { comments: true, attachments: true } },
+                },
+                orderBy: { priority: 'desc' as const },
+                take: 5,
+              },
+              _count: {
+                select: { tasks: true, labels: true, milestones: true },
+              },
+            },
+            orderBy: { createdAt: 'desc' as const },
+            take: 3,
+          },
+          members: {
+            where: { role: { in: ['ADMIN', 'OWNER'] } },
+            select: {
+              role: true,
+              user: {
+                select: {
+                  email: true,
+                  _count: { select: { assignedTasks: true } },
+                },
+              },
+            },
+            take: 5,
+          },
+          _count: { select: { projects: true, members: true } },
+        },
+        orderBy: { createdAt: 'desc' as const },
+        take: 2,
+      }
+
+      return runParityTest(
+        db,
+        benchmarkResults,
+        'ultra deep query',
+        'Organization',
+        { method: 'findMany', ...args },
+        () => db.prisma.organization.findMany(args),
+        { sortField: undefined },
+      )
+    })
+
+    it('transaction: groupBy + aggregate + findMany with isolation', async () => {
+      const orgId = seed.organizationIds[0]
+      const userId = seed.userIds[0]
+
+      const baseWhere = {
+        status: { in: ['TODO', 'IN_PROGRESS'] },
+        priority: { in: ['HIGH', 'URGENT'] },
+        project: { organizationId: orgId },
+      }
+
+      const groupByArgs = {
+        by: ['status', 'priority'],
+        where: baseWhere,
+        _count: { _all: true, id: true },
+        _sum: { position: true },
+        _avg: { position: true },
+        having: {
+          status: { _count: { gte: 1 } },
+        },
+        orderBy: [{ status: 'asc' }, { priority: 'desc' }],
+      }
+
+      const aggregateArgs = {
+        where: baseWhere,
+        _count: { _all: true },
+        _avg: { position: true },
+        _sum: { position: true },
+      }
+
+      const findManyArgs = {
+        where: baseWhere,
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          priority: true,
+        },
+        orderBy: { id: 'asc' },
+        take: 5,
+      }
+
+      const [extGrouped, extAgg, extTasks] = await db.extended.$transaction([
+        { model: 'Task', method: 'groupBy', args: groupByArgs },
+        { model: 'Task', method: 'aggregate', args: aggregateArgs },
+        { model: 'Task', method: 'findMany', args: findManyArgs },
+      ])
+
+      const [prismaGrouped, prismaAgg, prismaTasks] =
+        await db.prisma.$transaction([
+          db.prisma.task.groupBy(groupByArgs as any),
+          db.prisma.task.aggregate(aggregateArgs),
+          db.prisma.task.findMany(findManyArgs as any),
+        ])
+
+      expect(normalizeValue(extGrouped)).toEqual(normalizeValue(prismaGrouped))
+      expect(normalizeValue(extAgg)).toEqual(normalizeValue(prismaAgg))
+      expect(normalizeValue(extTasks)).toEqual(normalizeValue(prismaTasks))
+    })
   })
 })

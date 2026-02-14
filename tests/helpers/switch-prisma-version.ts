@@ -13,15 +13,15 @@ const packageJsonPath = path.join(process.cwd(), 'package.json')
 const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
 
 if (version === '6') {
-  pkg.dependencies['@prisma/client'] = '6.16.3'
-  pkg.dependencies['prisma'] = '6.16.3'
-  pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^6.16.3'
-  pkg.devDependencies['@prisma/adapter-pg'] = '^6.16.3'
+  pkg.dependencies['@prisma/client'] = '6.19.2'
+  pkg.dependencies['prisma'] = '6.19.2'
+  pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^6.19.2'
+  pkg.devDependencies['@prisma/adapter-pg'] = '^6.19.2'
 } else {
-  pkg.dependencies['@prisma/client'] = '7.2.0'
-  pkg.dependencies['prisma'] = '7.2.0'
-  pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^7.2.0'
-  pkg.devDependencies['@prisma/adapter-pg'] = '^7.2.0'
+  pkg.dependencies['@prisma/client'] = '7.4.0'
+  pkg.dependencies['prisma'] = '7.4.0'
+  pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^7.4.0'
+  pkg.devDependencies['@prisma/adapter-pg'] = '^7.4.0'
 }
 
 delete pkg.dependencies['@prisma/client-v7']

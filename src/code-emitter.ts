@@ -1007,9 +1007,27 @@ function generateExtension(runtimeImportPath: string): string {
     }
 
     async function transaction(
-      queries: TransactionQuery[],
+      queries: TransactionQuery[] | any[],
       options?: TransactionOptions,
     ): Promise<unknown[]> {
+      if (!queries || queries.length === 0) {
+        return []
+      }
+
+      const isTransactionQuery = queries.every(q => 
+        q && 
+        typeof q === 'object' && 
+        !q.then &&
+        'model' in q && 
+        'method' in q &&
+        typeof q.model === 'string' &&
+        typeof q.method === 'string'
+      )
+
+      if (!isTransactionQuery) {
+        return Promise.all(queries)
+      }
+
       const startTime = Date.now()
       if (debug) {
         console.log(\`[\${DIALECT}] $transaction (\${queries.length} queries)\`)

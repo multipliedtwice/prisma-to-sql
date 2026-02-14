@@ -8,7 +8,13 @@ export function transformAggregateRow(row: any): any {
   for (const key in row) {
     if (!Object.prototype.hasOwnProperty.call(row, key)) continue
 
-    const value = row[key]
+    let value = row[key]
+
+    // Convert string numbers to actual numbers for consistency with Prisma
+    if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value)) {
+      value = value.includes('.') ? parseFloat(value) : parseInt(value, 10)
+    }
+
     const dotIndex = key.indexOf('.')
 
     if (dotIndex === -1) {
@@ -36,13 +42,17 @@ export function extractCountValue(row: any): number | bigint {
   if (!row || typeof row !== 'object') return 0
 
   if ('_count._all' in row) {
-    return row['_count._all'] as number | bigint
+    const value = row['_count._all']
+    if (typeof value === 'string') return parseInt(value, 10)
+    return value as number | bigint
   }
 
   if ('_count' in row && row['_count'] && typeof row['_count'] === 'object') {
     const countObj = row['_count'] as Record<string, unknown>
     if ('_all' in countObj) {
-      return countObj['_all'] as number | bigint
+      const value = countObj['_all']
+      if (typeof value === 'string') return parseInt(value, 10)
+      return value as number | bigint
     }
   }
 
@@ -52,6 +62,9 @@ export function extractCountValue(row: any): number | bigint {
       const value = row[key]
       if (typeof value === 'number' || typeof value === 'bigint') {
         return value
+      }
+      if (typeof value === 'string') {
+        return parseInt(value, 10)
       }
     }
   }

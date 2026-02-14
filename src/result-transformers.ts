@@ -1,34 +1,49 @@
 import { PrismaMethod } from './types'
+import { getRowTransformer } from './builder/select/row-transformers'
 
 export function transformQueryResults(
   method: string,
   results: unknown,
 ): unknown {
-  if (method === 'findFirst' || method === 'findUnique') {
+  const rowTransformer = getRowTransformer(method)
+
+  let transformed = results
+  if (rowTransformer) {
     if (Array.isArray(results)) {
-      return results[0] ?? null
+      transformed = results.map((row) => rowTransformer(row))
+    } else if (results && typeof results === 'object') {
+      transformed = rowTransformer(results)
+    }
+  }
+
+  if (method === 'findFirst' || method === 'findUnique') {
+    if (Array.isArray(transformed)) {
+      return transformed[0] ?? null
+    }
+  }
+
+  if (method === 'aggregate') {
+    if (Array.isArray(transformed)) {
+      return transformed[0] ?? null
     }
   }
 
   if (method === 'count') {
-    if (Array.isArray(results) && results.length > 0) {
-      const row = results[0]
+    if (Array.isArray(transformed) && transformed.length > 0) {
+      const row = transformed[0]
 
-      // If the row is already a number or bigint, return it
       if (typeof row === 'number' || typeof row === 'bigint') {
         return row
       }
 
-      // If it's an object with _count._all, extract the simple count
       if (row && typeof row === 'object' && '_count._all' in row) {
         return (row as any)['_count._all']
       }
 
-      // Otherwise return the row as-is (for count with select)
       return row
     }
     return 0
   }
 
-  return results
+  return transformed
 }

@@ -973,14 +973,38 @@ function parseCountValue(value: unknown): number {
 
 export function parseBatchCountResults(
   row: Record<string, unknown>,
-  count: number,
+  queryCount: number,
 ): number[] {
   const results: number[] = []
-  for (let i = 0; i < count; i++) {
-    const key = `count_${i}`
+
+  for (let i = 0; i < queryCount; i++) {
+    const key = `_count_${i}`
     const value = row[key]
-    results.push(parseCountValue(value))
+
+    if (value === null || value === undefined) {
+      results.push(0)
+      continue
+    }
+
+    if (typeof value === 'number') {
+      results.push(value)
+      continue
+    }
+
+    if (typeof value === 'bigint') {
+      results.push(Number(value))
+      continue
+    }
+
+    if (typeof value === 'string') {
+      const parsed = parseInt(value, 10)
+      results.push(isNaN(parsed) ? 0 : parsed)
+      continue
+    }
+
+    results.push(0)
   }
+
   return results
 }
 
