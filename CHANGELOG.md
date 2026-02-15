@@ -1,3 +1,10 @@
+# [1.67.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.66.1...v1.67.0) (2026-02-15)
+
+
+### Features
+
+* **relations.ts:** optimize handling of NONE filter in buildListRelationFilters function to improve performance ([f8faeb0](https://github.com/multipliedtwice/prisma-to-sql/commit/f8faeb0c410a17d225af7adab6483e46df4ceafe))
+
 ## [1.66.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.66.0...v1.66.1) (2026-02-13)
 
 
