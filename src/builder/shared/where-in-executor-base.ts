@@ -6,7 +6,10 @@ import {
   reduceArrayAggRows,
 } from '../select/array-agg-reducer'
 import type { WhereInSegment } from '../select/segment-planner'
+import { planQueryStrategy } from '../select/segment-planner'
 import { isPlainObject } from './validators/type-guards'
+
+const MAX_RECURSIVE_DEPTH = 10
 
 export interface ExecuteWhereInParams {
   segments: WhereInSegment[]
@@ -94,7 +97,15 @@ export async function executeSegmentBase(
   modelMap: Map<string, Model>,
   dialect: 'postgres' | 'sqlite',
   execute: (sql: string, params: unknown[]) => Promise<any[]>,
+  depth: number = 0,
 ): Promise<void> {
+  if (depth > MAX_RECURSIVE_DEPTH) {
+    for (const parent of parentRows) {
+      parent[segment.relationName] = segment.isList ? [] : null
+    }
+    return
+  }
+
   const parentIds = parentRows
     .map((r) => r[segment.parentKeyFieldName])
     .filter((v) => v != null)
@@ -114,24 +125,46 @@ export async function executeSegmentBase(
     }
     return
   }
+
   const allChildRows: any[] = []
   let needsStripFk = false
+  let nestedSegments: WhereInSegment[] = []
+
   for (const chunk of chunks) {
     const childArgs = buildChildArgs(
       segment.relArgs,
       segment.fkFieldName,
       chunk,
     )
-    const stripFk = ensureFkInSelect(childArgs, segment.fkFieldName)
+
+    const childPlan = planQueryStrategy({
+      model: childModel,
+      method: 'findMany',
+      args: childArgs,
+      allModels,
+      dialect,
+    })
+
+    if (nestedSegments.length === 0 && childPlan.whereInSegments.length > 0) {
+      nestedSegments = childPlan.whereInSegments
+    }
+
+    const stripFk = ensureFkInSelect(
+      childPlan.filteredArgs,
+      segment.fkFieldName,
+    )
     if (stripFk) needsStripFk = true
+
     const result = buildSQL(
       childModel,
       allModels as Model[],
       'findMany',
-      childArgs,
+      childPlan.filteredArgs,
       dialect,
     )
+
     let rows = await execute(result.sql, result.params as unknown[])
+
     if (result.isArrayAgg && result.includeSpec) {
       const config = buildArrayAggReducerConfig(
         childModel,
@@ -147,9 +180,31 @@ export async function executeSegmentBase(
       )
       rows = reduceFlatRows(rows, config)
     }
+
     for (const row of rows) {
       allChildRows.push(row)
     }
   }
+
+  if (nestedSegments.length > 0 && allChildRows.length > 0) {
+    for (const row of allChildRows) {
+      for (const nestedSeg of nestedSegments) {
+        row[nestedSeg.relationName] = nestedSeg.isList ? [] : null
+      }
+    }
+
+    for (const nestedSeg of nestedSegments) {
+      await executeSegmentBase(
+        nestedSeg,
+        allChildRows,
+        allModels,
+        modelMap,
+        dialect,
+        execute,
+        depth + 1,
+      )
+    }
+  }
+
   stitchResults(parentRows, segment, allChildRows, needsStripFk)
 }

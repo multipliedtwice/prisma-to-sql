@@ -1,12 +1,15 @@
 import type { Model } from '../../types'
 import { getPrimaryKeyField } from '../shared/primary-key-utils'
 import type { WhereInSegment } from '../select/segment-planner'
+import { planQueryStrategy } from '../select/segment-planner'
 import { buildSQL } from '../..'
 import { buildReducerConfig, reduceFlatRows } from './reducer'
 import {
   buildArrayAggReducerConfig,
   reduceArrayAggRows,
 } from './array-agg-reducer'
+
+const MAX_RECURSIVE_DEPTH = 10
 
 interface StreamingWhereInParams {
   segments: WhereInSegment[]
@@ -82,6 +85,7 @@ export async function executeWhereInSegmentsStreaming(
           modelMap,
           dialect,
           execute,
+          0,
         )
 
         inFlightMap.set(promise, seg.relationName)
@@ -108,6 +112,7 @@ export async function executeWhereInSegmentsStreaming(
         modelMap,
         dialect,
         execute,
+        0,
       )
 
       inFlightMap.set(promise, seg.relationName)
@@ -131,7 +136,10 @@ async function fetchAndAttachChildren(
   modelMap: Map<string, Model>,
   dialect: 'postgres' | 'sqlite',
   execute: (sql: string, params: unknown[]) => Promise<any[]>,
+  depth: number,
 ): Promise<void> {
+  if (depth > MAX_RECURSIVE_DEPTH) return
+
   const childModel = modelMap.get(segment.childModelName)
   if (!childModel) return
 
@@ -140,11 +148,20 @@ async function fetchAndAttachChildren(
     segment.fkFieldName,
     parentIds,
   )
+
+  const childPlan = planQueryStrategy({
+    model: childModel,
+    method: 'findMany',
+    args: childArgs,
+    allModels,
+    dialect,
+  })
+
   const result = buildSQL(
     childModel,
     allModels as Model[],
     'findMany',
-    childArgs,
+    childPlan.filteredArgs,
     dialect,
   )
 
@@ -160,6 +177,42 @@ async function fetchAndAttachChildren(
   } else if (result.requiresReduction && result.includeSpec) {
     const config = buildReducerConfig(childModel, result.includeSpec, allModels)
     children = reduceFlatRows(children, config)
+  }
+
+  if (childPlan.whereInSegments.length > 0 && children.length > 0) {
+    const childPkField = getPrimaryKeyField(childModel)
+    const childMap = new Map<string, any>()
+
+    for (const child of children) {
+      const pk = child[childPkField]
+      if (pk != null) {
+        childMap.set(pk, child)
+      }
+      for (const nestedSeg of childPlan.whereInSegments) {
+        child[nestedSeg.relationName] = nestedSeg.isList ? [] : null
+      }
+    }
+
+    for (const nestedSeg of childPlan.whereInSegments) {
+      const nestedIds = children
+        .map((c) => c[nestedSeg.parentKeyFieldName])
+        .filter((v) => v != null)
+
+      const uniqueNestedIds = [...new Set(nestedIds)]
+
+      if (uniqueNestedIds.length > 0) {
+        await fetchAndAttachChildren(
+          nestedSeg,
+          uniqueNestedIds,
+          childMap,
+          allModels,
+          modelMap,
+          dialect,
+          execute,
+          depth + 1,
+        )
+      }
+    }
   }
 
   for (const child of children) {
