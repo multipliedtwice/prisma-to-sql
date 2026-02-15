@@ -170,6 +170,18 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
   const noneValue = value[RelationFilters.NONE]
 
   if (noneValue !== undefined && noneValue !== null) {
+    const emptyOptimized = tryOptimizeNoneFilter(
+      noneValue,
+      ctx,
+      relModel,
+      relTable,
+      relAlias,
+      join,
+      { clause: '', joins: [] },
+    )
+
+    if (emptyOptimized) return emptyOptimized
+
     const sub = whereBuilder.build(noneValue as Record<string, unknown>, {
       ...ctx,
       alias: relAlias,

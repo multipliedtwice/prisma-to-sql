@@ -2343,7 +2343,7 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
       ))
   })
 
-  describe('Dense API coverage', () => {
+  describe('Extra API coverage', () => {
     it('complex query with nested relations and counts', async () => {
       const search = 'task'
       const statuses = ['TODO', 'IN_PROGRESS']
@@ -2389,7 +2389,7 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
         },
       }
 
-      const extResult = await runParityTest(
+      await runParityTest(
         db,
         benchmarkResults,
         'complex nested select',
@@ -2544,14 +2544,11 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
       )
     })
 
-    it('transaction: groupBy + aggregate + findMany with isolation', async () => {
-      const orgId = seed.organizationIds[0]
-      const userId = seed.userIds[0]
-
+    it('transaction: groupBy + aggregate + findMany with isolation', () => {
       const baseWhere = {
         status: { in: ['TODO', 'IN_PROGRESS'] },
         priority: { in: ['HIGH', 'URGENT'] },
-        project: { organizationId: orgId },
+        project: { organizationId: seed.organizationIds[0] },
       }
 
       const groupByArgs = {
@@ -2560,9 +2557,7 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
         _count: { _all: true, id: true },
         _sum: { position: true },
         _avg: { position: true },
-        having: {
-          status: { _count: { gte: 1 } },
-        },
+        having: { status: { _count: { gte: 1 } } },
         orderBy: [{ status: 'asc' }, { priority: 'desc' }],
       }
 
@@ -2575,32 +2570,32 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
 
       const findManyArgs = {
         where: baseWhere,
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          priority: true,
-        },
+        select: { id: true, title: true, status: true, priority: true },
         orderBy: { id: 'asc' },
         take: 5,
       }
 
-      const [extGrouped, extAgg, extTasks] = await db.extended.$transaction([
-        { model: 'Task', method: 'groupBy', args: groupByArgs },
-        { model: 'Task', method: 'aggregate', args: aggregateArgs },
-        { model: 'Task', method: 'findMany', args: findManyArgs },
-      ])
-
-      const [prismaGrouped, prismaAgg, prismaTasks] =
-        await db.prisma.$transaction([
-          db.prisma.task.groupBy(groupByArgs as any),
-          db.prisma.task.aggregate(aggregateArgs),
-          db.prisma.task.findMany(findManyArgs as any),
-        ])
-
-      expect(normalizeValue(extGrouped)).toEqual(normalizeValue(prismaGrouped))
-      expect(normalizeValue(extAgg)).toEqual(normalizeValue(prismaAgg))
-      expect(normalizeValue(extTasks)).toEqual(normalizeValue(prismaTasks))
+      return runParityTest(
+        db,
+        benchmarkResults,
+        'transaction: groupBy + aggregate + findMany',
+        'Task',
+        {},
+        () =>
+          db.prisma.$transaction([
+            db.prisma.task.groupBy(groupByArgs as any),
+            db.prisma.task.aggregate(aggregateArgs),
+            db.prisma.task.findMany(findManyArgs as any),
+          ]),
+        {
+          transactionOps: [
+            { model: 'Task', method: 'groupBy', args: groupByArgs },
+            { model: 'Task', method: 'aggregate', args: aggregateArgs },
+            { model: 'Task', method: 'findMany', args: findManyArgs },
+          ],
+          sortField: undefined,
+        },
+      )
     })
   })
 })

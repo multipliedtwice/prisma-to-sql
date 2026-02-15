@@ -4,6 +4,8 @@ import {
   buildReducerConfig,
   reduceFlatRows,
   normalizeValue,
+  getRowTransformer,
+  createStreamingReducer,
 } from './index'
 
 export const SQLITE_STMT_CACHE = new WeakMap<any, Map<string, any>>()
@@ -49,44 +51,28 @@ export async function executePostgresQuery(
   method: string,
   requiresReduction: boolean,
   includeSpec: Record<string, any> | undefined,
-  model: any | undefined,
+  model: any,
   allModels: readonly any[],
 ): Promise<unknown[]> {
   const normalizedParams = normalizeParams(params)
-  const query = client.unsafe(sql, normalizedParams)
+  const rowTransformer = getRowTransformer(method)
 
-  if (requiresReduction && includeSpec && model) {
+  if (requiresReduction && includeSpec) {
     const config = buildReducerConfig(model, includeSpec, allModels)
-    const { createStreamingReducer } = await import('./index')
     const reducer = createStreamingReducer(config)
 
-    await query.forEach((row: any) => {
-      reducer.processRow(row)
+    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+      reducer.processRow(rowTransformer ? rowTransformer(row) : row)
     })
 
     return reducer.getResults()
   }
 
-  if (method === 'count') {
-    const results: any[] = []
-    await query.forEach((row: any) => {
-      results.push(extractCountValue(row))
-    })
-    return results
-  }
-
-  if (method === 'groupBy' || method === 'aggregate') {
-    const results: any[] = []
-    await query.forEach((row: any) => {
-      results.push(transformAggregateRow(row))
-    })
-    return results
-  }
-
   const results: any[] = []
-  await query.forEach((row: any) => {
-    results.push(row)
+  await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+    results.push(rowTransformer ? rowTransformer(row) : row)
   })
+
   return results
 }
 
@@ -97,46 +83,37 @@ export function executeSqliteQuery(
   method: string,
   requiresReduction: boolean,
   includeSpec: Record<string, any> | undefined,
-  model: any | undefined,
+  model: any,
   allModels: readonly any[],
 ): unknown[] {
   const normalizedParams = normalizeParams(params)
-  const stmt = getOrPrepareStatement(client, sql)
+  const shouldTransform =
+    method === 'groupBy' || method === 'aggregate' || method === 'count'
 
-  if (shouldSqliteUseGet(method)) {
-    const row = stmt.get(...normalizedParams)
-    if (row === undefined) {
-      return method === 'count' ? [0] : []
-    }
-
-    if (method === 'count') {
-      return [extractCountValue(row)]
-    }
-
-    if (method === 'aggregate') {
-      return [transformAggregateRow(row)]
-    }
-
-    return [row]
-  }
-
-  const rows = stmt.all(...normalizedParams)
-
-  if (method === 'count') {
-    if (rows.length === 0) return [0]
-    return [extractCountValue(rows[0])]
-  }
-
-  if (method === 'groupBy' || method === 'aggregate') {
-    return rows.map((row: any) => transformAggregateRow(row))
-  }
-
-  if (requiresReduction && includeSpec && model) {
+  if (requiresReduction && includeSpec) {
     const config = buildReducerConfig(model, includeSpec, allModels)
-    return reduceFlatRows(rows as any[], config)
+    const stmt = getOrPrepareStatement(client, sql)
+
+    const useGet = shouldSqliteUseGet(method)
+    const rawResults = useGet
+      ? stmt.get(...normalizedParams)
+      : stmt.all(...normalizedParams)
+    const results = Array.isArray(rawResults) ? rawResults : [rawResults]
+
+    const transformed = shouldTransform
+      ? results.map(transformAggregateRow)
+      : results
+    return reduceFlatRows(transformed, config)
   }
 
-  return rows
+  const stmt = getOrPrepareStatement(client, sql)
+  const useGet = shouldSqliteUseGet(method)
+  const rawResults = useGet
+    ? stmt.get(...normalizedParams)
+    : stmt.all(...normalizedParams)
+  const results = Array.isArray(rawResults) ? rawResults : [rawResults]
+
+  return shouldTransform ? results.map(transformAggregateRow) : results
 }
 
 export async function executeRaw(
