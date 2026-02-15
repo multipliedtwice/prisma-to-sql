@@ -19,6 +19,7 @@ interface SqlResult {
   paramMappings?: readonly ParamMap[]
   requiresReduction?: boolean
   includeSpec?: Record<string, any>
+  isArrayAgg?: boolean
 }
 
 interface CacheStats {
@@ -30,20 +31,16 @@ interface CacheStats {
 class QueryCacheStats {
   #hits = 0
   #misses = 0
-
   hit(): void {
     this.#hits++
   }
-
   miss(): void {
     this.#misses++
   }
-
   reset(): void {
     this.#hits = 0
     this.#misses = 0
   }
-
   get snapshot(): CacheStats {
     return Object.freeze({
       hits: this.#hits,
@@ -54,7 +51,6 @@ class QueryCacheStats {
 }
 
 export const queryCache = createBoundedCache<string, SqlResult>(1000)
-
 export const queryCacheStats = new QueryCacheStats()
 
 export function makeAlias(name: string): string {
@@ -80,7 +76,6 @@ function handleSingleQuote(sql: string, state: ScanState): ScanState {
   let i = state.position
   let out = state.output + sql[i]
   i++
-
   while (i < n) {
     out += sql[i]
     if (sql.charCodeAt(i) === 39) {
@@ -93,7 +88,6 @@ function handleSingleQuote(sql: string, state: ScanState): ScanState {
     }
     i++
   }
-
   return { ...state, position: i, output: out }
 }
 
@@ -102,7 +96,6 @@ function handleDoubleQuote(sql: string, state: ScanState): ScanState {
   let i = state.position
   let out = state.output + sql[i]
   i++
-
   while (i < n) {
     out += sql[i]
     if (sql.charCodeAt(i) === 34) {
@@ -115,7 +108,6 @@ function handleDoubleQuote(sql: string, state: ScanState): ScanState {
     }
     i++
   }
-
   return { ...state, position: i, output: out }
 }
 
@@ -127,7 +119,6 @@ function extractParameterNumber(
   let j = startPos + 1
   let num = 0
   let hasDigit = false
-
   while (j < n) {
     const d = sql.charCodeAt(j)
     if (d >= 48 && d <= 57) {
@@ -138,11 +129,9 @@ function extractParameterNumber(
       break
     }
   }
-
   if (hasDigit && num >= 1) {
     return { num, nextPos: j }
   }
-
   return null
 }
 
@@ -152,7 +141,6 @@ function handleParameterSubstitution(
   state: ScanState,
 ): ScanState {
   const result = extractParameterNumber(sql, state.position)
-
   if (result) {
     return {
       ...state,
@@ -161,7 +149,6 @@ function handleParameterSubstitution(
       reorderedParams: [...state.reorderedParams, params[result.num - 1]],
     }
   }
-
   return {
     ...state,
     position: state.position + 1,
@@ -177,42 +164,34 @@ function toSqliteParams(sql: string, params: readonly unknown[]): SqlResult {
     output: '',
     reorderedParams: [],
   }
-
   while (state.position < n) {
     const ch = sql.charCodeAt(state.position)
-
     if (state.mode === 'single') {
       state = handleSingleQuote(sql, state)
       continue
     }
-
     if (state.mode === 'double') {
       state = handleDoubleQuote(sql, state)
       continue
     }
-
     if (ch === 39) {
       state = { ...state, mode: 'single' }
       continue
     }
-
     if (ch === 34) {
       state = { ...state, mode: 'double' }
       continue
     }
-
     if (ch === 36) {
       state = handleParameterSubstitution(sql, params, state)
       continue
     }
-
     state = {
       ...state,
       position: state.position + 1,
       output: state.output + sql[state.position],
     }
   }
-
   return { sql: state.output, params: state.reorderedParams }
 }
 
@@ -252,7 +231,6 @@ function buildSQLFull(
     dialect,
   )
   const alias = makeAlias(model.tableName)
-
   const whereResult = buildWhereClause(
     (args.where || {}) as Record<string, unknown>,
     {
@@ -264,17 +242,15 @@ function buildSQLFull(
       dialect,
     },
   )
-
   const withMethod = { ...args, method }
-
   let result: {
     sql: string
     params: readonly unknown[]
     paramMappings?: readonly ParamMap[]
     requiresReduction?: boolean
     includeSpec?: Record<string, any>
+    isArrayAgg?: boolean
   }
-
   switch (method) {
     case 'aggregate':
       result = buildAggregateSql(
@@ -315,17 +291,16 @@ function buildSQLFull(
         dialect,
       })
   }
-
   const sqlResult =
     dialect === 'sqlite'
       ? toSqliteParams(result.sql, result.params)
       : { sql: result.sql, params: [...result.params] }
-
   return {
     ...sqlResult,
     paramMappings: result.paramMappings,
     requiresReduction: result.requiresReduction,
     includeSpec: result.includeSpec,
+    isArrayAgg: result.isArrayAgg,
   }
 }
 
@@ -337,7 +312,6 @@ export function buildSQLWithCache(
   dialect: SqlDialect,
 ): SqlResult {
   const cacheKey = canonicalizeQuery(model.name, method, args, dialect)
-
   const cached = queryCache.get(cacheKey)
   if (cached) {
     queryCacheStats.hit()
@@ -347,11 +321,10 @@ export function buildSQLWithCache(
       paramMappings: cached.paramMappings,
       requiresReduction: cached.requiresReduction,
       includeSpec: cached.includeSpec,
+      isArrayAgg: cached.isArrayAgg,
     }
   }
-
   queryCacheStats.miss()
-
   const fastResult = tryFastPath(model, method, args, dialect)
   if (fastResult) {
     queryCache.set(cacheKey, {
@@ -360,16 +333,14 @@ export function buildSQLWithCache(
     })
     return fastResult
   }
-
   const result = buildSQLFull(model, models, method, args, dialect)
-
   queryCache.set(cacheKey, {
     sql: result.sql,
     params: [...result.params],
     paramMappings: result.paramMappings,
     requiresReduction: result.requiresReduction,
     includeSpec: result.includeSpec,
+    isArrayAgg: result.isArrayAgg,
   })
-
   return result
 }

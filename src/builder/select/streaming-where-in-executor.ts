@@ -3,6 +3,10 @@ import { getPrimaryKeyField } from '../shared/primary-key-utils'
 import type { WhereInSegment } from '../select/segment-planner'
 import { buildSQL } from '../..'
 import { buildReducerConfig, reduceFlatRows } from './reducer'
+import {
+  buildArrayAggReducerConfig,
+  reduceArrayAggRows,
+} from './array-agg-reducer'
 
 interface StreamingWhereInParams {
   segments: WhereInSegment[]
@@ -146,7 +150,14 @@ async function fetchAndAttachChildren(
 
   let children = await execute(result.sql, result.params as unknown[])
 
-  if (result.requiresReduction && result.includeSpec) {
+  if (result.isArrayAgg && result.includeSpec) {
+    const config = buildArrayAggReducerConfig(
+      childModel,
+      result.includeSpec,
+      allModels,
+    )
+    children = reduceArrayAggRows(children, config)
+  } else if (result.requiresReduction && result.includeSpec) {
     const config = buildReducerConfig(childModel, result.includeSpec, allModels)
     children = reduceFlatRows(children, config)
   }

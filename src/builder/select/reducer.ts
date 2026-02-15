@@ -36,6 +36,7 @@ export interface RelationMetadata {
   includeAllScalars: boolean
   selectedScalarFields: string[]
   nestedIncludes?: ReducerConfig | null
+  childLimit?: number // NEW: for client-side limiting
 
   path: string
   keyCols: string[]
@@ -62,6 +63,17 @@ function buildRelationScalarCols(
     })
   }
   return out
+}
+
+function extractChildLimit(relArgs: unknown): number | undefined {
+  if (!isPlainObject(relArgs)) return undefined
+  const obj = relArgs as Record<string, unknown>
+
+  if ('take' in obj && typeof obj.take === 'number' && obj.take > 0) {
+    return obj.take
+  }
+
+  return undefined
 }
 
 export function buildReducerConfig(
@@ -124,6 +136,8 @@ export function buildReducerConfig(
       scalarSel.selectedScalarFields,
     )
 
+    const childLimit = isList ? extractChildLimit(incValue) : undefined
+
     includedRelations.push({
       name: incName,
       cardinality: isList ? 'many' : 'one',
@@ -132,6 +146,7 @@ export function buildReducerConfig(
       includeAllScalars: scalarSel.includeAllScalars,
       selectedScalarFields: scalarSel.selectedScalarFields,
       nestedIncludes,
+      childLimit,
 
       path: relPath,
       keyCols,
@@ -230,6 +245,12 @@ function processRelation(
   }
 
   const arr = parentObj[rel.name] as any[]
+
+  // Apply client-side child limit
+  if (rel.childLimit && arr.length >= rel.childLimit) {
+    return // Skip - limit reached
+  }
+
   const idx = getIndexForParent(manyStore, parentObj, rel.path)
 
   const existing = idx.get(relKey)

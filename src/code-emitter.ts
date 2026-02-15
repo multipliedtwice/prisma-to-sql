@@ -99,6 +99,7 @@ function processModelDirectives(
         paramMappings: sqlDirective.paramMappings,
         requiresReduction: sqlDirective.requiresReduction || false,
         includeSpec: sqlDirective.includeSpec || {},
+        isArrayAgg: sqlDirective.isArrayAgg || false,
       })
     } catch (error) {
       if (!config.skipInvalid) throw error
@@ -395,6 +396,7 @@ const QUERIES: Record<string, Record<string, Record<string, {
   paramMappings: any[]
   requiresReduction: boolean
   includeSpec: Record<string, any>
+  isArrayAgg: boolean
 }>>> = ${formatQueries(queries)}
 
 const DIALECT = ${JSON.stringify(dialect)}
@@ -619,9 +621,10 @@ function generateExtension(runtimeImportPath: string): string {
     requiresReduction: boolean,
     includeSpec: Record<string, any> | undefined,
     model: any | undefined,
+    isArrayAgg?: boolean,
   ): Promise<unknown[]> {
     if (DIALECT === 'postgres') {
-      return executePostgresQuery(client, sql, params, method, requiresReduction, includeSpec, model, MODELS)
+      return executePostgresQuery(client, sql, params, method, requiresReduction, includeSpec, model, MODELS, isArrayAgg)
     }
     
     return executeSqliteQuery(client, sql, params, method, requiresReduction, includeSpec, model, MODELS)
@@ -703,6 +706,7 @@ function generateExtension(runtimeImportPath: string): string {
         let prebaked = false
         let requiresReduction = false
         let includeSpec: Record<string, any> | undefined
+        let isArrayAgg = false
 
         if (prebakedQuery) {
           sql = prebakedQuery.sql
@@ -710,17 +714,19 @@ function generateExtension(runtimeImportPath: string): string {
           prebaked = true
           requiresReduction = prebakedQuery.requiresReduction || false
           includeSpec = prebakedQuery.includeSpec
+          isArrayAgg = prebakedQuery.isArrayAgg || false
         } else {
           const result = buildSQL(model, MODELS, method, plan.filteredArgs, DIALECT)
           sql = result.sql
           params = result.params as unknown[]
           requiresReduction = result.requiresReduction || false
           includeSpec = result.includeSpec
+          isArrayAgg = result.isArrayAgg || false
         }
 
         if (debug) {
           const strategy = DIALECT === 'postgres'
-            ? (requiresReduction ? 'STREAMING REDUCTION' : 'STREAMING')
+            ? (isArrayAgg ? 'ARRAY AGG' : requiresReduction ? 'STREAMING REDUCTION' : 'STREAMING')
             : (requiresReduction ? 'BUFFERED REDUCTION' : 'DIRECT')
           
           const whereInMode = plan.whereInSegments.length > 0
@@ -733,7 +739,7 @@ function generateExtension(runtimeImportPath: string): string {
           console.log('  Params:', params)
         }
 
-        let results = await executeQuery(sql, params, method, requiresReduction, includeSpec, model)
+        let results = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isArrayAgg)
         
         const duration = Date.now() - startTime
 
@@ -841,23 +847,39 @@ function generateExtension(runtimeImportPath: string): string {
       let params: unknown[]
       let requiresReduction = false
       let includeSpec: Record<string, any> | undefined
+      let isArrayAgg = false
       
       if (prebakedQuery) {
         sql = prebakedQuery.sql
         params = resolveParamsFromMappings(plan.filteredArgs, prebakedQuery.paramMappings)
         requiresReduction = prebakedQuery.requiresReduction
         includeSpec = prebakedQuery.includeSpec
+        isArrayAgg = prebakedQuery.isArrayAgg || false
       } else {
         const result = buildSQL(model, MODELS, 'findMany', plan.filteredArgs, DIALECT)
         sql = result.sql
         params = result.params as unknown[]
         requiresReduction = result.requiresReduction || false
         includeSpec = result.includeSpec
+        isArrayAgg = result.isArrayAgg || false
       }
       
       const normalizedParams = normalizeParams(params)
       
-      if (requiresReduction && includeSpec) {
+      if (isArrayAgg && includeSpec) {
+        const { buildArrayAggReducerConfig, reduceArrayAggRows } = await import(${JSON.stringify(runtimeImportPath)})
+        const config = buildArrayAggReducerConfig(model, includeSpec, MODELS)
+        const results: any[] = []
+
+        await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+          results.push(row)
+        })
+
+        const reduced = reduceArrayAggRows(results, config)
+        for (const item of reduced) {
+          yield item
+        }
+      } else if (requiresReduction && includeSpec) {
         const { createProgressiveReducer } = await import(${JSON.stringify(runtimeImportPath)})
         const config = buildReducerConfig(model, includeSpec, MODELS)
         const reducer = createProgressiveReducer(config)
@@ -1159,6 +1181,7 @@ function formatQueries(
       paramMappings: ${JSON.stringify(query.paramMappings)},
       requiresReduction: ${query.requiresReduction || false},
       includeSpec: ${JSON.stringify(query.includeSpec || {})},
+      isArrayAgg: ${query.isArrayAgg || false},
     }`)
       }
 

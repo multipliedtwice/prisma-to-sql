@@ -382,6 +382,39 @@ export function buildCursorCondition(
   if (cursorEntries.length === 0)
     throw new Error('cursor must have at least one field with defined value')
 
+  const orderEntries = normalizeAndValidateOrderBy(
+    orderBy,
+    model!,
+    parseOrderByValue,
+  )
+
+  if (cursorEntries.length === 1 && orderEntries.length === 0) {
+    const [field, value] = cursorEntries[0]
+    const ph = addAutoScoped(params, value, `cursor.${field}`)
+    const c = col(alias, field, model)
+
+    return {
+      cte: '',
+      condition: `${c} >= ${ph}`,
+    }
+  }
+
+  if (cursorEntries.length === 1 && orderEntries.length === 1) {
+    const [cursorField, cursorValue] = cursorEntries[0]
+    const orderEntry = orderEntries[0]
+
+    if (orderEntry.field === cursorField) {
+      const ph = addAutoScoped(params, cursorValue, `cursor.${cursorField}`)
+      const c = col(alias, cursorField, model)
+      const op = orderEntry.direction === 'asc' ? '>=' : '<='
+
+      return {
+        cte: '',
+        condition: `${c} ${op} ${ph}`,
+      }
+    }
+  }
+
   const { cteName, srcAlias } = buildCursorNames(alias)
   assertSafeAlias(cteName)
   assertSafeAlias(srcAlias)
@@ -392,21 +425,24 @@ export function buildCursorCondition(
     parseValue: parseOrderByValue,
   })
 
-  let orderEntries = normalizeAndValidateOrderBy(
+  let finalOrderEntries = normalizeAndValidateOrderBy(
     orderBy,
     model!,
     parseOrderByValue,
   )
-  if (orderEntries.length === 0) {
-    orderEntries = cursorEntries.map(([field]) => ({
+  if (finalOrderEntries.length === 0) {
+    finalOrderEntries = cursorEntries.map(([field]) => ({
       field,
       direction: 'asc' as const,
     }))
   } else {
-    orderEntries = ensureCursorFieldsInOrder(orderEntries, cursorEntries)
+    finalOrderEntries = ensureCursorFieldsInOrder(
+      finalOrderEntries,
+      cursorEntries,
+    )
   }
 
-  assertCursorAndOrderFieldsScalar(model, cursor, orderEntries)
+  assertCursorAndOrderFieldsScalar(model, cursor, finalOrderEntries)
 
   const { whereSql: cursorWhereSql } = buildCursorFilterParts(
     cursor,
@@ -415,7 +451,7 @@ export function buildCursorCondition(
     model,
   )
 
-  const cursorOrderBy = orderEntries
+  const cursorOrderBy = finalOrderEntries
     .map(
       (e) =>
         srcAlias +
@@ -428,7 +464,7 @@ export function buildCursorCondition(
 
   const selectList = buildCursorCteSelectList(
     cursorEntries,
-    orderEntries,
+    finalOrderEntries,
     model,
   )
 
@@ -450,17 +486,17 @@ export function buildCursorCondition(
 
   const orClauses: string[] = []
 
-  for (let level = 0; level < orderEntries.length; level++) {
+  for (let level = 0; level < finalOrderEntries.length; level++) {
     const andParts: string[] = []
 
     for (let i = 0; i < level; i++) {
-      const e = orderEntries[i]
+      const e = finalOrderEntries[i]
       const c = col(alias, e.field, model)
       const cursorField = cteName + '.' + quoteColumn(model, e.field)
       andParts.push(buildCursorEqualityExpr(c, cursorField))
     }
 
-    const e = orderEntries[level]
+    const e = finalOrderEntries[level]
     const c = col(alias, e.field, model)
     const cursorField = cteName + '.' + quoteColumn(model, e.field)
     const nulls = e.nulls ?? defaultNullsFor(d, e.direction)

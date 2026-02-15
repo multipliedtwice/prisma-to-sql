@@ -136,10 +136,26 @@ function canUseNestedFlatJoin(relArgs: unknown, depth: number): boolean {
 
 export function canUseFlatJoinForAll(
   includeSpec: Record<string, any>,
+  parentModel: Model,
+  schemas: readonly Model[],
 ): boolean {
-  for (const value of Object.values(includeSpec)) {
+  const modelMap = new Map(schemas.map((m) => [m.name, m]))
+
+  for (const [relName, value] of Object.entries(includeSpec)) {
     if (value === false) continue
+
+    const field = parentModel.fields.find((f) => f.name === relName)
+    if (!field || !field.isRelation) continue
+
     if (!canUseNestedFlatJoin(value, 0)) return false
+
+    const relModel = modelMap.get(field.relatedModel!)
+    if (!relModel) continue
+
+    const nestedSpec = extractNestedIncludeSpec(value, relModel)
+    if (Object.keys(nestedSpec).length > 0) {
+      if (!canUseFlatJoinForAll(nestedSpec, relModel, schemas)) return false
+    }
   }
   return true
 }
@@ -261,7 +277,7 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     return { sql: '', requiresReduction: false, includeSpec: {} }
   }
 
-  if (!canUseFlatJoinForAll(includeSpec)) {
+  if (!canUseFlatJoinForAll(includeSpec, model, schemas)) {
     return { sql: '', requiresReduction: false, includeSpec: {} }
   }
 

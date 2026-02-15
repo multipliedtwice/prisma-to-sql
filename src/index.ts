@@ -30,6 +30,10 @@ import {
 } from './types'
 import { planQueryStrategy } from './builder/select/segment-planner'
 import { executeWhereInSegments } from './builder/where-in-executor'
+import {
+  buildArrayAggReducerConfig,
+  reduceArrayAggRows,
+} from './builder/select/array-agg-reducer'
 
 export function buildSQL(
   model: Model,
@@ -215,6 +219,8 @@ export {
   planQueryStrategy,
   createTransactionExecutor,
   executeWhereInSegments,
+  buildArrayAggReducerConfig,
+  reduceArrayAggRows,
 }
 export { buildReducerConfig, reduceFlatRows } from './builder/select/reducer'
 export type { ReducerConfig } from './builder/select/reducer'

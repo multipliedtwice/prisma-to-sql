@@ -15,6 +15,7 @@ export interface SqlResult {
   requiresReduction?: boolean
   includeSpec?: Record<string, any>
   supportsStreaming?: boolean
+  isArrayAgg?: boolean
 }
 
 export interface PrismaQueryArgs {

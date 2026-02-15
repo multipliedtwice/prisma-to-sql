@@ -28,6 +28,7 @@ export interface SQLDirective {
   paramMappings: readonly ParamMap[]
   requiresReduction: boolean
   includeSpec: Record<string, any>
+  isArrayAgg: boolean
   originalDirective: DirectiveProps
 }
 
@@ -296,6 +297,7 @@ function buildAndNormalizeSql(args: {
   paramMappings: readonly ParamMap[]
   requiresReduction: boolean
   includeSpec: Record<string, any>
+  isArrayAgg: boolean
 } {
   const {
     method,
@@ -331,12 +333,14 @@ function buildAndNormalizeSql(args: {
       : null) ?? extractIncludeSpec(processed, modelDef)
 
   const requiresReduction = sqlResult.requiresReduction === true
+  const isArrayAgg = sqlResult.isArrayAgg === true
 
   return {
     sql: normalized.sql,
     paramMappings: normalized.paramMappings,
     requiresReduction,
     includeSpec,
+    isArrayAgg,
   }
 }
 
@@ -348,6 +352,7 @@ function finalizeDirective(args: {
   dialect: SqlDialect
   requiresReduction: boolean
   includeSpec: Record<string, any>
+  isArrayAgg: boolean
 }): SQLDirective {
   const {
     directive,
@@ -357,6 +362,7 @@ function finalizeDirective(args: {
     dialect,
     requiresReduction,
     includeSpec,
+    isArrayAgg,
   } = args
 
   const params = normalizedMappings.map((m) => m.value ?? undefined)
@@ -374,6 +380,7 @@ function finalizeDirective(args: {
     paramMappings: normalizedMappings,
     requiresReduction,
     includeSpec,
+    isArrayAgg,
     originalDirective: directive,
   }
 }
@@ -416,5 +423,6 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
     dialect,
     requiresReduction: built.requiresReduction,
     includeSpec: built.includeSpec,
+    isArrayAgg: built.isArrayAgg,
   })
 }

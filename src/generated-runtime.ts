@@ -7,6 +7,10 @@ import {
   getRowTransformer,
   createStreamingReducer,
 } from './index'
+import {
+  buildArrayAggReducerConfig,
+  reduceArrayAggRows,
+} from './builder/select/array-agg-reducer'
 
 export const SQLITE_STMT_CACHE = new WeakMap<any, Map<string, any>>()
 
@@ -53,26 +57,55 @@ export async function executePostgresQuery(
   includeSpec: Record<string, any> | undefined,
   model: any,
   allModels: readonly any[],
+  isArrayAgg?: boolean,
 ): Promise<unknown[]> {
   const normalizedParams = normalizeParams(params)
-  const rowTransformer = getRowTransformer(method)
+
+  if (isArrayAgg && includeSpec) {
+    const config = buildArrayAggReducerConfig(model, includeSpec, allModels)
+    const results: any[] = []
+
+    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+      results.push(row)
+    })
+
+    return reduceArrayAggRows(results, config)
+  }
 
   if (requiresReduction && includeSpec) {
     const config = buildReducerConfig(model, includeSpec, allModels)
     const reducer = createStreamingReducer(config)
 
     await client.unsafe(sql, normalizedParams).forEach((row: any) => {
-      reducer.processRow(rowTransformer ? rowTransformer(row) : row)
+      reducer.processRow(row)
     })
 
     return reducer.getResults()
   }
 
+  const needsTransform =
+    method === 'groupBy' || method === 'aggregate' || method === 'count'
+
+  if (!needsTransform) {
+    const results: any[] = []
+    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+      results.push(row)
+    })
+    return results
+  }
+
+  const rowTransformer = getRowTransformer(method)
   const results: any[] = []
-  // runs inside of driver's main loop
-  await client.unsafe(sql, normalizedParams).forEach((row: any) => {
-    results.push(rowTransformer ? rowTransformer(row) : row)
-  })
+
+  if (rowTransformer) {
+    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+      results.push(rowTransformer(row))
+    })
+  } else {
+    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+      results.push(row)
+    })
+  }
 
   return results
 }

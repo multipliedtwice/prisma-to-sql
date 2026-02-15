@@ -23,6 +23,7 @@ import {
   OrderBySortObject,
 } from '../shared/order-by-utils'
 import { buildFlatJoinSql, canUseFlatJoinForAll } from './flat-join'
+import { buildArrayAggSql, canUseArrayAggForAll } from './array-agg'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
 
 type DistinctOrderEntry = {
@@ -639,6 +640,55 @@ function ensurePostgresDistinctOrderBy(args: {
   return ensureIdTiebreakerOrderBy(merged, fromAlias, model)
 }
 
+function hasOnlySingleLevelIncludes(
+  includeSpec: Record<string, any>,
+  model: SelectQuerySpec['model'],
+  schemas: readonly any[],
+): boolean {
+  const modelMap = new Map(schemas.map((m: any) => [m.name, m]))
+
+  for (const [relName, value] of Object.entries(includeSpec)) {
+    if (value === false) continue
+
+    const field = model.fields.find((f: any) => f.name === relName)
+    if (!field || !field.isRelation || !field.relatedModel) continue
+
+    if (!isPlainObject(value)) continue
+
+    const obj = value as Record<string, unknown>
+
+    if (obj.include && isPlainObject(obj.include)) {
+      const relModel = modelMap.get(field.relatedModel)
+      if (!relModel) continue
+      const relRelationSet = getRelationFieldSet(relModel)
+      for (const k of Object.keys(obj.include as Record<string, unknown>)) {
+        if (
+          relRelationSet.has(k) &&
+          (obj.include as Record<string, unknown>)[k] !== false
+        ) {
+          return false
+        }
+      }
+    }
+
+    if (obj.select && isPlainObject(obj.select)) {
+      const relModel = modelMap.get(field.relatedModel)
+      if (!relModel) continue
+      const relRelationSet = getRelationFieldSet(relModel)
+      for (const k of Object.keys(obj.select as Record<string, unknown>)) {
+        if (
+          relRelationSet.has(k) &&
+          (obj.select as Record<string, unknown>)[k] !== false
+        ) {
+          return false
+        }
+      }
+    }
+  }
+
+  return true
+}
+
 export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const {
     select,
@@ -653,7 +703,6 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
     params,
     dialect,
     model,
-    includes,
     schemas,
     pagination,
     args,
@@ -670,11 +719,38 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
 
   const hasPagination = isNotNullish(pagination.take)
 
+  const takeValue = typeof pagination.take === 'number' ? pagination.take : null
+  const isLargeTake = takeValue !== null && takeValue > 50
+
+  const shouldUseArrayAgg =
+    dialect === 'postgres' &&
+    hasIncludes &&
+    method === 'findMany' &&
+    hasPagination &&
+    isLargeTake &&
+    canUseArrayAggForAll(includeSpec, model, schemas)
+
+  if (shouldUseArrayAgg) {
+    const aaResult = buildArrayAggSql(spec)
+
+    if (aaResult.sql) {
+      const baseSqlResult = finalizeSql(aaResult.sql, params, dialect)
+      return {
+        sql: baseSqlResult.sql,
+        params: baseSqlResult.params,
+        paramMappings: baseSqlResult.paramMappings,
+        requiresReduction: true,
+        includeSpec: aaResult.includeSpec,
+        isArrayAgg: true,
+      }
+    }
+  }
+
   const shouldUseFlatJoin =
     dialect === 'postgres' &&
     hasPagination &&
     hasIncludes &&
-    canUseFlatJoinForAll(includeSpec)
+    canUseFlatJoinForAll(includeSpec, model, schemas)
 
   if (shouldUseFlatJoin) {
     const flatResult = buildFlatJoinSql(spec)
