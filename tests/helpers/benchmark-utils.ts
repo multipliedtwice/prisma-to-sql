@@ -11,6 +11,7 @@ import {
   withDrizzleCapture,
   withPrismaCapture,
   formatCapturedQueries,
+  withExtensionCapture,
 } from './query-capture'
 
 export interface BenchmarkStats {
@@ -438,7 +439,7 @@ export async function runParityTest<T>(
 
         parts.push(``)
         parts.push(`SQL (Extended):`)
-        const extendedCaptured = await withPrismaCapture(async () =>
+        const extendedCaptured = await withExtensionCapture(async () =>
           extendedQuery(),
         )
         parts.push(formatCapturedQueries(extendedCaptured.queries, 2))
@@ -515,7 +516,7 @@ export async function runParityTest<T>(
         const prismaCaptured = await withPrismaCapture(async () =>
           prismaQuery(),
         )
-        const extendedCaptured = await withPrismaCapture(async () =>
+        const extendedCaptured = await withExtensionCapture(async () =>
           extendedQuery(),
         )
         const drizzleCaptured = options.drizzleQuery

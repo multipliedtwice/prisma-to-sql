@@ -8,7 +8,7 @@ export type CapturedQuery = {
 
 const prismaStore = new AsyncLocalStorage<CapturedQuery[]>()
 const drizzleStore = new AsyncLocalStorage<CapturedQuery[]>()
-
+const extensionStore = new AsyncLocalStorage<CapturedQuery[]>()
 const registeredPrismaClients = new WeakSet<object>()
 
 function parseMaybeJson(value: unknown): unknown {
@@ -68,6 +68,21 @@ export async function withDrizzleCapture<T>(
 ): Promise<{ result: T; queries: CapturedQuery[] }> {
   const queries: CapturedQuery[] = []
   const result = await drizzleStore.run(queries, fn)
+  return { result, queries }
+}
+
+export function captureExtensionQuery(query: CapturedQuery): void {
+  const store = extensionStore.getStore()
+  if (store) {
+    store.push(query)
+  }
+}
+
+export async function withExtensionCapture<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; queries: CapturedQuery[] }> {
+  const queries: CapturedQuery[] = []
+  const result = await extensionStore.run(queries, fn)
   return { result, queries }
 }
 

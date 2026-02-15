@@ -4,7 +4,10 @@ import { promisify } from 'util'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
-import { registerPrismaQueryCapture } from './query-capture'
+import {
+  captureExtensionQuery,
+  registerPrismaQueryCapture,
+} from './query-capture'
 import { generateClient } from '../../src/code-emitter'
 
 const execAsync = promisify(exec)
@@ -213,6 +216,13 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
       speedExtension({
         postgres: pgClient,
         debug: false,
+        onQuery: (info: any) => {
+          captureExtensionQuery({
+            sql: info.sql,
+            params: info.params,
+            durationMs: info.duration,
+          })
+        },
       }),
     )
 
@@ -259,6 +269,13 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
       speedExtension({
         postgres: pgClient,
         debug: false,
+        onQuery: (info: any) => {
+          captureExtensionQuery({
+            sql: info.sql,
+            params: info.params,
+            durationMs: info.duration,
+          })
+        },
       }),
     )
 
@@ -316,6 +333,13 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
       speedExtension({
         sqlite: sqliteClient,
         debug: false,
+        onQuery: (info: any) => {
+          captureExtensionQuery({
+            sql: info.sql,
+            params: info.params,
+            durationMs: info.duration,
+          })
+        },
       }),
     )
 
@@ -375,6 +399,13 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
       speedExtension({
         sqlite: sqliteClient,
         debug: false,
+        onQuery: (info: any) => {
+          captureExtensionQuery({
+            sql: info.sql,
+            params: info.params,
+            durationMs: info.duration,
+          })
+        },
       }),
     )
 

@@ -609,9 +609,9 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
     function createExtended(): SpeedClient {
       return db.prisma.$extends(
         speedExtension({
+          debug: true,
           postgres: pgClient,
           models,
-          debug: false,
         }),
       ) as SpeedClient
     }
@@ -755,9 +755,9 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
     it('batch is faster than sequential queries', async () => {
       const extended = db.prisma.$extends(
         speedExtension({
+          debug: true,
           postgres: pgClient,
           models,
-          debug: false,
         }),
       ) as SpeedClient
 
@@ -798,9 +798,9 @@ Speedup:    ${(sequentialTime / batchTime).toFixed(2)}x
     it('complex dashboard query performance', async () => {
       const extended = db.prisma.$extends(
         speedExtension({
+          debug: true,
           postgres: pgClient,
           models,
-          debug: false,
         }),
       ) as SpeedClient
 
