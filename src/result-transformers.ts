@@ -1,5 +1,8 @@
 import { PrismaMethod } from './types'
-import { getRowTransformer } from './builder/select/row-transformers'
+import {
+  extractCountValue,
+  getRowTransformer,
+} from './builder/select/row-transformers'
 
 export function transformQueryResults(
   method: string,
@@ -19,7 +22,11 @@ export function transformQueryResults(
 
   if (method === 'count') {
     if (Array.isArray(results) && results.length > 0) {
-      return results[0]
+      const first = results[0]
+      if (typeof first === 'number' || typeof first === 'bigint') {
+        return first
+      }
+      return extractCountValue(first)
     }
     return 0
   }

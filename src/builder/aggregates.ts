@@ -26,7 +26,6 @@ import {
   isPlainObject,
 } from './shared/validators/type-guards'
 import { SqlDialect, getGlobalDialect } from '../sql-builder-dialect'
-import { isDynamicParameter } from '@dee-wan/schema-parser'
 import { addAutoScoped } from './shared/dynamic-params'
 import { buildNotComposite } from './where/operators-scalar'
 import {

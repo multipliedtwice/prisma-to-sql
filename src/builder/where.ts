@@ -25,7 +25,7 @@ export function buildWhereClause(
   assertSafeAlias(options.alias)
 
   const dialect = options.dialect || getGlobalDialect()
-  const params = options.params ?? createParamStore()
+  const params = options.params ?? createParamStore(1, dialect)
 
   const ctx: BuildContext = {
     alias: options.alias,

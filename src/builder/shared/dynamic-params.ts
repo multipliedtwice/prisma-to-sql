@@ -15,6 +15,7 @@ export function addAutoScoped(
 ): string {
   if (isDynamicParameter(value)) {
     const dn = extractDynamicName(value as string)
+    console.log(`[PARAM] ${scope} = ${JSON.stringify(value)}`)
     return params.add(undefined, scopeName(scope, dn))
   }
   return params.add(value)

@@ -170,38 +170,21 @@ function buildListRelationFilters(args: RelationFilterArgs): QueryResult {
   const noneValue = value[RelationFilters.NONE]
 
   if (noneValue !== undefined && noneValue !== null) {
-    const emptyOptimized = tryOptimizeNoneFilter(
-      noneValue,
-      ctx,
-      relModel,
-      relTable,
-      relAlias,
-      join,
-      { clause: '', joins: [] },
-    )
+    const isEmptyFilter =
+      isPlainObject(noneValue) && Object.keys(noneValue).length === 0
 
-    if (emptyOptimized) return emptyOptimized
+    if (isEmptyFilter && !ctx.isSubquery) {
+      const checkField =
+        relModel.fields.find(
+          (f) => !f.isRelation && f.isRequired && f.name !== 'id',
+        ) || relModel.fields.find((f) => !f.isRelation && f.name === 'id')
 
-    const sub = whereBuilder.build(noneValue as Record<string, unknown>, {
-      ...ctx,
-      alias: relAlias,
-      model: relModel,
-      path: [...ctx.path, fieldName, RelationFilters.NONE],
-      isSubquery: true,
-      depth: ctx.depth + 1,
-    })
-
-    const optimized = tryOptimizeNoneFilter(
-      noneValue,
-      ctx,
-      relModel,
-      relTable,
-      relAlias,
-      join,
-      sub,
-    )
-
-    if (optimized) return optimized
+      if (checkField) {
+        const leftJoinSql = `LEFT JOIN ${relTable} ${relAlias} ON ${join}`
+        const whereClause = `${relAlias}.${quoteColumn(relModel, checkField.name)} IS NULL`
+        return { clause: whereClause, joins: [leftJoinSql] }
+      }
+    }
   }
 
   const filters: Array<{

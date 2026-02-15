@@ -69,6 +69,7 @@ export async function executePostgresQuery(
   }
 
   const results: any[] = []
+  // runs inside of driver's main loop
   await client.unsafe(sql, normalizedParams).forEach((row: any) => {
     results.push(rowTransformer ? rowTransformer(row) : row)
   })

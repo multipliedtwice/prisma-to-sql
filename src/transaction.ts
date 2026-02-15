@@ -2,6 +2,7 @@ import type { Model, PrismaMethod } from './types'
 import type { SqlDialect } from './sql-builder-dialect'
 import { buildSQLWithCache } from './query-cache'
 import { transformQueryResults } from './result-transformers'
+import { getRowTransformer } from './builder/select/row-transformers'
 
 export interface TransactionQuery {
   model: string
@@ -111,7 +112,13 @@ export function createTransactionExecutor(deps: {
             dialect,
           )
 
-          const rawResults = await sql.unsafe(sqlStr, params as any[])
+          let rawResults = await sql.unsafe(sqlStr, params as any[])
+
+          const rowTransformer = getRowTransformer(q.method)
+          if (rowTransformer && Array.isArray(rawResults)) {
+            rawResults = rawResults.map(rowTransformer)
+          }
+
           results.push(transformQueryResults(q.method, rawResults))
         }
 
