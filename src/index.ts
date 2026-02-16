@@ -245,3 +245,10 @@ export {
   executeSqliteQuery,
   executeRaw,
 } from './generated-runtime'
+export {
+  setRelationStats,
+  getRelationStats,
+  estimateJoinExpansion,
+  countIncludeDepth,
+  shouldPreferFlatJoinStrategy,
+} from './builder/select/strategy-estimator'

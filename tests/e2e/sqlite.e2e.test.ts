@@ -1,5 +1,10 @@
 import { describe, it, beforeAll, afterAll } from 'vitest'
-import { createTestDB, type TestDB } from '../helpers/db'
+import {
+  createTestDB,
+  type TestDB,
+  generateSpeedExtensionForDB,
+  loadExtensionIntoTestDB,
+} from '../helpers/db'
 import { seedDatabase, type SeedResult } from '../helpers/seed-db'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
 import {
@@ -27,6 +32,7 @@ import {
   outputBenchmarkResults,
   type BenchmarkResult,
 } from '../helpers/benchmark-utils'
+import Database from 'better-sqlite3'
 
 const SHOULD_OUTPUT_JSON = process.env.BENCHMARK_JSON_OUTPUT === '1'
 const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
@@ -34,15 +40,23 @@ const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
 let db: TestDB
 let seed: SeedResult
 let drizzle: SqliteDrizzleDB
+let sqliteClient: Database.Database
 const benchmarkResults: BenchmarkResult[] = []
 
 describe('Prisma Parity E2E - SQLite', () => {
   beforeAll(async () => {
     setGlobalDialect('sqlite')
     db = await createTestDB('sqlite')
-    seed = await seedDatabase(db)
+
+    sqliteClient = new Database('./tests/prisma/db.sqlite')
     drizzle = createDrizzleDB('sqlite', './tests/prisma/db.sqlite')
+
     await new Promise((resolve) => setTimeout(resolve, 100))
+
+    seed = await seedDatabase(db)
+
+    await generateSpeedExtensionForDB(db)
+    await loadExtensionIntoTestDB(db, undefined, sqliteClient)
 
     for (let i = 0; i < 5; i++) {
       await db.prisma.user.findMany({ take: 1 })
@@ -57,6 +71,7 @@ describe('Prisma Parity E2E - SQLite', () => {
       dialect: 'sqlite',
       shouldOutputJson: SHOULD_OUTPUT_JSON,
     })
+    sqliteClient?.close()
     await db?.close()
   })
 

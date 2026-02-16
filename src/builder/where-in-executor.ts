@@ -1,197 +1,303 @@
-import {
-  executeSegmentBase,
-  type ExecuteWhereInParams,
-} from './shared/where-in-executor-base'
-import { getPrimaryKeyField } from './shared/primary-key-utils'
-
+import type { Model } from '../types'
+import type { WhereInSegment } from './select/segment-planner'
 import {
   buildArrayAggReducerConfig,
   reduceArrayAggRows,
 } from './select/array-agg-reducer'
-import { WhereInSegment } from './select/segment-planner'
-import { buildReducerConfig, buildSQL, Model, reduceFlatRows } from '..'
+import { buildReducerConfig, reduceFlatRows } from './select/reducer'
+import { buildSQL } from '..'
+import { getPrimaryKeyField } from './shared/primary-key-utils'
+import { planQueryStrategy } from './select/segment-planner'
 
-const ADAPTIVE_PARENT_THRESHOLD = 15
-const ADAPTIVE_DEPTH_THRESHOLD = 2
+const MAX_RECURSIVE_DEPTH = 10
 
-function measureRelArgsDepth(relArgs: unknown): number {
-  if (!relArgs || relArgs === true || typeof relArgs !== 'object') return 0
-
-  const args = relArgs as Record<string, any>
-  const nested = args.include || args.select
-  if (!nested || typeof nested !== 'object') return 0
-
-  let maxChildDepth = 0
-  for (const val of Object.values(nested)) {
-    if (val === false) continue
-    if (val === true) {
-      maxChildDepth = Math.max(maxChildDepth, 1)
-      continue
-    }
-    if (val && typeof val === 'object') {
-      maxChildDepth = Math.max(maxChildDepth, 1 + measureRelArgsDepth(val))
-    }
-  }
-  return maxChildDepth
+export interface ExecuteWhereInParams {
+  segments: WhereInSegment[]
+  parentRows: any[]
+  parentModel: Model
+  allModels: readonly Model[]
+  modelMap: Map<string, Model>
+  dialect: 'postgres' | 'sqlite'
+  execute: (sql: string, params: unknown[]) => Promise<any[]>
 }
 
-function measureSegmentNestingDepth(segments: WhereInSegment[]): number {
-  let maxDepth = 0
-  for (const seg of segments) {
-    const depth = 1 + measureRelArgsDepth(seg.relArgs)
-    maxDepth = Math.max(maxDepth, depth)
-  }
-  return maxDepth
-}
-
-function shouldAdaptivelySwitch(
-  actualParentCount: number,
-  segments: WhereInSegment[],
-): boolean {
-  if (actualParentCount > ADAPTIVE_PARENT_THRESHOLD) return false
-  if (segments.length === 0) return false
-
-  const depth = measureSegmentNestingDepth(segments)
-  return depth >= ADAPTIVE_DEPTH_THRESHOLD
-}
-
-async function executeCorrelatedFallback(
+function buildParentKeyIndex(
   parentRows: any[],
-  parentModel: Model,
-  allModels: readonly Model[],
-  dialect: 'postgres' | 'sqlite',
-  execute: (sql: string, params: unknown[]) => Promise<any[]>,
-  originalArgs: any,
-  method: string,
-  segments: WhereInSegment[],
-): Promise<void> {
-  const pkField = getPrimaryKeyField(parentModel)
-  const pks = parentRows.map((r) => r[pkField]).filter(Boolean)
+  parentKeyFieldName: string,
+): Map<unknown, any[]> {
+  const index = new Map<unknown, any[]>()
+  for (const parent of parentRows) {
+    const keyVal = parent[parentKeyFieldName]
+    if (keyVal == null) continue
+    let arr = index.get(keyVal)
+    if (!arr) {
+      arr = []
+      index.set(keyVal, arr)
+    }
+    arr.push(parent)
+  }
+  return index
+}
 
-  if (pks.length === 0) {
-    for (const parent of parentRows) {
-      for (const seg of segments) {
-        parent[seg.relationName] = seg.isList ? [] : null
+function needsPerParentPagination(segment: WhereInSegment): boolean {
+  return (
+    segment.isList &&
+    ((segment.perParentSkip != null && segment.perParentSkip > 0) ||
+      segment.perParentTake != null)
+  )
+}
+
+function stitchChildrenToParents(
+  children: any[],
+  segment: WhereInSegment,
+  parentKeyIndex: Map<unknown, any[]>,
+): void {
+  const grouped = new Map<unknown, any[]>()
+  for (const child of children) {
+    const childKey = child[segment.fkFieldName]
+    if (childKey == null) continue
+    let arr = grouped.get(childKey)
+    if (!arr) {
+      arr = []
+      grouped.set(childKey, arr)
+    }
+    arr.push(child)
+  }
+
+  const perParentPaginated = needsPerParentPagination(segment)
+
+  for (const [fkVal, groupedChildren] of grouped) {
+    const matchingParents = parentKeyIndex.get(fkVal)
+    if (!matchingParents) continue
+
+    let sliced = groupedChildren
+    if (perParentPaginated) {
+      const start = segment.perParentSkip || 0
+      const end =
+        segment.perParentTake != null
+          ? start + segment.perParentTake
+          : undefined
+      sliced = groupedChildren.slice(start, end)
+    }
+
+    for (const parent of matchingParents) {
+      if (segment.isList) {
+        if (!Array.isArray(parent[segment.relationName])) {
+          parent[segment.relationName] = []
+        }
+        for (const child of sliced) {
+          parent[segment.relationName].push(child)
+        }
+      } else {
+        parent[segment.relationName] = sliced[0] ?? null
       }
     }
-    return
+  }
+}
+
+function buildChildArgs(
+  relArgs: unknown,
+  fkFieldName: string,
+  uniqueIds: unknown[],
+  stripPagination: boolean,
+): any {
+  const base: any =
+    relArgs === true || typeof relArgs !== 'object' || relArgs === null
+      ? {}
+      : { ...(relArgs as any) }
+
+  if (stripPagination) {
+    delete base.take
+    delete base.skip
   }
 
-  const fallbackArgs = { ...originalArgs }
-  delete fallbackArgs.take
-  delete fallbackArgs.skip
-  delete fallbackArgs.cursor
+  const existingWhere = base.where
+  const inCondition = { [fkFieldName]: { in: uniqueIds } }
 
-  fallbackArgs.where = { [pkField]: { in: pks } }
+  base.where = existingWhere
+    ? { AND: [existingWhere, inCondition] }
+    : inCondition
 
-  if (originalArgs.orderBy) {
-    fallbackArgs.orderBy = originalArgs.orderBy
-  }
+  return base
+}
+
+function ensureFkInSelect(childArgs: any, fkFieldName: string): boolean {
+  if (!childArgs.select) return false
+  if (childArgs.select[fkFieldName]) return false
+  childArgs.select = { ...childArgs.select, [fkFieldName]: true }
+  return true
+}
+
+function ensureOrderByPk(childArgs: any, childModel: Model): void {
+  if (childArgs.orderBy) return
+  const pkField = getPrimaryKeyField(childModel)
+  childArgs.orderBy = { [pkField]: 'asc' }
+}
+
+async function resolveSingleSegment(
+  segment: WhereInSegment,
+  parentRows: any[],
+  allModels: readonly Model[],
+  modelMap: Map<string, Model>,
+  dialect: 'postgres' | 'sqlite',
+  execute: (sql: string, params: unknown[]) => Promise<any[]>,
+  depth: number,
+): Promise<void> {
+  if (depth > MAX_RECURSIVE_DEPTH) return
+
+  const childModel = modelMap.get(segment.childModelName)
+  if (!childModel) return
+
+  const parentIds = parentRows
+    .map((r) => r[segment.parentKeyFieldName])
+    .filter((v) => v != null)
+
+  if (parentIds.length === 0) return
+
+  const uniqueIds = [...new Set(parentIds)]
+  const stripPagination = needsPerParentPagination(segment)
+
+  const childArgs = buildChildArgs(
+    segment.relArgs,
+    segment.fkFieldName,
+    uniqueIds,
+    stripPagination,
+  )
+
+  ensureOrderByPk(childArgs, childModel)
+
+  const needsStripFk = ensureFkInSelect(childArgs, segment.fkFieldName)
+
+  const childPlan = planQueryStrategy({
+    model: childModel,
+    method: 'findMany',
+    args: childArgs,
+    allModels,
+    dialect,
+  })
 
   const result = buildSQL(
-    parentModel,
+    childModel,
     allModels as Model[],
-    method as any,
-    fallbackArgs,
+    'findMany',
+    childPlan.filteredArgs,
     dialect,
   )
 
-  let rows = await execute(result.sql, result.params as unknown[])
+  let children = await execute(result.sql, result.params as unknown[])
 
   if (result.isArrayAgg && result.includeSpec) {
     const config = buildArrayAggReducerConfig(
-      parentModel,
+      childModel,
       result.includeSpec,
       allModels,
     )
-    rows = reduceArrayAggRows(rows, config)
+    children = reduceArrayAggRows(children, config)
   } else if (result.requiresReduction && result.includeSpec) {
-    const config = buildReducerConfig(
-      parentModel,
-      result.includeSpec,
+    const config = buildReducerConfig(childModel, result.includeSpec, allModels)
+    children = reduceFlatRows(children, config)
+  }
+
+  if (childPlan.whereInSegments.length > 0 && children.length > 0) {
+    for (const child of children) {
+      for (const nestedSeg of childPlan.whereInSegments) {
+        child[nestedSeg.relationName] = nestedSeg.isList ? [] : null
+      }
+    }
+
+    await resolveSegments(
+      childPlan.whereInSegments,
+      children,
       allModels,
+      modelMap,
+      dialect,
+      execute,
+      depth + 1,
     )
-    rows = reduceFlatRows(rows, config)
+
+    if (childPlan.injectedParentKeys.length > 0) {
+      for (const child of children) {
+        for (const key of childPlan.injectedParentKeys) {
+          delete child[key]
+        }
+      }
+    }
   }
 
-  const rowsByPk = new Map<unknown, any>()
-  for (const row of rows) {
-    rowsByPk.set(row[pkField], row)
-  }
+  const parentKeyIndex = buildParentKeyIndex(
+    parentRows,
+    segment.parentKeyFieldName,
+  )
+  stitchChildrenToParents(children, segment, parentKeyIndex)
 
-  for (const parent of parentRows) {
-    const pk = parent[pkField]
-    const fullRow = rowsByPk.get(pk)
-    if (fullRow) {
-      for (const seg of segments) {
-        parent[seg.relationName] = fullRow[seg.relationName]
-      }
-    } else {
-      for (const seg of segments) {
-        parent[seg.relationName] = seg.isList ? [] : null
-      }
+  if (needsStripFk) {
+    for (const child of children) {
+      delete child[segment.fkFieldName]
     }
   }
 }
 
-export async function executeWhereInSegments(
-  params: ExecuteWhereInParams,
+async function resolveSegments(
+  segments: WhereInSegment[],
+  parentRows: any[],
+  allModels: readonly Model[],
+  modelMap: Map<string, Model>,
+  dialect: 'postgres' | 'sqlite',
+  execute: (sql: string, params: unknown[]) => Promise<any[]>,
+  depth: number,
 ): Promise<void> {
-  const {
-    segments,
-    parentRows,
-    parentModel,
-    allModels,
-    modelMap,
-    dialect,
-    execute,
-    originalArgs,
-    method,
-  } = params
-
-  if (
-    originalArgs &&
-    method &&
-    parentModel &&
-    shouldAdaptivelySwitch(parentRows.length, segments)
-  ) {
-    await executeCorrelatedFallback(
-      parentRows,
-      parentModel,
-      allModels,
-      dialect,
-      execute,
-      originalArgs,
-      method,
-      segments,
-    )
-    return
-  }
+  if (depth > MAX_RECURSIVE_DEPTH) return
+  if (segments.length === 0) return
 
   if (segments.length === 1) {
-    await executeSegmentBase(
+    await resolveSingleSegment(
       segments[0],
       parentRows,
       allModels,
       modelMap,
       dialect,
       execute,
-      0,
+      depth,
     )
     return
   }
 
   await Promise.all(
     segments.map((segment) =>
-      executeSegmentBase(
+      resolveSingleSegment(
         segment,
         parentRows,
         allModels,
         modelMap,
         dialect,
         execute,
-        0,
+        depth,
       ),
     ),
+  )
+}
+
+export async function executeWhereInSegments(
+  params: ExecuteWhereInParams,
+): Promise<void> {
+  const { segments, parentRows, allModels, modelMap, dialect, execute } = params
+
+  if (segments.length === 0) return
+  if (parentRows.length === 0) return
+
+  for (const row of parentRows) {
+    for (const seg of segments) {
+      row[seg.relationName] = seg.isList ? [] : null
+    }
+  }
+
+  await resolveSegments(
+    segments,
+    parentRows,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+    0,
   )
 }

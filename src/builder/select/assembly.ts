@@ -25,6 +25,10 @@ import {
 import { buildFlatJoinSql, canUseFlatJoinForAll } from './flat-join'
 import { buildArrayAggSql, canUseArrayAggForAll } from './array-agg'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
+import {
+  countIncludeDepth,
+  shouldPreferFlatJoinStrategy,
+} from './strategy-estimator'
 
 type OrderByEntry = {
   field: string
@@ -639,14 +643,52 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const hasPagination = isNotNullish(pagination.take)
 
   const takeValue = typeof pagination.take === 'number' ? pagination.take : null
-  const isLargeTake = takeValue !== null && takeValue > 50
+
+  const includeDepth = hasIncludes
+    ? countIncludeDepth(includeSpec, model, schemas)
+    : 0
+
+  const flatJoinEligible =
+    dialect === 'postgres' &&
+    hasIncludes &&
+    canUseFlatJoinForAll(includeSpec, model, schemas)
+
+  const shouldUseFlatJoin = shouldPreferFlatJoinStrategy({
+    includeSpec,
+    model,
+    schemas,
+    hasPagination,
+    takeValue,
+    canUseFlatJoin: flatJoinEligible,
+  })
+
+  if (shouldUseFlatJoin) {
+    const flatResult = buildFlatJoinSql(spec)
+
+    if (flatResult.sql) {
+      validateSelectQuery(flatResult.sql)
+      validateParamConsistencyByDialect(
+        flatResult.sql,
+        flatResult.params,
+        dialect,
+      )
+      return {
+        sql: flatResult.sql,
+        params: flatResult.params,
+        paramMappings: flatResult.params.map((v, i) => ({
+          index: i + 1,
+          value: v,
+        })),
+        requiresReduction: true,
+        includeSpec: flatResult.includeSpec,
+      }
+    }
+  }
 
   const shouldUseArrayAgg =
     dialect === 'postgres' &&
     hasIncludes &&
     method === 'findMany' &&
-    hasPagination &&
-    isLargeTake &&
     canUseArrayAggForAll(includeSpec, model, schemas)
 
   if (shouldUseArrayAgg) {
@@ -661,27 +703,6 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
         requiresReduction: true,
         includeSpec: aaResult.includeSpec,
         isArrayAgg: true,
-      }
-    }
-  }
-
-  const shouldUseFlatJoin =
-    dialect === 'postgres' &&
-    hasPagination &&
-    hasIncludes &&
-    canUseFlatJoinForAll(includeSpec, model, schemas)
-
-  if (shouldUseFlatJoin) {
-    const flatResult = buildFlatJoinSql(spec)
-
-    if (flatResult.sql) {
-      const baseSqlResult = finalizeSql(flatResult.sql, params, dialect)
-      return {
-        sql: baseSqlResult.sql,
-        params: baseSqlResult.params,
-        paramMappings: baseSqlResult.paramMappings,
-        requiresReduction: true,
-        includeSpec: flatResult.includeSpec,
       }
     }
   }

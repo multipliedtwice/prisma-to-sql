@@ -24,7 +24,7 @@ import {
 } from '../shared/validators/type-guards'
 import {
   reverseOrderByInput,
-  normalizeOrderByInput,
+  normalizeOrderByInput as normalizeOrderByShared,
 } from '../shared/order-by-utils'
 import { addAutoScoped } from '../shared/dynamic-params'
 import {
@@ -86,6 +86,13 @@ interface IncludeBuildContext {
 interface FlatJoinEligibility {
   canUse: boolean
   reason?: string
+}
+
+interface NestedToOneRelation {
+  name: string
+  field: Field
+  model: Model
+  args: unknown
 }
 
 export function canUseFlatJoinForInclude(
@@ -187,7 +194,7 @@ function validateOrderByForModel(model: Model, orderBy: unknown): void {
   if (!isNotNullish(orderBy)) return
 
   const scalarSet = getScalarFieldSet(model)
-  const normalized = normalizeOrderByInput(orderBy, parseOrderByValue)
+  const normalized = normalizeOrderByShared(orderBy, parseOrderByValue)
 
   for (const item of normalized) {
     const entries = Object.entries(item)
@@ -316,56 +323,163 @@ function finalizeOrderByForInclude(args: {
   })
 }
 
+function extractNestedToOneRelations(
+  relArgs: unknown,
+  relModel: Model,
+  schemaByName: Map<string, Model>,
+): NestedToOneRelation[] {
+  if (!isPlainObject(relArgs)) return []
+
+  const entries = extractRelationEntries(relArgs as any, relModel)
+  const toOneRelations: NestedToOneRelation[] = []
+
+  for (const entry of entries) {
+    const field = relModel.fields.find((f) => f.name === entry.name)
+    if (!field || !isValidRelationField(field as Field)) continue
+
+    const isList = typeof field.type === 'string' && field.type.endsWith('[]')
+    if (isList) continue
+
+    const nestedModel = schemaByName.get(field.relatedModel!)
+    if (!nestedModel) continue
+
+    toOneRelations.push({
+      name: entry.name,
+      field: field as Field,
+      model: nestedModel,
+      args: entry.value,
+    })
+  }
+
+  return toOneRelations
+}
+
+function buildNestedToOneJoins(
+  relations: NestedToOneRelation[],
+  baseAlias: string,
+  baseModel: Model,
+  aliasGen: AliasGenerator,
+  dialect: SqlDialect,
+): { joins: string[]; aliasMap: Map<string, string> } {
+  const joins: string[] = []
+  const aliasMap = new Map<string, string>()
+
+  for (const rel of relations) {
+    const relTable = getRelationTableReference(rel.model, dialect)
+    const relAlias = aliasGen.next(`${rel.name}_joined`)
+    const joinCond = joinCondition(
+      rel.field,
+      baseModel,
+      rel.model,
+      baseAlias,
+      relAlias,
+    )
+
+    joins.push(`LEFT JOIN ${relTable} ${relAlias} ON ${joinCond}`)
+    aliasMap.set(rel.name, relAlias)
+  }
+
+  return { joins, aliasMap }
+}
+
+function buildNestedToOneSelects(
+  relations: NestedToOneRelation[],
+  aliasMap: Map<string, string>,
+): string[] {
+  const selects: string[] = []
+
+  for (const rel of relations) {
+    const relAlias = aliasMap.get(rel.name)
+    if (!relAlias) continue
+
+    const relSelect = buildRelationSelect(rel.args, rel.model, relAlias)
+    if (!relSelect || relSelect.trim().length === 0) continue
+
+    selects.push(`${sqlStringLiteral(rel.name)}, ${relSelect}`)
+  }
+
+  return selects
+}
+
 function buildSelectWithNestedIncludes(
   relArgs: unknown,
   relModel: Model,
   relAlias: string,
   ctx: IncludeBuildContext,
-): string {
-  let relSelect = buildRelationSelect(relArgs, relModel, relAlias)
+): { select: string; nestedJoins: string[] } {
+  const nestedToOnes = extractNestedToOneRelations(
+    relArgs,
+    relModel,
+    ctx.schemaByName,
+  )
 
-  let nestedIncludes: IncludeSpec[] = []
-  if (isPlainObject(relArgs)) {
-    const prevModel = ctx.model
-    const prevParentAlias = ctx.parentAlias
-    const prevDepth = ctx.depth
+  if (nestedToOnes.length === 0) {
+    let relSelect = buildRelationSelect(relArgs, relModel, relAlias)
 
-    ctx.model = relModel
-    ctx.parentAlias = relAlias
-    ctx.depth = prevDepth + 1
+    let nestedIncludes: IncludeSpec[] = []
+    if (isPlainObject(relArgs)) {
+      const prevModel = ctx.model
+      const prevParentAlias = ctx.parentAlias
+      const prevDepth = ctx.depth
 
-    try {
-      nestedIncludes = buildIncludeSqlInternal(relArgs as PrismaQueryArgs, ctx)
-    } finally {
-      ctx.model = prevModel
-      ctx.parentAlias = prevParentAlias
-      ctx.depth = prevDepth
+      ctx.model = relModel
+      ctx.parentAlias = relAlias
+      ctx.depth = prevDepth + 1
+
+      try {
+        nestedIncludes = buildIncludeSqlInternal(
+          relArgs as PrismaQueryArgs,
+          ctx,
+        )
+      } finally {
+        ctx.model = prevModel
+        ctx.parentAlias = prevParentAlias
+        ctx.depth = prevDepth
+      }
     }
+
+    if (isNonEmptyArray(nestedIncludes)) {
+      const emptyJson = ctx.dialect === 'postgres' ? `'[]'::json` : `json('[]')`
+      const nestedSelects = nestedIncludes
+        .map((inc) =>
+          inc.isOneToOne
+            ? `${sqlStringLiteral(inc.name)}, (${inc.sql})`
+            : `${sqlStringLiteral(inc.name)}, COALESCE((${inc.sql}), ${emptyJson})`,
+        )
+        .join(SQL_SEPARATORS.FIELD_LIST)
+
+      relSelect =
+        isNotNullish(relSelect) && relSelect.trim().length > 0
+          ? `${relSelect}${SQL_SEPARATORS.FIELD_LIST}${nestedSelects}`
+          : nestedSelects
+    }
+
+    return { select: relSelect, nestedJoins: [] }
   }
 
-  if (isNonEmptyArray(nestedIncludes)) {
-    const emptyJson = ctx.dialect === 'postgres' ? `'[]'::json` : `json('[]')`
-    const nestedSelects = nestedIncludes
-      .map((inc) =>
-        inc.isOneToOne
-          ? `${sqlStringLiteral(inc.name)}, (${inc.sql})`
-          : `${sqlStringLiteral(inc.name)}, COALESCE((${inc.sql}), ${emptyJson})`,
-      )
-      .join(SQL_SEPARATORS.FIELD_LIST)
+  const { joins, aliasMap } = buildNestedToOneJoins(
+    nestedToOnes,
+    relAlias,
+    relModel,
+    ctx.aliasGen,
+    ctx.dialect,
+  )
 
-    relSelect =
-      isNotNullish(relSelect) && relSelect.trim().length > 0
-        ? `${relSelect}${SQL_SEPARATORS.FIELD_LIST}${nestedSelects}`
-        : nestedSelects
+  const baseSelect = buildRelationSelect(relArgs, relModel, relAlias)
+  const nestedSelects = buildNestedToOneSelects(nestedToOnes, aliasMap)
+
+  const allParts: string[] = []
+  if (baseSelect && baseSelect.trim().length > 0) {
+    allParts.push(baseSelect)
+  }
+  for (const ns of nestedSelects) {
+    allParts.push(ns)
   }
 
-  if (!isNotNullish(relSelect) || relSelect.trim().length === 0) {
-    throw new Error(
-      `Select must include at least one field or nested relation for model ${relModel.name}`,
-    )
+  return {
+    select: allParts.join(SQL_SEPARATORS.FIELD_LIST),
+    nestedJoins: joins,
   }
-
-  return relSelect
 }
 
 function buildWhereParts(
@@ -425,12 +539,14 @@ function buildBaseSql(args: {
   joins: string
   joinPredicate: string
   whereClause: string
+  nestedJoins: string[]
 }): string {
-  const joins = args.joins ? ` ${args.joins}` : ''
+  const allJoins = [args.joins, ...args.nestedJoins].filter((j) => j).join(' ')
+  const joinsStr = allJoins ? ` ${allJoins}` : ''
   const where = `${SQL_TEMPLATES.WHERE} ${args.joinPredicate}${args.whereClause}`
   return (
     `${SQL_TEMPLATES.SELECT} ${args.selectExpr} ` +
-    `${SQL_TEMPLATES.FROM} ${args.relTable} ${args.relAlias}${joins} ` +
+    `${SQL_TEMPLATES.FROM} ${args.relTable} ${args.relAlias}${joinsStr} ` +
     where
   )
 }
@@ -447,6 +563,7 @@ function buildOneToOneIncludeSql(args: {
   takeVal: OptionalIntOrDynamic
   skipVal: OptionalIntOrDynamic
   ctx: IncludeBuildContext
+  nestedJoins: string[]
 }): string {
   const objExpr = jsonBuildObject(args.relSelect, args.ctx.dialect)
 
@@ -457,6 +574,7 @@ function buildOneToOneIncludeSql(args: {
     joins: args.joins,
     joinPredicate: args.joinPredicate,
     whereClause: args.whereClause,
+    nestedJoins: args.nestedJoins,
   })
 
   if (args.orderBySql) sql += ` ${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}`
@@ -489,6 +607,7 @@ function buildListIncludeSpec(args: {
   takeVal: OptionalIntOrDynamic
   skipVal: OptionalIntOrDynamic
   ctx: IncludeBuildContext
+  nestedJoins: string[]
 }): IncludeSpec {
   const rowExpr = jsonBuildObject(args.relSelect, args.ctx.dialect)
   const noTake = !isNotNullish(args.takeVal)
@@ -511,6 +630,7 @@ function buildListIncludeSpec(args: {
       joins: args.joins,
       joinPredicate: args.joinPredicate,
       whereClause: args.whereClause,
+      nestedJoins: args.nestedJoins,
     })
 
     return Object.freeze({ name: args.relName, sql, isOneToOne: false })
@@ -525,6 +645,7 @@ function buildListIncludeSpec(args: {
     joins: args.joins,
     joinPredicate: args.joinPredicate,
     whereClause: args.whereClause,
+    nestedJoins: args.nestedJoins,
   })
 
   if (args.orderBySql) base += ` ${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}`
@@ -640,6 +761,7 @@ function buildJoinBasedNonPaginated(args: {
   orderBySql: string
   relSelect: string
   ctx: IncludeBuildContext
+  nestedJoins: string[]
 }): IncludeSpec {
   const { childKeys: relKeyFields, parentKeys: parentKeyFields } =
     resolveRelationKeys(args.field, 'include')
@@ -654,7 +776,10 @@ function buildJoinBasedNonPaginated(args: {
     ? `json_agg(${rowExpr} ORDER BY ${args.orderBySql})`
     : `json_agg(${rowExpr})`
 
-  const joinsPart = args.whereJoins ? ` ${args.whereJoins}` : ''
+  const allJoins = [args.whereJoins, ...args.nestedJoins]
+    .filter((j) => j)
+    .join(' ')
+  const joinsPart = allJoins ? ` ${allJoins}` : ''
   const wherePart = args.rawWhereClause
     ? ` ${SQL_TEMPLATES.WHERE} ${args.rawWhereClause}`
     : ''
@@ -696,6 +821,7 @@ function buildJoinBasedPaginated(args: {
   takeVal: number | undefined
   skipVal: number | undefined
   ctx: IncludeBuildContext
+  nestedJoins: string[]
 }): IncludeSpec {
   const { childKeys: relKeyFields, parentKeys: parentKeyFields } =
     resolveRelationKeys(args.field, 'include')
@@ -715,7 +841,10 @@ function buildJoinBasedPaginated(args: {
     args.orderBySql ||
     `${args.relAlias}.${quoteColumn(args.relModel, 'id')} ASC`
 
-  const joinsPart = args.whereJoins ? ` ${args.whereJoins}` : ''
+  const allJoins = [args.whereJoins, ...args.nestedJoins]
+    .filter((j) => j)
+    .join(' ')
+  const joinsPart = allJoins ? ` ${allJoins}` : ''
   const wherePart = args.rawWhereClause
     ? ` ${SQL_TEMPLATES.WHERE} ${args.rawWhereClause}`
     : ''
@@ -806,7 +935,7 @@ function buildSingleInclude(
   )
 
   const whereInput = readWhereInput(relArgs)
-  const relSelect = buildSelectWithNestedIncludes(
+  const { select: relSelect, nestedJoins } = buildSelectWithNestedIncludes(
     relArgs,
     relModel,
     relAlias,
@@ -859,6 +988,7 @@ function buildSingleInclude(
       takeVal: adjusted.takeVal,
       skipVal: paginationConfig.skipVal,
       ctx,
+      nestedJoins,
     })
     return Object.freeze({ name: relName, sql, isOneToOne: true })
   }
@@ -893,6 +1023,7 @@ function buildSingleInclude(
         orderBySql,
         relSelect,
         ctx,
+        nestedJoins,
       })
     }
 
@@ -909,6 +1040,7 @@ function buildSingleInclude(
       takeVal: adjusted.takeVal as number | undefined,
       skipVal: paginationConfig.skipVal as number | undefined,
       ctx,
+      nestedJoins,
     })
   }
 
@@ -924,6 +1056,7 @@ function buildSingleInclude(
     takeVal: adjusted.takeVal,
     skipVal: paginationConfig.skipVal,
     ctx,
+    nestedJoins,
   })
 }
 

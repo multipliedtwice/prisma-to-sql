@@ -1,17 +1,28 @@
 import type { Model } from '../../types'
-import { buildSQL } from '../..'
-import { buildReducerConfig, reduceFlatRows } from '../select/reducer'
+import { getPrimaryKeyField } from '../shared/primary-key-utils'
+import type { WhereInSegment } from '../select/segment-planner'
 import {
   buildArrayAggReducerConfig,
+  buildReducerConfig,
+  buildSQL,
   reduceArrayAggRows,
-} from '../select/array-agg-reducer'
-import type { WhereInSegment } from '../select/segment-planner'
-import { planQueryStrategy } from '../select/segment-planner'
-import { isPlainObject } from './validators/type-guards'
+  reduceFlatRows,
+} from '../..'
 
 const MAX_RECURSIVE_DEPTH = 10
 
-export interface ExecuteWhereInParams {
+interface StreamingWhereInParams {
+  segments: WhereInSegment[]
+  parentSql: string
+  parentParams: unknown[]
+  parentModel: Model
+  allModels: readonly Model[]
+  modelMap: Map<string, Model>
+  dialect: 'postgres' | 'sqlite'
+  execute: (sql: string, params: unknown[]) => Promise<any[]>
+}
+
+interface PreFetchedWhereInParams {
   segments: WhereInSegment[]
   parentRows: any[]
   parentModel: Model
@@ -19,35 +30,105 @@ export interface ExecuteWhereInParams {
   modelMap: Map<string, Model>
   dialect: 'postgres' | 'sqlite'
   execute: (sql: string, params: unknown[]) => Promise<any[]>
-  originalArgs?: any
-  method?: string
 }
 
-function getParamLimit(dialect: 'postgres' | 'sqlite'): number {
-  return dialect === 'postgres' ? 32000 : 900
-}
-
-function chunkArray<T>(arr: T[], size: number): T[][] {
-  if (arr.length <= size) return [arr]
-  const chunks: T[][] = []
-  for (let i = 0; i < arr.length; i += size) {
-    chunks.push(arr.slice(i, i + size))
+function buildParentKeyIndex(
+  parentRows: any[],
+  parentKeyFieldName: string,
+): Map<unknown, any[]> {
+  const index = new Map<unknown, any[]>()
+  for (const parent of parentRows) {
+    const keyVal = parent[parentKeyFieldName]
+    if (keyVal == null) continue
+    let arr = index.get(keyVal)
+    if (!arr) {
+      arr = []
+      index.set(keyVal, arr)
+    }
+    arr.push(parent)
   }
-  return chunks
+  return index
 }
 
-export function buildChildArgs(
+function needsPerParentPagination(segment: WhereInSegment): boolean {
+  return (
+    segment.isList &&
+    ((segment.perParentSkip != null && segment.perParentSkip > 0) ||
+      segment.perParentTake != null)
+  )
+}
+
+function stitchChildrenToParents(
+  children: any[],
+  segment: WhereInSegment,
+  parentKeyIndex: Map<unknown, any[]>,
+): void {
+  const grouped = new Map<unknown, any[]>()
+  for (const child of children) {
+    const childKey = child[segment.fkFieldName]
+    if (childKey == null) continue
+    let arr = grouped.get(childKey)
+    if (!arr) {
+      arr = []
+      grouped.set(childKey, arr)
+    }
+    arr.push(child)
+  }
+
+  const perParentPaginated = needsPerParentPagination(segment)
+
+  for (const [fkVal, groupedChildren] of grouped) {
+    const matchingParents = parentKeyIndex.get(fkVal)
+    if (!matchingParents) continue
+
+    let sliced = groupedChildren
+    if (perParentPaginated) {
+      const start = segment.perParentSkip || 0
+      const end =
+        segment.perParentTake != null
+          ? start + segment.perParentTake
+          : undefined
+      sliced = groupedChildren.slice(start, end)
+    }
+
+    for (const parent of matchingParents) {
+      if (segment.isList) {
+        if (!Array.isArray(parent[segment.relationName])) {
+          parent[segment.relationName] = []
+        }
+        for (const child of sliced) {
+          parent[segment.relationName].push(child)
+        }
+      } else {
+        parent[segment.relationName] = sliced[0] ?? null
+      }
+    }
+  }
+}
+
+function buildChildArgs(
   relArgs: unknown,
   fkFieldName: string,
-  parentIds: unknown[],
+  uniqueIds: unknown[],
+  stripPagination: boolean,
 ): any {
   const base: any =
-    relArgs === true || !isPlainObject(relArgs) ? {} : { ...(relArgs as any) }
+    relArgs === true || typeof relArgs !== 'object' || relArgs === null
+      ? {}
+      : { ...(relArgs as any) }
+
+  if (stripPagination) {
+    delete base.take
+    delete base.skip
+  }
+
   const existingWhere = base.where
-  const inCondition = { [fkFieldName]: { in: parentIds } }
+  const inCondition = { [fkFieldName]: { in: uniqueIds } }
+
   base.where = existingWhere
     ? { AND: [existingWhere, inCondition] }
     : inCondition
+
   return base
 }
 
@@ -58,161 +139,93 @@ function ensureFkInSelect(childArgs: any, fkFieldName: string): boolean {
   return true
 }
 
-export function stitchResults(
-  parentRows: any[],
-  segment: WhereInSegment,
-  childRows: any[],
-  stripFk: boolean,
-): void {
-  const grouped = new Map<unknown, any[]>()
-  for (const child of childRows) {
-    const fk = child[segment.fkFieldName]
-    if (fk == null) continue
-    let arr = grouped.get(fk)
-    if (!arr) {
-      arr = []
-      grouped.set(fk, arr)
-    }
-    if (stripFk) {
-      const cleaned = { ...child }
-      delete cleaned[segment.fkFieldName]
-      arr.push(cleaned)
-    } else {
-      arr.push(child)
-    }
-  }
-  for (const parent of parentRows) {
-    const pk = parent[segment.parentKeyFieldName]
-    const children = grouped.get(pk) || []
-    if (segment.isList) {
-      parent[segment.relationName] = children
-    } else {
-      parent[segment.relationName] = children[0] || null
-    }
-  }
+function ensureOrderByPk(childArgs: any, childModel: Model): void {
+  if (childArgs.orderBy) return
+  const pkField = getPrimaryKeyField(childModel)
+  childArgs.orderBy = { [pkField]: 'asc' }
 }
 
-async function executeSingleSegment(
-  segment: WhereInSegment,
-  parentRows: any[],
-  allModels: readonly Model[],
-  modelMap: Map<string, Model>,
-  dialect: 'postgres' | 'sqlite',
-  execute: (sql: string, params: unknown[]) => Promise<any[]>,
-  depth: number,
-): Promise<void> {
-  if (depth > MAX_RECURSIVE_DEPTH) {
-    for (const parent of parentRows) {
-      parent[segment.relationName] = segment.isList ? [] : null
-    }
-    return
+export async function executeWhereInSegmentsStreaming(
+  params: StreamingWhereInParams,
+): Promise<any[]> {
+  const {
+    segments,
+    parentSql,
+    parentParams,
+    parentModel,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+  } = params
+
+  if (segments.length === 0) {
+    throw new Error('executeWhereInSegmentsStreaming requires segments')
   }
 
-  const parentIds = parentRows
-    .map((r) => r[segment.parentKeyFieldName])
-    .filter((v) => v != null)
-
-  if (parentIds.length === 0) {
-    for (const parent of parentRows) {
-      parent[segment.relationName] = segment.isList ? [] : null
-    }
-    return
+  if (dialect !== 'postgres') {
+    throw new Error('Streaming WHERE IN requires postgres dialect')
   }
 
-  const uniqueIds = [...new Set(parentIds)]
-  const paramLimit = getParamLimit(dialect)
-  const chunks = chunkArray(uniqueIds, paramLimit)
+  const parentRows = await execute(parentSql, parentParams)
 
-  const childModel = modelMap.get(segment.childModelName)
-  if (!childModel) {
-    for (const parent of parentRows) {
-      parent[segment.relationName] = segment.isList ? [] : null
-    }
-    return
-  }
+  if (parentRows.length === 0) return []
 
-  const allChildRows: any[] = []
-  let needsStripFk = false
-  let nestedSegments: WhereInSegment[] = []
-
-  for (const chunk of chunks) {
-    const childArgs = buildChildArgs(
-      segment.relArgs,
-      segment.fkFieldName,
-      chunk,
-    )
-
-    const childPlan = planQueryStrategy({
-      model: childModel,
-      method: 'findMany',
-      args: childArgs,
-      allModels,
-      dialect,
-    })
-
-    if (nestedSegments.length === 0 && childPlan.whereInSegments.length > 0) {
-      nestedSegments = childPlan.whereInSegments
-    }
-
-    const stripFk = ensureFkInSelect(
-      childPlan.filteredArgs,
-      segment.fkFieldName,
-    )
-    if (stripFk) needsStripFk = true
-
-    const result = buildSQL(
-      childModel,
-      allModels as Model[],
-      'findMany',
-      childPlan.filteredArgs,
-      dialect,
-    )
-
-    let rows = await execute(result.sql, result.params as unknown[])
-
-    if (result.isArrayAgg && result.includeSpec) {
-      const config = buildArrayAggReducerConfig(
-        childModel,
-        result.includeSpec as Record<string, any>,
-        allModels,
-      )
-      rows = reduceArrayAggRows(rows, config)
-    } else if (result.requiresReduction && result.includeSpec) {
-      const config = buildReducerConfig(
-        childModel,
-        result.includeSpec as Record<string, any>,
-        allModels,
-      )
-      rows = reduceFlatRows(rows, config)
-    }
-
-    for (const row of rows) {
-      allChildRows.push(row)
+  for (const row of parentRows) {
+    for (const seg of segments) {
+      row[seg.relationName] = seg.isList ? [] : null
     }
   }
 
-  if (nestedSegments.length > 0 && allChildRows.length > 0) {
-    for (const row of allChildRows) {
-      for (const nestedSeg of nestedSegments) {
-        row[nestedSeg.relationName] = nestedSeg.isList ? [] : null
-      }
-    }
+  await resolveSegments(
+    segments,
+    parentRows,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+    0,
+  )
 
-    await resolveSegmentsIntelligent(
-      nestedSegments,
-      allChildRows,
-      allModels,
-      modelMap,
-      dialect,
-      execute,
-      depth + 1,
-    )
-  }
-
-  stitchResults(parentRows, segment, allChildRows, needsStripFk)
+  return parentRows
 }
 
-async function resolveSegmentsIntelligent(
+export async function executeWithPreFetchedParents(
+  params: PreFetchedWhereInParams,
+): Promise<any[]> {
+  const {
+    segments,
+    parentRows,
+    parentModel,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+  } = params
+
+  if (segments.length === 0) return parentRows
+  if (parentRows.length === 0) return []
+
+  for (const row of parentRows) {
+    for (const seg of segments) {
+      row[seg.relationName] = seg.isList ? [] : null
+    }
+  }
+
+  await resolveSegments(
+    segments,
+    parentRows,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+    0,
+  )
+
+  return parentRows
+}
+
+async function resolveSegments(
   segments: WhereInSegment[],
   parentRows: any[],
   allModels: readonly Model[],
@@ -225,7 +238,7 @@ async function resolveSegmentsIntelligent(
   if (segments.length === 0) return
 
   if (segments.length === 1) {
-    await executeSingleSegment(
+    await resolveSingleSegment(
       segments[0],
       parentRows,
       allModels,
@@ -239,7 +252,7 @@ async function resolveSegmentsIntelligent(
 
   await Promise.all(
     segments.map((seg) =>
-      executeSingleSegment(
+      resolveSingleSegment(
         seg,
         parentRows,
         allModels,
@@ -252,22 +265,73 @@ async function resolveSegmentsIntelligent(
   )
 }
 
-export async function executeSegmentBase(
+async function resolveSingleSegment(
   segment: WhereInSegment,
   parentRows: any[],
   allModels: readonly Model[],
   modelMap: Map<string, Model>,
   dialect: 'postgres' | 'sqlite',
   execute: (sql: string, params: unknown[]) => Promise<any[]>,
-  depth: number = 0,
+  depth: number,
 ): Promise<void> {
-  await executeSingleSegment(
-    segment,
-    parentRows,
-    allModels,
-    modelMap,
-    dialect,
-    execute,
-    depth,
+  const childModel = modelMap.get(segment.childModelName)
+  if (!childModel) {
+    return
+  }
+
+  const parentIds = parentRows
+    .map((r) => r[segment.parentKeyFieldName])
+    .filter((v) => v != null)
+
+  if (parentIds.length === 0) {
+    return
+  }
+
+  const uniqueIds = [...new Set(parentIds)]
+  const stripPagination = needsPerParentPagination(segment)
+
+  const childArgs = buildChildArgs(
+    segment.relArgs,
+    segment.fkFieldName,
+    uniqueIds,
+    stripPagination,
   )
+
+  ensureOrderByPk(childArgs, childModel)
+
+  const needsStripFk = ensureFkInSelect(childArgs, segment.fkFieldName)
+
+  const result = buildSQL(
+    childModel,
+    allModels as Model[],
+    'findMany',
+    childArgs,
+    dialect,
+  )
+
+  let children = await execute(result.sql, result.params as unknown[])
+
+  if (result.isArrayAgg && result.includeSpec) {
+    const config = buildArrayAggReducerConfig(
+      childModel,
+      result.includeSpec,
+      allModels,
+    )
+    children = reduceArrayAggRows(children, config)
+  } else if (result.requiresReduction && result.includeSpec) {
+    const config = buildReducerConfig(childModel, result.includeSpec, allModels)
+    children = reduceFlatRows(children, config)
+  }
+
+  const parentKeyIndex = buildParentKeyIndex(
+    parentRows,
+    segment.parentKeyFieldName,
+  )
+  stitchChildrenToParents(children, segment, parentKeyIndex)
+
+  if (needsStripFk) {
+    for (const child of children) {
+      delete child[segment.fkFieldName]
+    }
+  }
 }

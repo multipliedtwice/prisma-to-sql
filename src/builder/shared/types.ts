@@ -74,34 +74,3 @@ export interface ErrorContext {
   modelName?: string
   availableFields?: readonly string[]
 }
-
-export interface SqlBatchQuery {
-  readonly sql: string
-  readonly params: readonly unknown[]
-  readonly paramMappings: readonly ParamMapping[]
-  readonly role: 'parent' | 'children'
-  readonly relationName?: string
-  readonly parentKeyField?: string
-  readonly childKeyField?: string
-  readonly isOneToOne?: boolean
-}
-
-export interface BatchRelationMeta {
-  readonly name: string
-  readonly foreignKey: string
-  readonly referenceKey: string
-  readonly isOneToOne: boolean
-}
-
-export type MergeStrategy =
-  | { readonly type: 'single' }
-  | {
-      readonly type: 'batch'
-      readonly parentIdField: string
-      readonly relations: readonly BatchRelationMeta[]
-    }
-
-export interface SqlBatchResult {
-  readonly queries: readonly SqlBatchQuery[]
-  readonly mergeStrategy: MergeStrategy
-}

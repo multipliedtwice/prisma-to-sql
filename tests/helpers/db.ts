@@ -192,8 +192,6 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
   await generatePrismaClient('postgres', version)
 
   const prismaVersion = version ?? PRISMA_VERSION
-  await generateSpeedExtension('postgres', prismaVersion)
-
   const pgClient = postgres(PG_URL)
 
   if (prismaVersion === 6) {
@@ -204,31 +202,9 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
     })
     registerPrismaQueryCapture(prisma)
 
-    const extensionPath = path.join(
-      process.cwd(),
-      'tests',
-      'generated',
-      'extension-postgres-v6',
-      'index.js',
-    )
-    const { speedExtension } = await import(extensionPath)
-    const extended = prisma.$extends(
-      speedExtension({
-        postgres: pgClient,
-        debug: false,
-        onQuery: (info: any) => {
-          captureExtensionQuery({
-            sql: info.sql,
-            params: info.params,
-            durationMs: info.duration,
-          })
-        },
-      }),
-    )
-
     return {
       prisma,
-      extended,
+      extended: null as any,
       dialect: 'postgres',
       execute: async (sql: string, params: unknown[]) => {
         return (await pgClient.unsafe(sql, params as any[])) as unknown[]
@@ -257,31 +233,9 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
     })
     registerPrismaQueryCapture(prisma)
 
-    const extensionPath = path.join(
-      process.cwd(),
-      'tests',
-      'generated',
-      'extension-postgres-v7',
-      'index.js',
-    )
-    const { speedExtension } = await import(extensionPath)
-    const extended = prisma.$extends(
-      speedExtension({
-        postgres: pgClient,
-        debug: false,
-        onQuery: (info: any) => {
-          captureExtensionQuery({
-            sql: info.sql,
-            params: info.params,
-            durationMs: info.duration,
-          })
-        },
-      }),
-    )
-
     return {
       prisma,
-      extended,
+      extended: null as any,
       dialect: 'postgres',
       execute: async (sql: string, params: unknown[]) => {
         return (await pgClient.unsafe(sql, params as any[])) as unknown[]
@@ -309,8 +263,6 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
   await generatePrismaClient('sqlite', version)
 
   const prismaVersion = version ?? PRISMA_VERSION
-  await generateSpeedExtension('sqlite', prismaVersion)
-
   const sqliteClient = new Database(SQLITE_DB_PATH)
 
   if (prismaVersion === 6) {
@@ -320,28 +272,6 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
       log: [{ emit: 'event', level: 'query' }],
     })
     registerPrismaQueryCapture(prisma)
-
-    const extensionPath = path.join(
-      process.cwd(),
-      'tests',
-      'generated',
-      'extension-sqlite-v6',
-      'index.js',
-    )
-    const { speedExtension } = await import(extensionPath)
-    const extended = prisma.$extends(
-      speedExtension({
-        sqlite: sqliteClient,
-        debug: false,
-        onQuery: (info: any) => {
-          captureExtensionQuery({
-            sql: info.sql,
-            params: info.params,
-            durationMs: info.duration,
-          })
-        },
-      }),
-    )
 
     const stmtCache = new Map<string, Database.Statement>()
 
@@ -355,7 +285,7 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
 
     return {
       prisma,
-      extended,
+      extended: null as any,
       dialect: 'sqlite',
       execute: async (sql: string, params: unknown[]) => {
         const stmt = sqliteClient.prepare(sql)
@@ -387,28 +317,6 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
     })
     registerPrismaQueryCapture(prisma)
 
-    const extensionPath = path.join(
-      process.cwd(),
-      'tests',
-      'generated',
-      'extension-sqlite-v7',
-      'index.js',
-    )
-    const { speedExtension } = await import(extensionPath)
-    const extended = prisma.$extends(
-      speedExtension({
-        sqlite: sqliteClient,
-        debug: false,
-        onQuery: (info: any) => {
-          captureExtensionQuery({
-            sql: info.sql,
-            params: info.params,
-            durationMs: info.duration,
-          })
-        },
-      }),
-    )
-
     const stmtCache = new Map<string, Database.Statement>()
 
     const getStmt = (sql: string) => {
@@ -421,7 +329,7 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
 
     return {
       prisma,
-      extended,
+      extended: null as any,
       dialect: 'sqlite',
       execute: async (sql: string, params: unknown[]) => {
         const stmt = sqliteClient.prepare(sql)
@@ -449,4 +357,90 @@ export async function createTestDB(
 ): Promise<TestDB> {
   if (dialect === 'postgres') return createPostgresDB(version)
   return createSqliteDB(version)
+}
+
+export async function generateSpeedExtensionForDB(
+  db: TestDB,
+  version?: number,
+): Promise<void> {
+  const prismaVersion = version ?? PRISMA_VERSION
+
+  const userCount = await db.prisma.user.count()
+  if (userCount === 0) {
+    console.log('No data in database, skipping extension generation')
+    return
+  }
+
+  console.log(
+    `Database has ${userCount} users, ensuring all transactions are committed...`,
+  )
+
+  try {
+    await db.prisma.$executeRaw`SELECT 1`
+  } catch (e) {
+    console.log('Connection check failed, continuing...')
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 500))
+
+  console.log('Generating speed extension with fresh datamodel...')
+  await generateSpeedExtension(db.dialect, prismaVersion)
+}
+
+export async function loadExtensionIntoTestDB(
+  db: TestDB,
+  pgClient?: postgres.Sql,
+  sqliteClient?: Database.Database,
+): Promise<void> {
+  const prismaVersion = PRISMA_VERSION
+
+  if (db.dialect === 'postgres') {
+    if (!pgClient) throw new Error('pgClient required for postgres')
+
+    const extensionPath = path.join(
+      process.cwd(),
+      'tests',
+      'generated',
+      `extension-postgres-v${prismaVersion}`,
+      'index.js',
+    )
+    const { speedExtension } = await import(extensionPath)
+    db.extended = db.prisma.$extends(
+      speedExtension({
+        postgres: pgClient,
+        debug: false,
+        onQuery: (info: any) => {
+          captureExtensionQuery({
+            sql: info.sql,
+            params: info.params,
+            durationMs: info.duration,
+          })
+        },
+      }),
+    )
+  } else {
+    if (!sqliteClient) throw new Error('sqliteClient required for sqlite')
+
+    const extensionPath = path.join(
+      process.cwd(),
+      'tests',
+      'generated',
+      `extension-sqlite-v${prismaVersion}`,
+      'index.js',
+    )
+    const { speedExtension } = await import(extensionPath)
+    db.extended = db.prisma.$extends(
+      speedExtension({
+        sqlite: sqliteClient,
+        debug: false,
+        onQuery: (info: any) => {
+          captureExtensionQuery({
+            sql: info.sql,
+            params: info.params,
+            durationMs: info.duration,
+          })
+        },
+      }),
+    )
+  }
 }

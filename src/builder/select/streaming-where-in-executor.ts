@@ -50,27 +50,89 @@ function buildParentKeyIndex(
   return index
 }
 
+function needsStrippedPagination(segment: WhereInSegment): boolean {
+  return (
+    segment.isList &&
+    ((segment.perParentSkip != null && segment.perParentSkip > 0) ||
+      segment.perParentTake != null)
+  )
+}
+
 function stitchChildrenToParents(
   children: any[],
   segment: WhereInSegment,
   parentKeyIndex: Map<unknown, any[]>,
 ): void {
+  const grouped = new Map<unknown, any[]>()
   for (const child of children) {
     const childKey = child[segment.fkFieldName]
-    const matchingParents = parentKeyIndex.get(childKey)
+    if (childKey == null) continue
+    let arr = grouped.get(childKey)
+    if (!arr) {
+      arr = []
+      grouped.set(childKey, arr)
+    }
+    arr.push(child)
+  }
+
+  const hasPerParentPagination =
+    segment.isList &&
+    ((segment.perParentSkip != null && segment.perParentSkip > 0) ||
+      segment.perParentTake != null)
+
+  for (const [fkVal, groupedChildren] of grouped) {
+    const matchingParents = parentKeyIndex.get(fkVal)
     if (!matchingParents) continue
+
+    let sliced = groupedChildren
+    if (hasPerParentPagination) {
+      const start = segment.perParentSkip || 0
+      const end =
+        segment.perParentTake != null
+          ? start + segment.perParentTake
+          : undefined
+      sliced = groupedChildren.slice(start, end)
+    }
 
     for (const parent of matchingParents) {
       if (segment.isList) {
         if (!Array.isArray(parent[segment.relationName])) {
           parent[segment.relationName] = []
         }
-        parent[segment.relationName].push(child)
+        for (const child of sliced) {
+          parent[segment.relationName].push(child)
+        }
       } else {
-        parent[segment.relationName] = child
+        parent[segment.relationName] = sliced[0] ?? null
       }
     }
   }
+}
+
+function buildChildArgs(
+  relArgs: unknown,
+  fkFieldName: string,
+  uniqueIds: unknown[],
+  stripPagination: boolean,
+): any {
+  const base: any =
+    relArgs === true || typeof relArgs !== 'object' || relArgs === null
+      ? {}
+      : { ...(relArgs as any) }
+
+  if (stripPagination) {
+    delete base.take
+    delete base.skip
+  }
+
+  const existingWhere = base.where
+  const inCondition = { [fkFieldName]: { in: uniqueIds } }
+
+  base.where = existingWhere
+    ? { AND: [existingWhere, inCondition] }
+    : inCondition
+
+  return base
 }
 
 function ensureFkInSelect(childArgs: any, fkFieldName: string): boolean {
@@ -78,6 +140,12 @@ function ensureFkInSelect(childArgs: any, fkFieldName: string): boolean {
   if (childArgs.select[fkFieldName]) return false
   childArgs.select = { ...childArgs.select, [fkFieldName]: true }
   return true
+}
+
+function ensureOrderByPk(childArgs: any, childModel: Model): void {
+  if (childArgs.orderBy) return
+  const pkField = getPrimaryKeyField(childModel)
+  childArgs.orderBy = { [pkField]: 'asc' }
 }
 
 export async function executeWhereInSegmentsStreaming(
@@ -223,12 +291,16 @@ async function resolveSingleSegment(
   }
 
   const uniqueIds = [...new Set(parentIds)]
+  const stripPagination = needsStrippedPagination(segment)
 
   const childArgs = buildChildArgs(
     segment.relArgs,
     segment.fkFieldName,
     uniqueIds,
+    stripPagination,
   )
+
+  ensureOrderByPk(childArgs, childModel)
 
   const needsStripFk = ensureFkInSelect(childArgs, segment.fkFieldName)
 
@@ -299,24 +371,4 @@ async function resolveSingleSegment(
       delete child[segment.fkFieldName]
     }
   }
-}
-
-function buildChildArgs(
-  relArgs: unknown,
-  fkFieldName: string,
-  parentIds: unknown[],
-): any {
-  const base: any =
-    relArgs === true || typeof relArgs !== 'object' || relArgs === null
-      ? {}
-      : { ...(relArgs as any) }
-
-  const existingWhere = base.where
-  const inCondition = { [fkFieldName]: { in: parentIds } }
-
-  base.where = existingWhere
-    ? { AND: [existingWhere, inCondition] }
-    : inCondition
-
-  return base
 }

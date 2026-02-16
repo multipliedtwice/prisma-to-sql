@@ -7,7 +7,6 @@ import {
   getFieldIndices,
   getRelationFieldSet,
 } from '../shared/model-field-cache'
-import { appendPagination } from './assembly'
 import { isPlainObject } from '../shared/validators/type-guards'
 import { SqlDialect } from '../../sql-builder-dialect'
 import {
@@ -22,9 +21,12 @@ import {
 } from '../shared/relation-utils'
 import { deduplicatePreserveOrder } from '../shared/array-utils'
 import { Field } from '@dee-wan/schema-parser'
+import { resolveRelationKeys } from '../shared/relation-key-utils'
+import { ParamStore } from '../shared/param-store'
 
 export interface FlatJoinBuildResult {
   sql: string
+  params: any[]
   requiresReduction: boolean
   includeSpec: Record<string, any>
 }
@@ -136,27 +138,67 @@ function canUseNestedFlatJoin(relArgs: unknown, depth: number): boolean {
 
 export function canUseFlatJoinForAll(
   includeSpec: Record<string, any>,
-  parentModel: Model,
+  model: Model,
   schemas: readonly Model[],
+  debug?: boolean,
 ): boolean {
   const modelMap = new Map(schemas.map((m) => [m.name, m]))
 
   for (const [relName, value] of Object.entries(includeSpec)) {
     if (value === false) continue
 
-    const field = parentModel.fields.find((f) => f.name === relName)
-    if (!field || !field.isRelation) continue
+    const field = model.fields.find((f) => f.name === relName)
+    if (!field?.isRelation || !field.relatedModel) {
+      return false
+    }
 
-    if (!canUseNestedFlatJoin(value, 0)) return false
+    if (isPlainObject(value)) {
+      const obj = value as Record<string, unknown>
+      if ('take' in obj && obj.take != null) {
+        return false
+      }
+      if ('skip' in obj && typeof obj.skip === 'number' && obj.skip > 0) {
+        return false
+      }
+    }
 
-    const relModel = modelMap.get(field.relatedModel!)
-    if (!relModel) continue
+    const relModel = modelMap.get(field.relatedModel)
+    if (!relModel) {
+      if (debug)
+        console.log(
+          `    [canFlatJoin] ${model.name}.${relName}: relModel not found for ${field.relatedModel}`,
+        )
+      return false
+    }
 
-    const nestedSpec = extractNestedIncludeSpec(value, relModel)
+    const keys = resolveRelationKeys(field as any, 'include')
+    if (!keys || keys.parentKeys.length === 0 || keys.childKeys.length === 0) {
+      if (debug)
+        console.log(
+          `    [canFlatJoin] ${model.name}.${relName}: no join keys resolved`,
+        )
+      return false
+    }
+
+    if (keys.parentKeys.length > 1 || keys.childKeys.length > 1) {
+      if (debug)
+        console.log(
+          `    [canFlatJoin] ${model.name}.${relName}: composite keys (${keys.parentKeys.length} parent, ${keys.childKeys.length} child)`,
+        )
+      return false
+    }
+
+    const nestedSpec = isPlainObject(value)
+      ? extractNestedIncludeSpec(value, relModel)
+      : {}
+
     if (Object.keys(nestedSpec).length > 0) {
-      if (!canUseFlatJoinForAll(nestedSpec, relModel, schemas)) return false
+      if (!canUseFlatJoinForAll(nestedSpec, relModel, schemas, debug)) {
+        return false
+      }
     }
   }
+
   return true
 }
 
@@ -252,6 +294,49 @@ function buildSubqueryRawSelect(model: Model, alias: string): string {
   return cols.length > 0 ? cols.join(SQL_SEPARATORS.FIELD_LIST) : '*'
 }
 
+function extractReferencedParams(
+  whereClause: string | undefined,
+  specParams: ParamStore | readonly unknown[],
+): { cleanWhere: string; params: any[] } {
+  if (!whereClause || whereClause === '1=1') {
+    return { cleanWhere: '', params: [] }
+  }
+
+  const refSet = new Set<number>()
+  const re = /\$(\d+)/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(whereClause)) !== null) {
+    refSet.add(Number(match[1]))
+  }
+
+  if (refSet.size === 0) {
+    return { cleanWhere: whereClause, params: [] }
+  }
+
+  const allParams: readonly unknown[] = Array.isArray(specParams)
+    ? specParams
+    : typeof (specParams as any).snapshot === 'function'
+      ? (specParams as ParamStore).snapshot().params
+      : []
+
+  const refs = Array.from(refSet).sort((a, b) => a - b)
+  const params: any[] = []
+  const indexMap = new Map<number, number>()
+
+  for (const oldIdx of refs) {
+    params.push(allParams[oldIdx - 1])
+    indexMap.set(oldIdx, params.length)
+  }
+
+  let cleanWhere = whereClause
+  const sorted = Array.from(indexMap.entries()).sort((a, b) => b[0] - a[0])
+  for (const [oldIdx, newIdx] of sorted) {
+    cleanWhere = cleanWhere.split(`$${oldIdx}`).join(`$${newIdx}`)
+  }
+
+  return { cleanWhere, params }
+}
+
 export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
   const {
     select,
@@ -263,7 +348,15 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     model,
     schemas,
     args,
+    pagination,
   } = spec
+
+  const emptyResult: FlatJoinBuildResult = {
+    sql: '',
+    params: [],
+    requiresReduction: false,
+    includeSpec: {},
+  }
 
   const includeSpec = extractRelationEntries(args, model).reduce(
     (acc, { name, value }) => {
@@ -274,16 +367,20 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
   )
 
   if (Object.keys(includeSpec).length === 0) {
-    return { sql: '', requiresReduction: false, includeSpec: {} }
+    return emptyResult
   }
 
   if (!canUseFlatJoinForAll(includeSpec, model, schemas)) {
-    return { sql: '', requiresReduction: false, includeSpec: {} }
+    return emptyResult
   }
 
+  const { cleanWhere, params } = extractReferencedParams(
+    whereClause,
+    spec.params,
+  )
+
   const baseJoins = whereJoins.length > 0 ? whereJoins.join(' ') : ''
-  const baseWhere =
-    whereClause && whereClause !== '1=1' ? `WHERE ${whereClause}` : ''
+  const baseWhere = cleanWhere ? `WHERE ${cleanWhere}` : ''
   const baseOrderBy = orderBy ? `ORDER BY ${orderBy}` : ''
 
   const subqueryScalarCols = buildSubqueryRawSelect(model, from.alias)
@@ -293,7 +390,24 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     ${baseWhere}
     ${baseOrderBy}
   `.trim()
-  baseSubquery = appendPagination(baseSubquery, spec)
+
+  const take =
+    pagination.take !== undefined && pagination.take !== null
+      ? pagination.take
+      : null
+  const skip =
+    pagination.skip !== undefined && pagination.skip !== null
+      ? pagination.skip
+      : null
+
+  if (take !== null) {
+    params.push(take)
+    baseSubquery += ` LIMIT $${params.length}`
+  }
+  if (skip !== null) {
+    params.push(skip)
+    baseSubquery += ` OFFSET $${params.length}`
+  }
 
   const aliasCounter = createAliasCounter()
   const built = buildNestedJoins(
@@ -308,7 +422,7 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
   )
 
   if (built.joins.length === 0) {
-    return { sql: '', requiresReduction: false, includeSpec: {} }
+    return emptyResult
   }
 
   const baseSelect = (select ?? '').trim()
@@ -335,5 +449,5 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     ORDER BY ${finalOrderBy}
   `.trim()
 
-  return { sql, requiresReduction: true, includeSpec }
+  return { sql, params, requiresReduction: true, includeSpec }
 }

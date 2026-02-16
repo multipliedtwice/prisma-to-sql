@@ -1,5 +1,10 @@
 import { describe, it, beforeAll, afterAll, expect } from 'vitest'
-import { createTestDB, type TestDB } from '../helpers/db'
+import {
+  createTestDB,
+  type TestDB,
+  generateSpeedExtensionForDB,
+  loadExtensionIntoTestDB,
+} from '../helpers/db'
 import { seedDatabase, type SeedResult } from '../helpers/seed-db'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
 import {
@@ -28,6 +33,7 @@ import {
   type BenchmarkResult,
 } from '../helpers/benchmark-utils'
 import { normalizeValue } from '../helpers/compare'
+import postgres from 'postgres'
 
 const SHOULD_OUTPUT_JSON = process.env.BENCHMARK_JSON_OUTPUT === '1'
 const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
@@ -35,18 +41,28 @@ const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
 let db: TestDB
 let seed: SeedResult
 let drizzle: PostgresDrizzleDB
+let pgClient: ReturnType<typeof postgres>
 const benchmarkResults: BenchmarkResult[] = []
 
 describe('Prisma Parity E2E - PostgreSQL', () => {
   beforeAll(async () => {
     setGlobalDialect('postgres')
     db = await createTestDB('postgres')
+
+    pgClient = postgres(
+      'postgresql://postgres:postgres@localhost:5433/prisma_test',
+    )
     drizzle = createDrizzleDB(
       'postgres',
       'postgresql://postgres:postgres@localhost:5433/prisma_test',
     )
+
     await new Promise((resolve) => setTimeout(resolve, 100))
+
     seed = await seedDatabase(db)
+
+    await generateSpeedExtensionForDB(db)
+    await loadExtensionIntoTestDB(db, pgClient)
 
     for (let i = 0; i < 5; i++) {
       await db.prisma.user.findMany({ take: 1 })
@@ -61,6 +77,7 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
       dialect: 'postgres',
       shouldOutputJson: SHOULD_OUTPUT_JSON,
     })
+    await pgClient.end()
     await db?.close()
   })
 

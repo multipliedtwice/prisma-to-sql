@@ -242,6 +242,7 @@ function generateImports(runtimeImportPath: string): string {
   planQueryStrategy, 
   executeWhereInSegments,
   buildReducerConfig,
+  setRelationStats,
   type PrismaMethod, 
   type Model, 
   type BatchQuery, 
@@ -254,6 +255,12 @@ function generateImports(runtimeImportPath: string): string {
   executeSqliteQuery,
   executeRaw,
 } from ${JSON.stringify(runtimeImportPath)}`
+}
+
+function generateStatsInit(): string {
+  return `import { RELATION_STATS } from './planner.generated'
+
+setRelationStats(RELATION_STATS as any)`
 }
 
 function generateCoreTypes(): string {
@@ -378,7 +385,7 @@ function generateDataConstants(
   queries: Map<string, Map<string, Map<string, any>>>,
   dialect: string,
 ): string {
-  return `export const MODELS: Model[] = ${JSON.stringify(cleanModels, null, 2)}
+  return `const MODELS: Model[] = ${JSON.stringify(cleanModels, null, 2)}
 
 const ENUM_MAPPINGS: Record<string, Record<string, string>> = ${JSON.stringify(mappings, null, 2)}
 
@@ -701,6 +708,7 @@ function generateExtension(runtimeImportPath: string): string {
         let requiresReduction = false
         let includeSpec: Record<string, any> | undefined
         let isArrayAgg = false
+        let skipWhereIn = false
 
         if (prebakedQuery) {
           sql = prebakedQuery.sql
@@ -709,13 +717,18 @@ function generateExtension(runtimeImportPath: string): string {
           requiresReduction = prebakedQuery.requiresReduction || false
           includeSpec = prebakedQuery.includeSpec
           isArrayAgg = prebakedQuery.isArrayAgg || false
+          skipWhereIn = prebakedQuery.skipWhereIn || false
         } else {
-          const result = buildSQL(model, MODELS, method, plan.filteredArgs, DIALECT)
+          const buildArgs = plan.whereInSegments.length > 0
+            ? { ...plan.filteredArgs, __originalArgs: plan.originalArgs }
+            : plan.filteredArgs
+          const result = buildSQL(model, MODELS, method, buildArgs, DIALECT)
           sql = result.sql
           params = result.params as unknown[]
           requiresReduction = result.requiresReduction || false
           includeSpec = result.includeSpec
           isArrayAgg = result.isArrayAgg || false
+          skipWhereIn = result.skipWhereIn || false
         }
 
         if (debug) {
@@ -723,17 +736,17 @@ function generateExtension(runtimeImportPath: string): string {
             ? (isArrayAgg ? 'ARRAY AGG' : requiresReduction ? 'STREAMING REDUCTION' : 'STREAMING')
             : (requiresReduction ? 'BUFFERED REDUCTION' : 'DIRECT')
           
-          const whereInMode = plan.whereInSegments.length > 0
+          const whereInMode = plan.whereInSegments.length > 0 && !skipWhereIn
             ? (DIALECT === 'postgres' ? 'STREAMING PARALLEL' : 'SEQUENTIAL')
             : 'NONE'
           
           console.log(\`[\${DIALECT}] \${modelName}.\${method} - \${strategy} + WHERE IN: \${whereInMode}\`)
-          console.log(\`  Prebaked: \${prebaked}\`)
+          console.log(\`  Prebaked: \${prebaked}, skipWhereIn: \${skipWhereIn}\`)
           console.log('  SQL:', sql)
           console.log('  Params:', params)
         }
 
-        if (plan.whereInSegments.length > 0) {
+        if (plan.whereInSegments.length > 0 && !skipWhereIn) {
           if (DIALECT === 'postgres') {
             const { executeWhereInSegmentsStreaming } = await import(${JSON.stringify(runtimeImportPath)})
             
@@ -1153,6 +1166,7 @@ function generateCode(
 
   return [
     generateImports(runtimeImportPath),
+    generateStatsInit(),
     generateCoreTypes(),
     generateHelpers(),
     generateDataConstants(cleanModels, mappings, fieldTypes, queries, dialect),

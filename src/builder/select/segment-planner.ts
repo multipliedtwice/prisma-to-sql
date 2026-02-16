@@ -2,7 +2,9 @@ import { isPlainObject } from '../shared/validators/type-guards'
 import { extractRelationEntries } from '../shared/relation-extraction-utils'
 import { resolveRelationKeys } from '../shared/relation-key-utils'
 import { Field, Model } from '../../types'
-import { hasChildPagination } from '../shared/relation-utils'
+import { extractNestedIncludeSpec } from '../shared/relation-utils'
+import { canUseFlatJoinForAll } from './flat-join'
+import { shouldPreferFlatJoinStrategy } from './strategy-estimator'
 
 export interface WhereInSegment {
   relationName: string
@@ -11,10 +13,13 @@ export interface WhereInSegment {
   fkFieldName: string
   parentKeyFieldName: string
   isList: boolean
+  perParentTake?: number
+  perParentSkip?: number
 }
 
 export interface QueryPlan {
   filteredArgs: any
+  originalArgs: any
   whereInSegments: WhereInSegment[]
   injectedParentKeys: string[]
 }
@@ -37,6 +42,24 @@ function resolveRelation(
   return { field: field as Field, relModel }
 }
 
+function extractPagination(relArgs: unknown): {
+  take?: number
+  skip?: number
+} {
+  if (!isPlainObject(relArgs)) return {}
+  const obj = relArgs as Record<string, unknown>
+  const result: { take?: number; skip?: number } = {}
+
+  if ('take' in obj && typeof obj.take === 'number') {
+    result.take = obj.take
+  }
+  if ('skip' in obj && typeof obj.skip === 'number' && obj.skip > 0) {
+    result.skip = obj.skip
+  }
+
+  return result
+}
+
 function buildWhereInSegment(
   name: string,
   relArgs: unknown,
@@ -46,13 +69,18 @@ function buildWhereInSegment(
   const keys = resolveRelationKeys(field, 'whereIn')
   if (keys.childKeys.length !== 1) return null
 
+  const isList = isListField(field)
+  const pagination = isList ? extractPagination(relArgs) : {}
+
   return {
     relationName: name,
     relArgs,
     childModelName: relModel.name,
     fkFieldName: keys.childKeys[0],
     parentKeyFieldName: keys.parentKeys[0],
-    isList: isListField(field),
+    isList,
+    perParentTake: pagination.take,
+    perParentSkip: pagination.skip,
   }
 }
 
@@ -121,10 +149,12 @@ export function planQueryStrategy(params: {
   args: any
   allModels: readonly Model[]
   dialect: 'postgres' | 'sqlite'
+  debug?: boolean
 }): QueryPlan {
-  const { model, args, allModels } = params
+  const { model, args, allModels, dialect, debug } = params
   const emptyPlan: QueryPlan = {
     filteredArgs: args,
+    originalArgs: args,
     whereInSegments: [],
     injectedParentKeys: [],
   }
@@ -134,16 +164,41 @@ export function planQueryStrategy(params: {
     return emptyPlan
   }
 
+  if (dialect === 'postgres') {
+    const includeSpec = extractNestedIncludeSpec(args, model)
+
+    if (Object.keys(includeSpec).length > 0) {
+      const hasPagination =
+        isPlainObject(args) && 'take' in args && args.take != null
+
+      const takeValue =
+        isPlainObject(args) && typeof args.take === 'number' ? args.take : null
+
+      const canFlatJoin = canUseFlatJoinForAll(includeSpec, model, allModels)
+
+      if (
+        shouldPreferFlatJoinStrategy({
+          includeSpec,
+          model,
+          schemas: allModels,
+          hasPagination,
+          takeValue,
+          canUseFlatJoin: canFlatJoin,
+          debug,
+          source: 'planner',
+        })
+      ) {
+        return emptyPlan
+      }
+    }
+  }
+
   const whereInSegments: WhereInSegment[] = []
   const toRemove = new Set<string>()
 
   for (const entry of entries) {
     const resolved = resolveRelation(model, entry.name, allModels)
     if (!resolved) continue
-
-    if (isListField(resolved.field) && hasChildPagination(entry.value)) {
-      continue
-    }
 
     const segment = buildWhereInSegment(
       entry.name,
@@ -169,6 +224,7 @@ export function planQueryStrategy(params: {
 
   return {
     filteredArgs: finalArgs,
+    originalArgs: args,
     whereInSegments,
     injectedParentKeys: injectedKeys,
   }

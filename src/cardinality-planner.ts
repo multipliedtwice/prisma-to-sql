@@ -229,6 +229,18 @@ async function collectPostgresStatsFromCatalog(params: {
   const edges = extractMeasurableOneToManyEdges(datamodel)
   const out: RelationStatsMap = {}
 
+  const tablesToAnalyze = new Set<string>()
+  for (const edge of edges) {
+    tablesToAnalyze.add(edge.parentTable)
+    tablesToAnalyze.add(edge.childTable)
+  }
+
+  for (const table of tablesToAnalyze) {
+    try {
+      await executor.query(`ANALYZE ${quoteIdent('postgres', table)}`)
+    } catch (_) {}
+  }
+
   const tableStatsQuery = `
     SELECT
       c.relname as table_name,
@@ -360,10 +372,28 @@ export async function collectRelationCardinalities(params: {
   dialect: Dialect
   mode?: 'fast' | 'precise'
 }): Promise<RelationStatsMap> {
-  const { executor, datamodel, dialect, mode = 'fast' } = params
+  const { executor, datamodel, dialect, mode = 'precise' } = params
 
   if (dialect === 'postgres' && mode === 'fast') {
-    return collectPostgresStatsFromCatalog({ executor, datamodel })
+    const stats = await collectPostgresStatsFromCatalog({ executor, datamodel })
+
+    let allTrivial = true
+    for (const model of Object.values(stats)) {
+      for (const rel of Object.values(model)) {
+        if (rel.avg > 1 || rel.coverage > 0.5) {
+          allTrivial = false
+          break
+        }
+      }
+      if (!allTrivial) break
+    }
+
+    if (allTrivial && Object.keys(stats).length > 0) {
+      console.warn('⚠ Catalog stats look stale, falling back to precise mode')
+      return collectPreciseCardinalities({ executor, datamodel, dialect })
+    }
+
+    return stats
   }
 
   return collectPreciseCardinalities({ executor, datamodel, dialect })

@@ -316,6 +316,13 @@ export async function seedDatabase(db: TestDB): Promise<SeedResult> {
   console.log(`  Tasks: ${taskIds.length}`)
   console.log(`  Comments: ${commentIds.length}`)
 
+  console.log('Flushing database connections...')
+  await db.prisma.$queryRaw`SELECT 1`
+  await new Promise((resolve) => setTimeout(resolve, 1000))
+
+  const finalUserCount = await db.prisma.user.count()
+  console.log(`Verified ${finalUserCount} users committed to database`)
+
   return {
     organizationIds,
     userIds,

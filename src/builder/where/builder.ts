@@ -263,7 +263,11 @@ function buildLogicalClause(
     return `${SQL_TEMPLATES.NOT} (${clauses.join(SQL_SEPARATORS.CONDITION_AND)})`
   }
 
-  return clauses.join(` ${operator} `)
+  const joined = clauses.join(` ${operator} `)
+  if (operator === 'OR' && clauses.length > 1) {
+    return `(${joined})`
+  }
+  return joined
 }
 
 function buildLogical(

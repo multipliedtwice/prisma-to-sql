@@ -19,13 +19,6 @@ export function isValidWhereClause(clause: string): boolean {
   )
 }
 
-export function isEmptyWhere(
-  where: Record<string, unknown> | null | undefined,
-): boolean {
-  if (!isNotNullish(where)) return true
-  return Object.keys(where).length === 0
-}
-
 function sqlPreview(sql: string): string {
   const s = String(sql)
   if (s.length <= 160) return s
