@@ -1,3 +1,17 @@
+# [1.68.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.67.0...v1.68.0) (2026-02-16)
+
+
+### Bug Fixes
+
+* **streaming-progressive-reducer.ts:** add type assertion for return value of getCurrentParentKey to ensure correct type handling ([07c5f54](https://github.com/multipliedtwice/prisma-to-sql/commit/07c5f540a67f7034f745414f50ea7d3c9a45e47b))
+
+
+### Features
+
+* **pagination.ts:** enhance cursor condition logic to handle single cursor and order entries for better query performance ([6af0af4](https://github.com/multipliedtwice/prisma-to-sql/commit/6af0af43182222d265c66c8dd4e2eb13dc0aace3))
+* **streaming-where-in-executor:** implement recursive fetching of child segments with depth control to prevent stack overflow ([aec4a6a](https://github.com/multipliedtwice/prisma-to-sql/commit/aec4a6ae9e467bc8a8a19ebfbecaccafee326e66))
+* **tests:** enable debug mode in speedExtension for better query logging and performance analysis ([c6de95d](https://github.com/multipliedtwice/prisma-to-sql/commit/c6de95d802d95989f19a2e4df6d3b48e6130ebbf))
+
 # [1.67.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.66.1...v1.67.0) (2026-02-15)
 
 
