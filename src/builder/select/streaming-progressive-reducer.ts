@@ -24,7 +24,7 @@ export function createProgressiveReducer(
     },
 
     getCurrentParentKey(row: any): string | null {
-      return coreReducer.processRow(row)
+      return coreReducer.processRow(row) as string | null
     },
 
     getCompletedParent(parentKey: string): any | null {
@@ -37,7 +37,10 @@ export function createProgressiveReducer(
 
     getRemainingParents(): any[] {
       const remaining: any[] = []
-      for (const [key, parent] of coreReducer.getParentMap()) {
+      for (const [key, parent] of coreReducer.getParentMap() as Map<
+        string,
+        any
+      >) {
         if (!completedKeys.has(key)) {
           remaining.push(parent)
           completedKeys.add(key)
