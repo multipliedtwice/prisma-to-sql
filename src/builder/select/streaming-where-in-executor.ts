@@ -11,6 +11,9 @@ import {
 
 const MAX_RECURSIVE_DEPTH = 10
 
+const ADAPTIVE_PARENT_THRESHOLD = 15
+const ADAPTIVE_DEPTH_THRESHOLD = 2
+
 interface StreamingWhereInParams {
   segments: WhereInSegment[]
   parentSql: string
@@ -22,6 +25,103 @@ interface StreamingWhereInParams {
   execute: (sql: string, params: unknown[]) => Promise<any[]>
   batchSize?: number
   maxConcurrency?: number
+  originalArgs?: any
+  method?: string
+}
+
+function measureRelArgsDepth(relArgs: unknown): number {
+  if (!relArgs || relArgs === true || typeof relArgs !== 'object') return 0
+
+  const args = relArgs as Record<string, any>
+  const nested = args.include || args.select
+  if (!nested || typeof nested !== 'object') return 0
+
+  let maxChildDepth = 0
+  for (const val of Object.values(nested)) {
+    if (val === false) continue
+    if (val === true) {
+      maxChildDepth = Math.max(maxChildDepth, 1)
+      continue
+    }
+    if (val && typeof val === 'object') {
+      maxChildDepth = Math.max(maxChildDepth, 1 + measureRelArgsDepth(val))
+    }
+  }
+  return maxChildDepth
+}
+
+function measureSegmentNestingDepth(segments: WhereInSegment[]): number {
+  let maxDepth = 0
+  for (const seg of segments) {
+    const depth = 1 + measureRelArgsDepth(seg.relArgs)
+    maxDepth = Math.max(maxDepth, depth)
+  }
+  return maxDepth
+}
+
+function shouldAdaptivelySwitch(
+  actualParentCount: number,
+  segments: WhereInSegment[],
+): boolean {
+  if (actualParentCount > ADAPTIVE_PARENT_THRESHOLD) return false
+  if (segments.length === 0) return false
+
+  const depth = measureSegmentNestingDepth(segments)
+  return depth >= ADAPTIVE_DEPTH_THRESHOLD
+}
+
+async function executeCorrelatedFallback(
+  parentRows: any[],
+  parentModel: Model,
+  allModels: readonly Model[],
+  dialect: 'postgres' | 'sqlite',
+  execute: (sql: string, params: unknown[]) => Promise<any[]>,
+  originalArgs: any,
+  method: string,
+): Promise<any[]> {
+  const pkField = getPrimaryKeyField(parentModel)
+  const pks = parentRows.map((r) => r[pkField]).filter(Boolean)
+
+  if (pks.length === 0) return []
+
+  const fallbackArgs = { ...originalArgs }
+  delete fallbackArgs.take
+  delete fallbackArgs.skip
+  delete fallbackArgs.cursor
+
+  fallbackArgs.where = { [pkField]: { in: pks } }
+
+  if (originalArgs.orderBy) {
+    fallbackArgs.orderBy = originalArgs.orderBy
+  }
+
+  const result = buildSQL(
+    parentModel,
+    allModels as Model[],
+    method as any,
+    fallbackArgs,
+    dialect,
+  )
+
+  let rows = await execute(result.sql, result.params as unknown[])
+
+  if (result.isArrayAgg && result.includeSpec) {
+    const config = buildArrayAggReducerConfig(
+      parentModel,
+      result.includeSpec,
+      allModels,
+    )
+    rows = reduceArrayAggRows(rows, config)
+  } else if (result.requiresReduction && result.includeSpec) {
+    const config = buildReducerConfig(
+      parentModel,
+      result.includeSpec,
+      allModels,
+    )
+    rows = reduceFlatRows(rows, config)
+  }
+
+  return rows
 }
 
 export async function executeWhereInSegmentsStreaming(
@@ -36,8 +136,8 @@ export async function executeWhereInSegmentsStreaming(
     modelMap,
     dialect,
     execute,
-    batchSize = 100,
-    maxConcurrency = 10,
+    originalArgs,
+    method,
   } = params
 
   if (segments.length === 0) {
@@ -48,89 +148,50 @@ export async function executeWhereInSegmentsStreaming(
     throw new Error('Streaming WHERE IN requires postgres dialect')
   }
 
-  const parentMap = new Map<string, any>()
-  const batches = new Map<string, unknown[]>()
-  const inFlightMap = new Map<Promise<void>, string>()
-
-  for (const seg of segments) {
-    batches.set(seg.relationName, [])
-  }
-
   const pkField = getPrimaryKeyField(parentModel)
-
   const parentRows = await execute(parentSql, parentParams)
 
+  if (
+    originalArgs &&
+    method &&
+    shouldAdaptivelySwitch(parentRows.length, segments)
+  ) {
+    return executeCorrelatedFallback(
+      parentRows,
+      parentModel,
+      allModels,
+      dialect,
+      execute,
+      originalArgs,
+      method,
+    )
+  }
+
+  const parentMap = new Map<string, any>()
   for (const row of parentRows) {
     const pk = row[pkField]
-    parentMap.set(pk, { ...row })
-
+    const enriched = { ...row }
     for (const seg of segments) {
-      row[seg.relationName] = seg.isList ? [] : null
+      enriched[seg.relationName] = seg.isList ? [] : null
     }
-
-    for (const seg of segments) {
-      const batch = batches.get(seg.relationName)!
-      const parentKey = row[seg.parentKeyFieldName]
-      batch.push(parentKey)
-
-      if (batch.length >= batchSize) {
-        const idsToFetch = [...batch]
-        batch.length = 0
-
-        const promise = fetchAndAttachChildren(
-          seg,
-          idsToFetch,
-          parentMap,
-          allModels,
-          modelMap,
-          dialect,
-          execute,
-          0,
-        )
-
-        inFlightMap.set(promise, seg.relationName)
-
-        promise.finally(() => {
-          inFlightMap.delete(promise)
-        })
-
-        if (inFlightMap.size >= maxConcurrency) {
-          await Promise.race(inFlightMap.keys())
-        }
-      }
-    }
+    parentMap.set(pk, enriched)
   }
 
-  for (const seg of segments) {
-    const batch = batches.get(seg.relationName)!
-    if (batch.length > 0) {
-      const promise = fetchAndAttachChildren(
-        seg,
-        batch,
-        parentMap,
-        allModels,
-        modelMap,
-        dialect,
-        execute,
-        0,
-      )
-
-      inFlightMap.set(promise, seg.relationName)
-
-      promise.finally(() => {
-        inFlightMap.delete(promise)
-      })
-    }
-  }
-
-  await Promise.all(inFlightMap.keys())
+  await resolveSegments(
+    segments,
+    parentMap,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+    0,
+  )
 
   return Array.from(parentMap.values())
 }
 
-async function fetchAndAttachChildren(
-  segment: any,
-  parentIds: unknown[],
+async function resolveSegments(
+  segments: WhereInSegment[],
   parentMap: Map<string, any>,
   allModels: readonly Model[],
   modelMap: Map<string, Model>,
@@ -139,14 +200,75 @@ async function fetchAndAttachChildren(
   depth: number,
 ): Promise<void> {
   if (depth > MAX_RECURSIVE_DEPTH) return
+  if (segments.length === 0) return
 
+  const parentRows = Array.from(parentMap.values())
+
+  if (segments.length === 1) {
+    await resolveSingleSegment(
+      segments[0],
+      parentRows,
+      parentMap,
+      allModels,
+      modelMap,
+      dialect,
+      execute,
+      depth,
+    )
+    return
+  }
+
+  await Promise.all(
+    segments.map((seg) =>
+      resolveSingleSegment(
+        seg,
+        parentRows,
+        parentMap,
+        allModels,
+        modelMap,
+        dialect,
+        execute,
+        depth,
+      ),
+    ),
+  )
+}
+
+async function resolveSingleSegment(
+  segment: WhereInSegment,
+  parentRows: any[],
+  parentMap: Map<string, any>,
+  allModels: readonly Model[],
+  modelMap: Map<string, Model>,
+  dialect: 'postgres' | 'sqlite',
+  execute: (sql: string, params: unknown[]) => Promise<any[]>,
+  depth: number,
+): Promise<void> {
   const childModel = modelMap.get(segment.childModelName)
-  if (!childModel) return
+  if (!childModel) {
+    for (const parent of parentRows) {
+      parent[segment.relationName] = segment.isList ? [] : null
+    }
+    return
+  }
+
+  const parentIds = parentRows
+    .map((r) => r[segment.parentKeyFieldName])
+    .filter((v) => v != null)
+
+  if (parentIds.length === 0) {
+    for (const parent of parentRows) {
+      parent[segment.relationName] = segment.isList ? [] : null
+    }
+    return
+  }
+
+  const uniqueIds = [...new Set(parentIds)]
 
   const childArgs = buildChildArgs(
     segment.relArgs,
     segment.fkFieldName,
-    parentIds,
+    uniqueIds,
   )
 
   const childPlan = planQueryStrategy({
@@ -193,26 +315,15 @@ async function fetchAndAttachChildren(
       }
     }
 
-    for (const nestedSeg of childPlan.whereInSegments) {
-      const nestedIds = children
-        .map((c) => c[nestedSeg.parentKeyFieldName])
-        .filter((v) => v != null)
-
-      const uniqueNestedIds = [...new Set(nestedIds)]
-
-      if (uniqueNestedIds.length > 0) {
-        await fetchAndAttachChildren(
-          nestedSeg,
-          uniqueNestedIds,
-          childMap,
-          allModels,
-          modelMap,
-          dialect,
-          execute,
-          depth + 1,
-        )
-      }
-    }
+    await resolveSegments(
+      childPlan.whereInSegments,
+      childMap,
+      allModels,
+      modelMap,
+      dialect,
+      execute,
+      depth + 1,
+    )
   }
 
   for (const child of children) {
@@ -242,7 +353,6 @@ function buildChildArgs(
       : { ...(relArgs as any) }
 
   const existingWhere = base.where
-
   const inCondition = { [fkFieldName]: { in: parentIds } }
 
   base.where = existingWhere

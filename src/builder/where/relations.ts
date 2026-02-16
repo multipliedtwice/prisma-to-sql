@@ -36,6 +36,18 @@ type RelationFilterArgs = {
 
 const NO_JOINS: readonly string[] = []
 
+const SCHEMA_MAP_CACHE = new WeakMap<readonly Model[], Map<string, Model>>()
+
+function getSchemaByName(schemas: readonly Model[]): Map<string, Model> {
+  let map = SCHEMA_MAP_CACHE.get(schemas)
+  if (!map) {
+    map = new Map()
+    for (const m of schemas) map.set(m.name, m)
+    SCHEMA_MAP_CACHE.set(schemas, map)
+  }
+  return map
+}
+
 function isListRelation(fieldType: unknown): boolean {
   return typeof fieldType === 'string' && fieldType.endsWith('[]')
 }
@@ -363,7 +375,8 @@ function buildRelation(
     })
   }
 
-  const relModel = ctx.schemaModels.find((m) => m.name === field.relatedModel)
+  const schemaMap = getSchemaByName(ctx.schemaModels)
+  const relModel = schemaMap.get(field.relatedModel!)
 
   if (!isNotNullish(relModel)) {
     throw createError(

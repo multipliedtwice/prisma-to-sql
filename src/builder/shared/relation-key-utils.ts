@@ -6,10 +6,9 @@ export interface RelationKeys {
   parentKeys: string[]
 }
 
-export function resolveRelationKeys(
-  field: Field,
-  context: 'include' | 'count' | 'whereIn' = 'include',
-): RelationKeys {
+const RELATION_KEYS_CACHE = new WeakMap<Field, RelationKeys>()
+
+function computeRelationKeys(field: Field, context: string): RelationKeys {
   const fkFields = normalizeKeyList(field.foreignKey)
 
   if (fkFields.length === 0) {
@@ -32,4 +31,16 @@ export function resolveRelationKeys(
   const parentKeys = field.isForeignKeyLocal ? fkFields : refFields
 
   return { childKeys, parentKeys }
+}
+
+export function resolveRelationKeys(
+  field: Field,
+  context: 'include' | 'count' | 'whereIn' = 'include',
+): RelationKeys {
+  let cached = RELATION_KEYS_CACHE.get(field)
+  if (cached) return cached
+
+  cached = computeRelationKeys(field, context)
+  RELATION_KEYS_CACHE.set(field, cached)
+  return cached
 }

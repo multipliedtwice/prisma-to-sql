@@ -1,7 +1,7 @@
 import type { Model } from '../../types'
 import type { RelationMetadata } from './reducer'
 import { getPrimaryKeyFields } from '../shared/primary-key-utils'
-import { buildCompositeKey } from '../shared/key-utils'
+import { buildKey } from '../shared/key-utils'
 import {
   maybeParseJson,
   parseJsonIfNeeded,
@@ -14,13 +14,13 @@ export interface CoreReducerConfig {
 }
 
 export interface CoreReducer {
-  processRow(row: any): string | null
-  getParent(key: string): any | null
+  processRow(row: any): unknown
+  getParent(key: unknown): any | null
   getAllParents(): any[]
-  getParentMap(): Map<string, any>
+  getParentMap(): Map<unknown, any>
 }
 
-type IndexByPath = Map<string, Map<string, any>>
+type IndexByPath = Map<string, Map<unknown, any>>
 
 const getOrCreateRelationMap = (
   relationMaps: WeakMap<object, IndexByPath>,
@@ -37,7 +37,7 @@ const getOrCreateRelationMap = (
 const getOrCreateChildMap = (
   relMap: IndexByPath,
   path: string,
-): Map<string, any> => {
+): Map<unknown, any> => {
   let childMap = relMap.get(path)
   if (!childMap) {
     childMap = new Map()
@@ -83,11 +83,6 @@ const createChildObject = (row: any, rel: RelationMetadata): any => {
   return child
 }
 
-const extractChildKey = (row: any, rel: RelationMetadata): string | null => {
-  const cols = rel.primaryKeyFields.map((f) => `${rel.path}.${f}`)
-  return buildCompositeKey(row, cols)
-}
-
 const attachChildToParent = (
   parent: any,
   child: any,
@@ -100,26 +95,45 @@ const attachChildToParent = (
   }
 }
 
+interface PreparedRelation {
+  rel: RelationMetadata
+  prefixedPkFields: string[]
+  nested: PreparedRelation[] | null
+}
+
+function prepareRelations(
+  relations: readonly RelationMetadata[],
+): PreparedRelation[] {
+  return relations.map((rel) => ({
+    rel,
+    prefixedPkFields: rel.primaryKeyFields.map((f) => `${rel.path}.${f}`),
+    nested: rel.nestedIncludes
+      ? prepareRelations(rel.nestedIncludes.includedRelations)
+      : null,
+  }))
+}
+
 const createRelationProcessor = (
   relationMaps: WeakMap<object, IndexByPath>,
 ) => {
   const processRelation = (
     parent: any,
-    rel: RelationMetadata,
+    prepared: PreparedRelation,
     row: any,
   ): void => {
-    const childKey = extractChildKey(row, rel)
-    if (!childKey) return
+    const { rel, prefixedPkFields, nested } = prepared
+
+    const childKey = buildKey(row, prefixedPkFields)
+    if (childKey == null) return
 
     const relMap = getOrCreateRelationMap(relationMaps, parent)
     const childMap = getOrCreateChildMap(relMap, rel.path)
 
     if (childMap.has(childKey)) {
-      const existing = childMap.get(childKey)!
-
-      if (rel.nestedIncludes) {
-        for (const nested of rel.nestedIncludes.includedRelations) {
-          processRelation(existing, nested, row)
+      if (nested) {
+        const existing = childMap.get(childKey)!
+        for (const nestedPrepared of nested) {
+          processRelation(existing, nestedPrepared, row)
         }
       }
       return
@@ -130,9 +144,9 @@ const createRelationProcessor = (
 
     attachChildToParent(parent, child, rel)
 
-    if (rel.nestedIncludes) {
-      for (const nested of rel.nestedIncludes.includedRelations) {
-        processRelation(child, nested, row)
+    if (nested) {
+      for (const nestedPrepared of nested) {
+        processRelation(child, nestedPrepared, row)
       }
     }
   }
@@ -141,7 +155,7 @@ const createRelationProcessor = (
 }
 
 export const createCoreReducer = (config: CoreReducerConfig): CoreReducer => {
-  const parentMap = new Map<string, any>()
+  const parentMap = new Map<unknown, any>()
   const relationMaps = new WeakMap<object, IndexByPath>()
 
   const scalarFields = config.parentModel.fields.filter((f) => !f.isRelation)
@@ -149,30 +163,24 @@ export const createCoreReducer = (config: CoreReducerConfig): CoreReducer => {
   const parentPkFields = getPrimaryKeyFields(config.parentModel)
   const includedRelations = config.includedRelations
 
-  const extractParentKey = (row: any): string | null =>
-    buildCompositeKey(row, parentPkFields)
+  const preparedRelations = prepareRelations(includedRelations)
 
   const processRelation = createRelationProcessor(relationMaps)
 
-  const processRow = (row: any): string | null => {
-    const parentKey = extractParentKey(row)
-    if (!parentKey) return null
+  const processRow = (row: any): unknown => {
+    const parentKey = buildKey(row, parentPkFields)
+    if (parentKey == null) return null
 
-    const parent = parentMap.has(parentKey)
-      ? parentMap.get(parentKey)!
-      : (() => {
-          const newParent = createParentObject(
-            row,
-            scalarFields,
-            jsonSet,
-            includedRelations,
-          )
-          parentMap.set(parentKey, newParent)
-          return newParent
-        })()
+    let parent: any
+    if (parentMap.has(parentKey)) {
+      parent = parentMap.get(parentKey)!
+    } else {
+      parent = createParentObject(row, scalarFields, jsonSet, includedRelations)
+      parentMap.set(parentKey, parent)
+    }
 
-    for (const rel of includedRelations) {
-      processRelation(parent, rel, row)
+    for (const prepared of preparedRelations) {
+      processRelation(parent, prepared, row)
     }
 
     return parentKey
@@ -180,7 +188,7 @@ export const createCoreReducer = (config: CoreReducerConfig): CoreReducer => {
 
   return {
     processRow,
-    getParent: (key: string) => parentMap.get(key) ?? null,
+    getParent: (key: unknown) => parentMap.get(key) ?? null,
     getAllParents: () => Array.from(parentMap.values()),
     getParentMap: () => parentMap,
   }

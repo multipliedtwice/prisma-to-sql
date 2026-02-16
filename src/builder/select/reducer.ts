@@ -8,7 +8,7 @@ import {
 import { getPrimaryKeyFields } from '../shared/primary-key-utils'
 import { extractRelationEntries } from '../shared/relation-extraction-utils'
 import { isPlainObject } from '../shared/validators/type-guards'
-import { buildCompositeKey } from '../shared/key-utils'
+import { buildKey } from '../shared/key-utils'
 
 import { getScalarFieldNames } from '../shared/model-field-cache'
 import {
@@ -36,7 +36,7 @@ export interface RelationMetadata {
   includeAllScalars: boolean
   selectedScalarFields: string[]
   nestedIncludes?: ReducerConfig | null
-  childLimit?: number // NEW: for client-side limiting
+  childLimit?: number
 
   path: string
   keyCols: string[]
@@ -161,7 +161,7 @@ export function buildReducerConfig(
   }
 }
 
-type ManyIndex = Map<string, any>
+type ManyIndex = Map<unknown, any>
 type IndexByPath = Map<string, ManyIndex>
 
 function getIndexForParent(
@@ -198,7 +198,7 @@ function materializeRelationObject(
   row: any,
   rel: RelationMetadata,
 ): any | null {
-  const relKey = buildCompositeKey(row, rel.keyCols)
+  const relKey = buildKey(row, rel.keyCols)
   if (relKey == null) return null
 
   const obj: any = {}
@@ -228,7 +228,7 @@ function processRelation(
   row: any,
   manyStore: WeakMap<object, IndexByPath>,
 ): void {
-  const relKey = buildCompositeKey(row, rel.keyCols)
+  const relKey = buildKey(row, rel.keyCols)
   if (relKey == null) return
 
   if (rel.cardinality === 'one') {
@@ -246,9 +246,8 @@ function processRelation(
 
   const arr = parentObj[rel.name] as any[]
 
-  // Apply client-side child limit
   if (rel.childLimit && arr.length >= rel.childLimit) {
-    return // Skip - limit reached
+    return
   }
 
   const idx = getIndexForParent(manyStore, parentObj, rel.path)
@@ -293,12 +292,12 @@ export function reduceFlatRows(rows: any[], config: ReducerConfig): any[] {
   const parentScalarFields = pickParentScalarFieldsFromRows(parentModel, rows)
   const parentJsonSet = getJsonFieldSet(parentModel)
 
-  const resultMap = new Map<string, any>()
+  const resultMap = new Map<unknown, any>()
   const manyStore = new WeakMap<object, IndexByPath>()
 
   for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
     const row = rows[rowIdx]
-    const parentKey = buildCompositeKey(row, parentKeyCols)
+    const parentKey = buildKey(row, parentKeyCols)
 
     if (parentKey == null) continue
 

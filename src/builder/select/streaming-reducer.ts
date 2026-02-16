@@ -16,7 +16,7 @@ export function createStreamingReducer(config: ReducerConfig) {
       return coreReducer.getAllParents()
     },
 
-    getParentMap(): Map<string, any> {
+    getParentMap(): Map<unknown, any> {
       return coreReducer.getParentMap()
     },
   }

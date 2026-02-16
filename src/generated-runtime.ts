@@ -14,6 +14,8 @@ import {
 
 export const SQLITE_STMT_CACHE = new WeakMap<any, Map<string, any>>()
 
+const STMT_CACHE_LIMIT = 1000
+
 export function getOrPrepareStatement(client: any, sql: string): any {
   let cache = SQLITE_STMT_CACHE.get(client)
   if (!cache) {
@@ -22,14 +24,18 @@ export function getOrPrepareStatement(client: any, sql: string): any {
   }
 
   let stmt = cache.get(sql)
-  if (!stmt) {
-    stmt = client.prepare(sql)
+  if (stmt) {
+    cache.delete(sql)
     cache.set(sql, stmt)
+    return stmt
+  }
 
-    if (cache.size > 1000) {
-      const firstKey = cache.keys().next().value
-      cache.delete(firstKey!)
-    }
+  stmt = client.prepare(sql)
+  cache.set(sql, stmt)
+
+  if (cache.size > STMT_CACHE_LIMIT) {
+    const firstKey = cache.keys().next().value
+    cache.delete(firstKey!)
   }
 
   return stmt

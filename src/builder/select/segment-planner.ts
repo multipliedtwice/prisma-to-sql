@@ -25,6 +25,9 @@ type RelationStatsLike = Record<string, Record<string, RelStats>>
 const HARD_FANOUT_CAP = 5000
 const MAX_ESTIMATED_ROWS = Number.MAX_SAFE_INTEGER / 1000
 
+const CORRELATED_PREFERRED_PARENT_LIMIT = 30
+const CORRELATED_PREFERRED_DEPTH_THRESHOLD = 2
+
 function isList(field: Field): boolean {
   return typeof field.type === 'string' && field.type.endsWith('[]')
 }
@@ -112,6 +115,93 @@ function getParentCount(method: string, args: any): number | null {
   return null
 }
 
+function measureMaxNestingDepth(
+  includeSpec: Record<string, any>,
+  model: Model,
+  allModels: readonly Model[],
+): number {
+  let maxDepth = 0
+  const modelMap = new Map(allModels.map((m) => [m.name, m]))
+
+  for (const [relName, relValue] of Object.entries(includeSpec)) {
+    if (relValue === false) continue
+
+    const field = model.fields.find((f) => f.name === relName)
+    if (!field || !field.isRelation || !field.relatedModel) continue
+
+    let thisDepth = 1
+
+    if (relValue && typeof relValue === 'object' && relValue !== true) {
+      const nestedInclude = relValue.include || relValue.select
+      if (nestedInclude && typeof nestedInclude === 'object') {
+        const relModel = modelMap.get(field.relatedModel)
+        if (relModel) {
+          thisDepth += measureMaxNestingDepth(
+            nestedInclude as Record<string, any>,
+            relModel,
+            allModels,
+          )
+        }
+      }
+    }
+
+    if (thisDepth > maxDepth) {
+      maxDepth = thisDepth
+    }
+  }
+
+  return maxDepth
+}
+
+function extractIncludeFromArgs(
+  args: any,
+  model: Model,
+): Record<string, any> | null {
+  if (!args) return null
+
+  if (args.include && isPlainObject(args.include)) {
+    return args.include as Record<string, any>
+  }
+
+  if (args.select && isPlainObject(args.select)) {
+    const relFields = getRelationFieldSet(model)
+    const relations: Record<string, any> = {}
+    let hasRelation = false
+
+    for (const [key, value] of Object.entries(args.select)) {
+      if (value === false) continue
+      if (relFields.has(key)) {
+        relations[key] = value
+        hasRelation = true
+      }
+    }
+
+    return hasRelation ? relations : null
+  }
+
+  return null
+}
+
+function shouldPreferCorrelatedSubqueries(
+  parentCount: number | null,
+  nestingDepth: number,
+  method: string,
+): boolean {
+  if (method === 'findFirst' || method === 'findUnique') {
+    return true
+  }
+
+  if (parentCount === null) {
+    return false
+  }
+
+  if (parentCount > CORRELATED_PREFERRED_PARENT_LIMIT) {
+    return false
+  }
+
+  return nestingDepth >= CORRELATED_PREFERRED_DEPTH_THRESHOLD
+}
+
 function buildWhereInSegment(
   name: string,
   relArgs: unknown,
@@ -182,6 +272,16 @@ export function planQueryStrategy(params: {
   const entries = extractRelationEntries(args, model)
   if (entries.length === 0) {
     return { filteredArgs: args, whereInSegments: [] }
+  }
+
+  const includeSpec = extractIncludeFromArgs(args, model)
+  if (includeSpec) {
+    const parentCount = getParentCount(method, args)
+    const nestingDepth = measureMaxNestingDepth(includeSpec, model, allModels)
+
+    if (shouldPreferCorrelatedSubqueries(parentCount, nestingDepth, method)) {
+      return { filteredArgs: args, whereInSegments: [] }
+    }
   }
 
   const oneToManyRels = collectOneToManyRelations(entries, model, allModels)

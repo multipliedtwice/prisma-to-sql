@@ -42,6 +42,19 @@ import {
 const MAX_INCLUDE_DEPTH = 5
 const MAX_INCLUDES_PER_LEVEL = 10
 const MAX_TOTAL_SUBQUERIES = 100
+const FIELD_BY_NAME_CACHE = new WeakMap<Model, Map<string, any>>()
+
+function getFieldMap(model: Model): Map<string, any> {
+  let map = FIELD_BY_NAME_CACHE.get(model)
+  if (!map) {
+    map = new Map()
+    for (const f of model.fields) {
+      map.set(f.name, f)
+    }
+    FIELD_BY_NAME_CACHE.set(model, map)
+  }
+  return map
+}
 
 interface IncludeComplexityStats {
   totalIncludes: number
@@ -130,9 +143,8 @@ function resolveRelationOrThrow(
   schemaByName: Map<string, Model>,
   relName: string,
 ): { field: Field; relModel: Model } {
-  const field = model.fields.find((f) => f.name === relName) as
-    | Field
-    | undefined
+  const fieldMap = getFieldMap(model)
+  const field = fieldMap.get(relName)
 
   if (!isNotNullish(field)) {
     throw new Error(
@@ -312,14 +324,24 @@ function buildSelectWithNestedIncludes(
 ): string {
   let relSelect = buildRelationSelect(relArgs, relModel, relAlias)
 
-  const nestedIncludes = isPlainObject(relArgs)
-    ? buildIncludeSqlInternal(relArgs as PrismaQueryArgs, {
-        ...ctx,
-        model: relModel,
-        parentAlias: relAlias,
-        depth: ctx.depth + 1,
-      })
-    : []
+  let nestedIncludes: IncludeSpec[] = []
+  if (isPlainObject(relArgs)) {
+    const prevModel = ctx.model
+    const prevParentAlias = ctx.parentAlias
+    const prevDepth = ctx.depth
+
+    ctx.model = relModel
+    ctx.parentAlias = relAlias
+    ctx.depth = prevDepth + 1
+
+    try {
+      nestedIncludes = buildIncludeSqlInternal(relArgs as PrismaQueryArgs, ctx)
+    } finally {
+      ctx.model = prevModel
+      ctx.parentAlias = prevParentAlias
+      ctx.depth = prevDepth
+    }
+  }
 
   if (isNonEmptyArray(nestedIncludes)) {
     const emptyJson = ctx.dialect === 'postgres' ? `'[]'::json` : `json('[]')`
@@ -982,18 +1004,23 @@ function buildIncludeSqlInternal(
       )
     }
 
-    const nextIncludePath = [...ctx.includePath, relName]
-    const nextVisitSet = new Set(ctx.visitSet)
-    nextVisitSet.add(relationPath)
+    ctx.includePath.push(relName)
+    ctx.visitSet.add(relationPath)
 
-    includes.push(
-      buildSingleInclude(relName, relArgs, resolved.field, resolved.relModel, {
-        ...ctx,
-        includePath: nextIncludePath,
-        visitSet: nextVisitSet,
-        depth: depth,
-      }),
-    )
+    try {
+      includes.push(
+        buildSingleInclude(
+          relName,
+          relArgs,
+          resolved.field,
+          resolved.relModel,
+          ctx,
+        ),
+      )
+    } finally {
+      ctx.includePath.pop()
+      ctx.visitSet.delete(relationPath)
+    }
   }
 
   return includes

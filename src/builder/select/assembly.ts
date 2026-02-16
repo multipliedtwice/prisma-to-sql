@@ -26,7 +26,7 @@ import { buildFlatJoinSql, canUseFlatJoinForAll } from './flat-join'
 import { buildArrayAggSql, canUseArrayAggForAll } from './array-agg'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
 
-type DistinctOrderEntry = {
+type OrderByEntry = {
   field: string
   direction: 'asc' | 'desc'
   nulls?: 'first' | 'last'
@@ -162,57 +162,107 @@ function buildOutputColumns(
   return formatted
 }
 
-function buildWindowOrder(args: {
-  baseOrder: string
-  idField: any
-  fromAlias: string
-  model?: any
-}): string {
-  const { baseOrder, idField, fromAlias, model } = args
-  const fromLower = String(fromAlias).toLowerCase()
-
-  const orderFields = baseOrder
-    .split(SQL_SEPARATORS.ORDER_BY)
-    .map((s) => s.trim().toLowerCase().replace(/\s+/g, ' '))
-
-  const hasIdInOrder = orderFields.some((f) => {
-    return f.includes(`${fromLower}.id`) || f.includes(`${fromLower}."id"`)
-  })
-
-  if (hasIdInOrder) return baseOrder
-
-  const idTiebreaker = idField
-    ? ', ' + col(fromAlias, 'id', model) + ' ASC'
-    : ''
-  return baseOrder + idTiebreaker
+function getOrderByEntries(spec: SelectQuerySpec): OrderByEntry[] {
+  if (!isNotNullish(spec.args.orderBy)) return []
+  const normalized = normalizeOrderByInput(spec.args.orderBy, parseOrderByValue)
+  const entries: OrderByEntry[] = []
+  for (const item of normalized) {
+    for (const field in item) {
+      if (!Object.prototype.hasOwnProperty.call(item, field)) continue
+      const value = item[field]
+      if (typeof value === 'string') {
+        entries.push({ field, direction: value as 'asc' | 'desc' })
+        continue
+      }
+      const obj = value as OrderBySortObject
+      entries.push({ field, direction: obj.direction, nulls: obj.nulls })
+    }
+  }
+  return entries
 }
 
-function extractDistinctOrderEntries(
-  spec: SelectQuerySpec,
-): DistinctOrderEntry[] {
-  if (isNotNullish(spec.args.orderBy)) {
-    const normalized = normalizeOrderByInput(
-      spec.args.orderBy,
-      parseOrderByValue,
-    )
-
-    const entries: DistinctOrderEntry[] = []
-    for (const item of normalized) {
-      for (const field in item) {
-        if (!Object.prototype.hasOwnProperty.call(item, field)) continue
-        const value = item[field]
-
-        if (typeof value === 'string') {
-          entries.push({ field, direction: value as 'asc' | 'desc' })
-          continue
-        }
-
-        const obj = value as OrderBySortObject
-        entries.push({ field, direction: obj.direction, nulls: obj.nulls })
-      }
+function renderOrderBySql(
+  entries: OrderByEntry[],
+  alias: string,
+  dialect: string,
+  model?: any,
+): string {
+  if (entries.length === 0) return ''
+  const out: string[] = []
+  for (const e of entries) {
+    const dir = e.direction.toUpperCase()
+    const c = col(alias, e.field, model)
+    if (dialect === 'postgres') {
+      const nulls = isNotNullish(e.nulls)
+        ? ` NULLS ${e.nulls.toUpperCase()}`
+        : ''
+      out.push(c + ' ' + dir + nulls)
+    } else if (isNotNullish(e.nulls)) {
+      const isNullExpr = `(${c} IS NULL)`
+      const nullRankDir = e.nulls === 'first' ? 'DESC' : 'ASC'
+      out.push(isNullExpr + ' ' + nullRankDir)
+      out.push(c + ' ' + dir)
+    } else {
+      out.push(c + ' ' + dir)
     }
-    if (entries.length > 0) return entries
   }
+  return out.join(SQL_SEPARATORS.ORDER_BY)
+}
+
+function renderOrderBySimple(entries: OrderByEntry[], alias: string): string {
+  if (entries.length === 0) return ''
+  const out: string[] = []
+  for (const e of entries) {
+    const dir = e.direction.toUpperCase()
+    const c = `${alias}.${quote(e.field)}`
+    if (isNotNullish(e.nulls)) {
+      const isNullExpr = `(${c} IS NULL)`
+      const nullRankDir = e.nulls === 'first' ? 'DESC' : 'ASC'
+      out.push(isNullExpr + ' ' + nullRankDir)
+      out.push(c + ' ' + dir)
+    } else {
+      out.push(c + ' ' + dir)
+    }
+  }
+  return out.join(SQL_SEPARATORS.ORDER_BY)
+}
+
+function ensureIdTiebreakerEntries(
+  entries: OrderByEntry[],
+  model: any,
+): OrderByEntry[] {
+  const idField = model?.fields?.find?.(
+    (f: any) => f.name === 'id' && !f.isRelation,
+  )
+  if (!idField) return entries
+  if (entries.some((e) => e.field === 'id')) return entries
+  return [...entries, { field: 'id', direction: 'asc' }]
+}
+
+function ensurePostgresDistinctOrderEntries(args: {
+  entries: OrderByEntry[]
+  distinct: readonly string[]
+  model: any
+}): OrderByEntry[] {
+  const { entries, distinct, model } = args
+
+  const distinctEntries: OrderByEntry[] = [...distinct].map((f) => ({
+    field: f,
+    direction: 'asc' as const,
+  }))
+
+  const canKeepAsIs =
+    entries.length >= distinctEntries.length &&
+    distinctEntries.every((de, i) => entries[i].field === de.field)
+
+  const merged = canKeepAsIs ? entries : [...distinctEntries, ...entries]
+
+  return ensureIdTiebreakerEntries(merged, model)
+}
+
+function extractDistinctOrderEntries(spec: SelectQuerySpec): OrderByEntry[] {
+  const entries = getOrderByEntries(spec)
+  if (entries.length > 0) return entries
 
   if (isNotNullish(spec.distinct) && isNonEmptyArray(spec.distinct)) {
     return [...spec.distinct].map((f) => ({
@@ -224,38 +274,12 @@ function extractDistinctOrderEntries(
   return []
 }
 
-function buildFieldNameOrderBy(
-  entries: DistinctOrderEntry[],
-  alias: string,
-): string {
-  if (entries.length === 0) return ''
-
-  const out: string[] = []
-  for (const e of entries) {
-    const dir = e.direction.toUpperCase()
-    const c = `${alias}.${quote(e.field)}`
-
-    if (isNotNullish(e.nulls)) {
-      const isNullExpr = `(${c} IS NULL)`
-      const nullRankDir = e.nulls === 'first' ? 'DESC' : 'ASC'
-      out.push(isNullExpr + ' ' + nullRankDir)
-      out.push(c + ' ' + dir)
-      continue
-    }
-
-    out.push(c + ' ' + dir)
-  }
-
-  return out.join(SQL_SEPARATORS.ORDER_BY)
-}
-
 function buildSqliteDistinctQuery(
   spec: SelectQuerySpec,
   selectWithIncludes: string,
   countJoins?: string[],
 ): string {
-  const { includes, from, whereClause, whereJoins, orderBy, distinct, model } =
-    spec
+  const { includes, from, whereClause, whereJoins, distinct, model } = spec
   if (!isNotNullish(distinct) || !isNonEmptyArray(distinct)) {
     throw new Error('buildSqliteDistinctQuery requires distinct fields')
   }
@@ -271,24 +295,24 @@ function buildSqliteDistinctQuery(
   )
   const distinctCols = buildDistinctColumns([...distinct], from.alias, model)
 
-  const fallbackOrder = [...distinct]
-    .map((f) => col(from.alias, f, model) + ' ASC')
-    .join(SQL_SEPARATORS.FIELD_LIST)
+  const baseEntries = getOrderByEntries(spec)
+  const fallbackEntries: OrderByEntry[] = [...distinct].map((f) => ({
+    field: f,
+    direction: 'asc' as const,
+  }))
 
-  const idField = model.fields.find(
-    (f: any) => f.name === 'id' && !f.isRelation,
-  )
-  const baseOrder = isNonEmptyString(orderBy) ? orderBy : fallbackOrder
+  const resolvedEntries = baseEntries.length > 0 ? baseEntries : fallbackEntries
 
-  const windowOrder = buildWindowOrder({
-    baseOrder,
-    idField,
-    fromAlias: from.alias,
+  const windowEntries = ensureIdTiebreakerEntries(resolvedEntries, model)
+  const windowOrder = renderOrderBySql(
+    windowEntries,
+    from.alias,
+    'sqlite',
     model,
-  })
+  )
 
   const outerEntries = extractDistinctOrderEntries(spec)
-  const outerOrder = buildFieldNameOrderBy(outerEntries, '"__tp_distinct"')
+  const outerOrder = renderOrderBySimple(outerEntries, '"__tp_distinct"')
 
   const joins = buildJoinsSql(whereJoins, countJoins)
 
@@ -584,111 +608,6 @@ function hasNestedIncludes(includeSpec: Record<string, any>): boolean {
   return Object.keys(includeSpec).length > 0
 }
 
-function splitOrderByTerms(orderBy: string): string[] {
-  const raw = orderBy.trim()
-  if (raw.length === 0) return []
-  return raw
-    .split(SQL_SEPARATORS.ORDER_BY)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-}
-
-function hasIdInOrderBy(orderBy: string, fromAlias: string): boolean {
-  const lower = orderBy.toLowerCase()
-  const aliasLower = fromAlias.toLowerCase()
-
-  return (
-    lower.includes(`${aliasLower}.id `) || lower.includes(`${aliasLower}."id"`)
-  )
-}
-
-function ensureIdTiebreakerOrderBy(
-  orderBy: string,
-  fromAlias: string,
-  model: any,
-): string {
-  const idField = model?.fields?.find?.(
-    (f: any) => f.name === 'id' && !f.isRelation,
-  )
-  if (!idField) return orderBy
-  if (hasIdInOrderBy(orderBy, fromAlias)) return orderBy
-  const t = col(fromAlias, 'id', model) + ' ASC'
-  return isNonEmptyString(orderBy) ? orderBy + ', ' + t : t
-}
-
-function ensurePostgresDistinctOrderBy(args: {
-  orderBy: string
-  distinct: readonly string[]
-  fromAlias: string
-  model: any
-}): string {
-  const { orderBy, distinct, fromAlias, model } = args
-
-  const distinctTerms = distinct.map((f) => col(fromAlias, f, model) + ' ASC')
-
-  const existing = splitOrderByTerms(orderBy)
-  const canKeepAsIs =
-    existing.length >= distinctTerms.length &&
-    distinctTerms.every((term, i) =>
-      existing[i].toLowerCase().startsWith(term.split(' ASC')[0].toLowerCase()),
-    )
-
-  const merged = canKeepAsIs
-    ? orderBy
-    : [...distinctTerms, ...existing].join(SQL_SEPARATORS.ORDER_BY)
-
-  return ensureIdTiebreakerOrderBy(merged, fromAlias, model)
-}
-
-function hasOnlySingleLevelIncludes(
-  includeSpec: Record<string, any>,
-  model: SelectQuerySpec['model'],
-  schemas: readonly any[],
-): boolean {
-  const modelMap = new Map(schemas.map((m: any) => [m.name, m]))
-
-  for (const [relName, value] of Object.entries(includeSpec)) {
-    if (value === false) continue
-
-    const field = model.fields.find((f: any) => f.name === relName)
-    if (!field || !field.isRelation || !field.relatedModel) continue
-
-    if (!isPlainObject(value)) continue
-
-    const obj = value as Record<string, unknown>
-
-    if (obj.include && isPlainObject(obj.include)) {
-      const relModel = modelMap.get(field.relatedModel)
-      if (!relModel) continue
-      const relRelationSet = getRelationFieldSet(relModel)
-      for (const k of Object.keys(obj.include as Record<string, unknown>)) {
-        if (
-          relRelationSet.has(k) &&
-          (obj.include as Record<string, unknown>)[k] !== false
-        ) {
-          return false
-        }
-      }
-    }
-
-    if (obj.select && isPlainObject(obj.select)) {
-      const relModel = modelMap.get(field.relatedModel)
-      if (!relModel) continue
-      const relRelationSet = getRelationFieldSet(relModel)
-      for (const k of Object.keys(obj.select as Record<string, unknown>)) {
-        if (
-          relRelationSet.has(k) &&
-          (obj.select as Record<string, unknown>)[k] !== false
-        ) {
-          return false
-        }
-      }
-    }
-  }
-
-  return true
-}
-
 export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const {
     select,
@@ -814,12 +733,13 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
 
   let finalOrderBy = orderBy
   if (dialect === 'postgres' && isNonEmptyArray(distinct)) {
-    finalOrderBy = ensurePostgresDistinctOrderBy({
-      orderBy: orderBy || '',
+    const currentEntries = getOrderByEntries(spec)
+    const mergedEntries = ensurePostgresDistinctOrderEntries({
+      entries: currentEntries.length > 0 ? currentEntries : [],
       distinct: [...distinct],
-      fromAlias: from.alias,
       model,
     })
+    finalOrderBy = renderOrderBySql(mergedEntries, from.alias, dialect, model)
   }
 
   if (isNonEmptyString(finalOrderBy))

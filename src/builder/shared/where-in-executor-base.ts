@@ -19,6 +19,8 @@ export interface ExecuteWhereInParams {
   modelMap: Map<string, Model>
   dialect: 'postgres' | 'sqlite'
   execute: (sql: string, params: unknown[]) => Promise<any[]>
+  originalArgs?: any
+  method?: string
 }
 
 function getParamLimit(dialect: 'postgres' | 'sqlite'): number {
@@ -90,14 +92,14 @@ export function stitchResults(
   }
 }
 
-export async function executeSegmentBase(
+async function executeSingleSegment(
   segment: WhereInSegment,
   parentRows: any[],
   allModels: readonly Model[],
   modelMap: Map<string, Model>,
   dialect: 'postgres' | 'sqlite',
   execute: (sql: string, params: unknown[]) => Promise<any[]>,
-  depth: number = 0,
+  depth: number,
 ): Promise<void> {
   if (depth > MAX_RECURSIVE_DEPTH) {
     for (const parent of parentRows) {
@@ -109,15 +111,18 @@ export async function executeSegmentBase(
   const parentIds = parentRows
     .map((r) => r[segment.parentKeyFieldName])
     .filter((v) => v != null)
+
   if (parentIds.length === 0) {
     for (const parent of parentRows) {
       parent[segment.relationName] = segment.isList ? [] : null
     }
     return
   }
+
   const uniqueIds = [...new Set(parentIds)]
   const paramLimit = getParamLimit(dialect)
   const chunks = chunkArray(uniqueIds, paramLimit)
+
   const childModel = modelMap.get(segment.childModelName)
   if (!childModel) {
     for (const parent of parentRows) {
@@ -193,18 +198,76 @@ export async function executeSegmentBase(
       }
     }
 
-    for (const nestedSeg of nestedSegments) {
-      await executeSegmentBase(
-        nestedSeg,
-        allChildRows,
+    await resolveSegmentsIntelligent(
+      nestedSegments,
+      allChildRows,
+      allModels,
+      modelMap,
+      dialect,
+      execute,
+      depth + 1,
+    )
+  }
+
+  stitchResults(parentRows, segment, allChildRows, needsStripFk)
+}
+
+async function resolveSegmentsIntelligent(
+  segments: WhereInSegment[],
+  parentRows: any[],
+  allModels: readonly Model[],
+  modelMap: Map<string, Model>,
+  dialect: 'postgres' | 'sqlite',
+  execute: (sql: string, params: unknown[]) => Promise<any[]>,
+  depth: number,
+): Promise<void> {
+  if (depth > MAX_RECURSIVE_DEPTH) return
+  if (segments.length === 0) return
+
+  if (segments.length === 1) {
+    await executeSingleSegment(
+      segments[0],
+      parentRows,
+      allModels,
+      modelMap,
+      dialect,
+      execute,
+      depth,
+    )
+    return
+  }
+
+  await Promise.all(
+    segments.map((seg) =>
+      executeSingleSegment(
+        seg,
+        parentRows,
         allModels,
         modelMap,
         dialect,
         execute,
-        depth + 1,
-      )
-    }
-  }
+        depth,
+      ),
+    ),
+  )
+}
 
-  stitchResults(parentRows, segment, allChildRows, needsStripFk)
+export async function executeSegmentBase(
+  segment: WhereInSegment,
+  parentRows: any[],
+  allModels: readonly Model[],
+  modelMap: Map<string, Model>,
+  dialect: 'postgres' | 'sqlite',
+  execute: (sql: string, params: unknown[]) => Promise<any[]>,
+  depth: number = 0,
+): Promise<void> {
+  await executeSingleSegment(
+    segment,
+    parentRows,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+    depth,
+  )
 }

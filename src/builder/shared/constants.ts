@@ -170,3 +170,6 @@ export const AGGREGATE_PREFIXES = new Set([
   '_min',
   '_max',
 ]) as ReadonlySet<string>
+
+export const DEBUG_PARAMS =
+  typeof process !== 'undefined' && process.env?.DEBUG_PARAMS === '1'

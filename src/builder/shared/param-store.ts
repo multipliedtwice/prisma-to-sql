@@ -23,6 +23,9 @@ interface ParamSnapshot {
 
 const MAX_PARAM_INDEX = Number.MAX_SAFE_INTEGER - 1000
 
+const IS_PRODUCTION =
+  typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+
 function assertSameLength(
   params: readonly unknown[],
   mappings: readonly ParamMap[],
@@ -104,6 +107,11 @@ function validateState(
   mappings: readonly ParamMap[],
   index: number,
 ): void {
+  if (IS_PRODUCTION) {
+    assertSameLength(params, mappings)
+    assertValidNextIndex(index)
+    return
+  }
   assertSameLength(params, mappings)
   assertValidNextIndex(index)
   if (mappings.length === 0) return

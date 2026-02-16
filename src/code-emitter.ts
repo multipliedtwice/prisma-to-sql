@@ -777,7 +777,9 @@ function generateExtension(runtimeImportPath: string): string {
                   return results
                 },
                 batchSize: 100,
-                maxConcurrency: 10
+                maxConcurrency: 10,
+                originalArgs: transformedArgs,
+                method: method,
               })
               
               transformed = Array.isArray(transformed) ? streamResults : streamResults[0]
@@ -790,6 +792,8 @@ function generateExtension(runtimeImportPath: string): string {
                 modelMap: MODEL_MAP,
                 dialect: DIALECT,
                 execute: executeWhereInQuery,
+                originalArgs: transformedArgs,
+                method: method,
               })
             }
           }

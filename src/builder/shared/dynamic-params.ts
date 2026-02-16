@@ -1,5 +1,6 @@
 import { extractDynamicName, isDynamicParameter } from '@dee-wan/schema-parser'
 import { ParamStore } from './param-store'
+import { DEBUG_PARAMS } from './constants'
 
 function scopeName(scope: string, dynamicName: string): string {
   const s = String(scope).trim()
@@ -15,7 +16,9 @@ export function addAutoScoped(
 ): string {
   if (isDynamicParameter(value)) {
     const dn = extractDynamicName(value as string)
-    console.log(`[PARAM] ${scope} = ${JSON.stringify(value)}`)
+    if (DEBUG_PARAMS) {
+      console.log(`[PARAM] ${scope} = ${JSON.stringify(value)}`)
+    }
     return params.add(undefined, scopeName(scope, dn))
   }
   return params.add(value)
