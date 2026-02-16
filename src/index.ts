@@ -34,6 +34,8 @@ import {
   buildArrayAggReducerConfig,
   reduceArrayAggRows,
 } from './builder/select/array-agg-reducer'
+import { executeWithPreFetchedParents } from './builder/select/streaming-where-in-executor'
+import { getPrimaryKeyField } from './builder/shared/primary-key-utils'
 
 export function buildSQL(
   model: Model,
@@ -221,6 +223,8 @@ export {
   executeWhereInSegments,
   buildArrayAggReducerConfig,
   reduceArrayAggRows,
+  executeWithPreFetchedParents,
+  getPrimaryKeyField,
 }
 export { buildReducerConfig, reduceFlatRows } from './builder/select/reducer'
 export type { ReducerConfig } from './builder/select/reducer'

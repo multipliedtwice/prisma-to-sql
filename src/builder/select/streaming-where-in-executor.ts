@@ -11,9 +11,6 @@ import {
 
 const MAX_RECURSIVE_DEPTH = 10
 
-const ADAPTIVE_PARENT_THRESHOLD = 15
-const ADAPTIVE_DEPTH_THRESHOLD = 2
-
 interface StreamingWhereInParams {
   segments: WhereInSegment[]
   parentSql: string
@@ -23,105 +20,64 @@ interface StreamingWhereInParams {
   modelMap: Map<string, Model>
   dialect: 'postgres' | 'sqlite'
   execute: (sql: string, params: unknown[]) => Promise<any[]>
-  batchSize?: number
-  maxConcurrency?: number
-  originalArgs?: any
-  method?: string
 }
 
-function measureRelArgsDepth(relArgs: unknown): number {
-  if (!relArgs || relArgs === true || typeof relArgs !== 'object') return 0
-
-  const args = relArgs as Record<string, any>
-  const nested = args.include || args.select
-  if (!nested || typeof nested !== 'object') return 0
-
-  let maxChildDepth = 0
-  for (const val of Object.values(nested)) {
-    if (val === false) continue
-    if (val === true) {
-      maxChildDepth = Math.max(maxChildDepth, 1)
-      continue
-    }
-    if (val && typeof val === 'object') {
-      maxChildDepth = Math.max(maxChildDepth, 1 + measureRelArgsDepth(val))
-    }
-  }
-  return maxChildDepth
+interface PreFetchedWhereInParams {
+  segments: WhereInSegment[]
+  parentRows: any[]
+  parentModel: Model
+  allModels: readonly Model[]
+  modelMap: Map<string, Model>
+  dialect: 'postgres' | 'sqlite'
+  execute: (sql: string, params: unknown[]) => Promise<any[]>
 }
 
-function measureSegmentNestingDepth(segments: WhereInSegment[]): number {
-  let maxDepth = 0
-  for (const seg of segments) {
-    const depth = 1 + measureRelArgsDepth(seg.relArgs)
-    maxDepth = Math.max(maxDepth, depth)
-  }
-  return maxDepth
-}
-
-function shouldAdaptivelySwitch(
-  actualParentCount: number,
-  segments: WhereInSegment[],
-): boolean {
-  if (actualParentCount > ADAPTIVE_PARENT_THRESHOLD) return false
-  if (segments.length === 0) return false
-
-  const depth = measureSegmentNestingDepth(segments)
-  return depth >= ADAPTIVE_DEPTH_THRESHOLD
-}
-
-async function executeCorrelatedFallback(
+function buildParentKeyIndex(
   parentRows: any[],
-  parentModel: Model,
-  allModels: readonly Model[],
-  dialect: 'postgres' | 'sqlite',
-  execute: (sql: string, params: unknown[]) => Promise<any[]>,
-  originalArgs: any,
-  method: string,
-): Promise<any[]> {
-  const pkField = getPrimaryKeyField(parentModel)
-  const pks = parentRows.map((r) => r[pkField]).filter(Boolean)
-
-  if (pks.length === 0) return []
-
-  const fallbackArgs = { ...originalArgs }
-  delete fallbackArgs.take
-  delete fallbackArgs.skip
-  delete fallbackArgs.cursor
-
-  fallbackArgs.where = { [pkField]: { in: pks } }
-
-  if (originalArgs.orderBy) {
-    fallbackArgs.orderBy = originalArgs.orderBy
+  parentKeyFieldName: string,
+): Map<unknown, any[]> {
+  const index = new Map<unknown, any[]>()
+  for (const parent of parentRows) {
+    const keyVal = parent[parentKeyFieldName]
+    if (keyVal == null) continue
+    let arr = index.get(keyVal)
+    if (!arr) {
+      arr = []
+      index.set(keyVal, arr)
+    }
+    arr.push(parent)
   }
+  return index
+}
 
-  const result = buildSQL(
-    parentModel,
-    allModels as Model[],
-    method as any,
-    fallbackArgs,
-    dialect,
-  )
+function stitchChildrenToParents(
+  children: any[],
+  segment: WhereInSegment,
+  parentKeyIndex: Map<unknown, any[]>,
+): void {
+  for (const child of children) {
+    const childKey = child[segment.fkFieldName]
+    const matchingParents = parentKeyIndex.get(childKey)
+    if (!matchingParents) continue
 
-  let rows = await execute(result.sql, result.params as unknown[])
-
-  if (result.isArrayAgg && result.includeSpec) {
-    const config = buildArrayAggReducerConfig(
-      parentModel,
-      result.includeSpec,
-      allModels,
-    )
-    rows = reduceArrayAggRows(rows, config)
-  } else if (result.requiresReduction && result.includeSpec) {
-    const config = buildReducerConfig(
-      parentModel,
-      result.includeSpec,
-      allModels,
-    )
-    rows = reduceFlatRows(rows, config)
+    for (const parent of matchingParents) {
+      if (segment.isList) {
+        if (!Array.isArray(parent[segment.relationName])) {
+          parent[segment.relationName] = []
+        }
+        parent[segment.relationName].push(child)
+      } else {
+        parent[segment.relationName] = child
+      }
+    }
   }
+}
 
-  return rows
+function ensureFkInSelect(childArgs: any, fkFieldName: string): boolean {
+  if (!childArgs.select) return false
+  if (childArgs.select[fkFieldName]) return false
+  childArgs.select = { ...childArgs.select, [fkFieldName]: true }
+  return true
 }
 
 export async function executeWhereInSegmentsStreaming(
@@ -136,8 +92,6 @@ export async function executeWhereInSegmentsStreaming(
     modelMap,
     dialect,
     execute,
-    originalArgs,
-    method,
   } = params
 
   if (segments.length === 0) {
@@ -148,38 +102,19 @@ export async function executeWhereInSegmentsStreaming(
     throw new Error('Streaming WHERE IN requires postgres dialect')
   }
 
-  const pkField = getPrimaryKeyField(parentModel)
   const parentRows = await execute(parentSql, parentParams)
 
-  if (
-    originalArgs &&
-    method &&
-    shouldAdaptivelySwitch(parentRows.length, segments)
-  ) {
-    return executeCorrelatedFallback(
-      parentRows,
-      parentModel,
-      allModels,
-      dialect,
-      execute,
-      originalArgs,
-      method,
-    )
-  }
+  if (parentRows.length === 0) return []
 
-  const parentMap = new Map<string, any>()
   for (const row of parentRows) {
-    const pk = row[pkField]
-    const enriched = { ...row }
     for (const seg of segments) {
-      enriched[seg.relationName] = seg.isList ? [] : null
+      row[seg.relationName] = seg.isList ? [] : null
     }
-    parentMap.set(pk, enriched)
   }
 
   await resolveSegments(
     segments,
-    parentMap,
+    parentRows,
     allModels,
     modelMap,
     dialect,
@@ -187,12 +122,47 @@ export async function executeWhereInSegmentsStreaming(
     0,
   )
 
-  return Array.from(parentMap.values())
+  return parentRows
+}
+
+export async function executeWithPreFetchedParents(
+  params: PreFetchedWhereInParams,
+): Promise<any[]> {
+  const {
+    segments,
+    parentRows,
+    parentModel,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+  } = params
+
+  if (segments.length === 0) return parentRows
+  if (parentRows.length === 0) return []
+
+  for (const row of parentRows) {
+    for (const seg of segments) {
+      row[seg.relationName] = seg.isList ? [] : null
+    }
+  }
+
+  await resolveSegments(
+    segments,
+    parentRows,
+    allModels,
+    modelMap,
+    dialect,
+    execute,
+    0,
+  )
+
+  return parentRows
 }
 
 async function resolveSegments(
   segments: WhereInSegment[],
-  parentMap: Map<string, any>,
+  parentRows: any[],
   allModels: readonly Model[],
   modelMap: Map<string, Model>,
   dialect: 'postgres' | 'sqlite',
@@ -202,13 +172,10 @@ async function resolveSegments(
   if (depth > MAX_RECURSIVE_DEPTH) return
   if (segments.length === 0) return
 
-  const parentRows = Array.from(parentMap.values())
-
   if (segments.length === 1) {
     await resolveSingleSegment(
       segments[0],
       parentRows,
-      parentMap,
       allModels,
       modelMap,
       dialect,
@@ -223,7 +190,6 @@ async function resolveSegments(
       resolveSingleSegment(
         seg,
         parentRows,
-        parentMap,
         allModels,
         modelMap,
         dialect,
@@ -237,7 +203,6 @@ async function resolveSegments(
 async function resolveSingleSegment(
   segment: WhereInSegment,
   parentRows: any[],
-  parentMap: Map<string, any>,
   allModels: readonly Model[],
   modelMap: Map<string, Model>,
   dialect: 'postgres' | 'sqlite',
@@ -246,9 +211,6 @@ async function resolveSingleSegment(
 ): Promise<void> {
   const childModel = modelMap.get(segment.childModelName)
   if (!childModel) {
-    for (const parent of parentRows) {
-      parent[segment.relationName] = segment.isList ? [] : null
-    }
     return
   }
 
@@ -257,9 +219,6 @@ async function resolveSingleSegment(
     .filter((v) => v != null)
 
   if (parentIds.length === 0) {
-    for (const parent of parentRows) {
-      parent[segment.relationName] = segment.isList ? [] : null
-    }
     return
   }
 
@@ -270,6 +229,8 @@ async function resolveSingleSegment(
     segment.fkFieldName,
     uniqueIds,
   )
+
+  const needsStripFk = ensureFkInSelect(childArgs, segment.fkFieldName)
 
   const childPlan = planQueryStrategy({
     model: childModel,
@@ -302,14 +263,7 @@ async function resolveSingleSegment(
   }
 
   if (childPlan.whereInSegments.length > 0 && children.length > 0) {
-    const childPkField = getPrimaryKeyField(childModel)
-    const childMap = new Map<string, any>()
-
     for (const child of children) {
-      const pk = child[childPkField]
-      if (pk != null) {
-        childMap.set(pk, child)
-      }
       for (const nestedSeg of childPlan.whereInSegments) {
         child[nestedSeg.relationName] = nestedSeg.isList ? [] : null
       }
@@ -317,27 +271,32 @@ async function resolveSingleSegment(
 
     await resolveSegments(
       childPlan.whereInSegments,
-      childMap,
+      children,
       allModels,
       modelMap,
       dialect,
       execute,
       depth + 1,
     )
+
+    if (childPlan.injectedParentKeys.length > 0) {
+      for (const child of children) {
+        for (const key of childPlan.injectedParentKeys) {
+          delete child[key]
+        }
+      }
+    }
   }
 
-  for (const child of children) {
-    const fkValue = child[segment.fkFieldName]
-    const parent = parentMap.get(fkValue)
-    if (!parent) continue
+  const parentKeyIndex = buildParentKeyIndex(
+    parentRows,
+    segment.parentKeyFieldName,
+  )
+  stitchChildrenToParents(children, segment, parentKeyIndex)
 
-    if (segment.isList) {
-      if (!Array.isArray(parent[segment.relationName])) {
-        parent[segment.relationName] = []
-      }
-      parent[segment.relationName].push(child)
-    } else {
-      parent[segment.relationName] = child
+  if (needsStripFk) {
+    for (const child of children) {
+      delete child[segment.fkFieldName]
     }
   }
 }

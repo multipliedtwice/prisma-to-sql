@@ -231,8 +231,6 @@ export async function generateClient(options: GenerateClientOptions) {
 
 function generateImports(runtimeImportPath: string): string {
   return `import { 
-  transformAggregateRow, 
-  extractCountValue, 
   buildSQL, 
   buildBatchSql, 
   parseBatchResults, 
@@ -244,7 +242,6 @@ function generateImports(runtimeImportPath: string): string {
   planQueryStrategy, 
   executeWhereInSegments,
   buildReducerConfig,
-  reduceFlatRows,
   type PrismaMethod, 
   type Model, 
   type BatchQuery, 
@@ -252,13 +249,11 @@ function generateImports(runtimeImportPath: string): string {
   type TransactionQuery, 
   type TransactionOptions,
   getOrPrepareStatement,
-  shouldSqliteUseGet,
   normalizeParams,
   executePostgresQuery,
   executeSqliteQuery,
   executeRaw,
-} from ${JSON.stringify(runtimeImportPath)}
-import { RELATION_STATS } from './planner.generated'`
+} from ${JSON.stringify(runtimeImportPath)}`
 }
 
 function generateCoreTypes(): string {
@@ -695,7 +690,6 @@ function generateExtension(runtimeImportPath: string): string {
           method,
           args: transformedArgs,
           allModels: MODELS,
-          relationStats: RELATION_STATS as any,
           dialect: DIALECT,
         })
 
@@ -739,67 +733,75 @@ function generateExtension(runtimeImportPath: string): string {
           console.log('  Params:', params)
         }
 
-        let results = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isArrayAgg)
-        
-        const duration = Date.now() - startTime
-
-        onQuery?.({
-          model: modelName,
-          method,
-          sql,
-          params,
-          duration,
-          prebaked,
-        })
-
-        let transformed = transformQueryResults(method, results)
-
         if (plan.whereInSegments.length > 0) {
-          const resultArray = Array.isArray(transformed) ? transformed : [transformed]
+          if (DIALECT === 'postgres') {
+            const { executeWhereInSegmentsStreaming } = await import(${JSON.stringify(runtimeImportPath)})
+            
+            const results = await executeWhereInSegmentsStreaming({
+              segments: plan.whereInSegments,
+              parentSql: sql,
+              parentParams: normalizeParams(params),
+              parentModel: model,
+              allModels: MODELS,
+              modelMap: MODEL_MAP,
+              dialect: DIALECT,
+              execute: async (sql: string, params: unknown[]) => {
+                const results: any[] = []
+                await client.unsafe(sql, normalizeParams(params)).forEach((row: any) => {
+                  results.push(row)
+                })
+                return results
+              },
+            })
 
-          if (resultArray.length > 0 && resultArray[0] != null) {
-            if (DIALECT === 'postgres') {
-              const { executeWhereInSegmentsStreaming } = await import(${JSON.stringify(runtimeImportPath)})
-              
-              const streamResults = await executeWhereInSegmentsStreaming({
-                segments: plan.whereInSegments,
-                parentSql: sql,
-                parentParams: params,
-                parentModel: model,
-                allModels: MODELS,
-                modelMap: MODEL_MAP,
-                dialect: DIALECT,
-                execute: async (sql: string, params: unknown[]) => {
-                  const results: any[] = []
-                  await client.unsafe(sql, normalizeParams(params)).forEach((row: any) => {
-                    results.push(row)
-                  })
-                  return results
-                },
-                batchSize: 100,
-                maxConcurrency: 10,
-                originalArgs: transformedArgs,
-                method: method,
-              })
-              
-              transformed = Array.isArray(transformed) ? streamResults : streamResults[0]
-            } else {
+            if (plan.injectedParentKeys.length > 0) {
+              for (const row of results) {
+                for (const key of plan.injectedParentKeys) {
+                  delete row[key]
+                }
+              }
+            }
+
+            const duration = Date.now() - startTime
+            onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
+
+            return transformQueryResults(method, results)
+          } else {
+            const parentRows = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isArrayAgg) as any[]
+
+            if (parentRows.length > 0) {
               await executeWhereInSegments({
                 segments: plan.whereInSegments,
-                parentRows: resultArray,
+                parentRows,
                 parentModel: model,
                 allModels: MODELS,
                 modelMap: MODEL_MAP,
                 dialect: DIALECT,
                 execute: executeWhereInQuery,
-                originalArgs: transformedArgs,
-                method: method,
               })
+
+              if (plan.injectedParentKeys.length > 0) {
+                for (const row of parentRows) {
+                  for (const key of plan.injectedParentKeys) {
+                    delete row[key]
+                  }
+                }
+              }
             }
+
+            const duration = Date.now() - startTime
+            onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
+
+            return transformQueryResults(method, parentRows)
           }
         }
 
-        return transformed
+        const results = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isArrayAgg)
+        
+        const duration = Date.now() - startTime
+        onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
+
+        return transformQueryResults(method, results)
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
         console.warn(\`[prisma-sql] \${modelName}.\${method} acceleration failed: \${msg}\`)
@@ -840,7 +842,6 @@ function generateExtension(runtimeImportPath: string): string {
         method: 'findMany',
         args: transformedArgs,
         allModels: MODELS,
-        relationStats: RELATION_STATS as any,
         dialect: DIALECT,
       })
       
@@ -1158,7 +1159,6 @@ function generateCode(
     generateTransformLogic(),
     generateExtension(runtimeImportPath),
     generateTypeExports(),
-    `export * from './planner.generated'`,
   ].join('\n\n')
 }
 
