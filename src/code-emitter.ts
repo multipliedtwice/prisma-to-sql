@@ -635,7 +635,7 @@ function generateExtension(runtimeImportPath: string): string {
     throw new Error(\`Generated code is for \${DIALECT}, but you provided \${actualDialect}\`)
   }
 
-  if (DIALECT === 'sqlite') {
+  if ((DIALECT as string) === 'sqlite') {
     setNormalizeDateMode(detectSqliteDateMode(client))
   }
 
@@ -665,7 +665,7 @@ function generateExtension(runtimeImportPath: string): string {
     }
   
     try {
-      const result = executeSqliteQuery(client, sql, params, method, requiresReduction, includeSpec, model, MODELS)
+      const result = executeSqliteQuery(client, sql, params, method)
       return result
     } catch (err) {
       console.log('[sqlite-debug] FAILED:', err instanceof Error ? err.message : err)
