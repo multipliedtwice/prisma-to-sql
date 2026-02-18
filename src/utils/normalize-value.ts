@@ -1,3 +1,33 @@
+type DateMode = 'iso' | 'ms'
+
+let globalDateMode: DateMode = 'iso'
+
+export function setNormalizeDateMode(mode: DateMode): void {
+  globalDateMode = mode
+}
+
+export function detectSqliteDateMode(client: any): DateMode {
+  try {
+    const tables: { name: string }[] = client
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_prisma_%' LIMIT 50",
+      )
+      .all()
+
+    for (const { name } of tables) {
+      const row = client
+        .prepare(`SELECT typeof("createdAt") as t FROM "${name}" LIMIT 1`)
+        .get() as { t: string } | undefined
+
+      if (row) {
+        return row.t === 'integer' ? 'ms' : 'iso'
+      }
+    }
+  } catch {}
+
+  return 'iso'
+}
+
 const MAX_DEPTH = 20
 
 export function normalizeValue(
@@ -23,10 +53,13 @@ export function normalizeValue(
   return value
 }
 
-function normalizeDateValue(date: Date): string {
+function normalizeDateValue(date: Date): string | number {
   const t = date.getTime()
   if (!Number.isFinite(t)) {
     throw new Error('Invalid Date value in SQL params')
+  }
+  if (globalDateMode === 'ms') {
+    return t
   }
   return date.toISOString()
 }
@@ -53,11 +86,9 @@ function normalizeObjectValue(
 ): unknown {
   if (value instanceof Uint8Array) return value
   if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return value
-
   const proto = Object.getPrototypeOf(value)
   const isPlain = proto === Object.prototype || proto === null
   if (!isPlain) return value
-
   const obj = value as Record<string, unknown>
   if (seen.has(obj)) {
     throw new Error('Circular reference in SQL params')

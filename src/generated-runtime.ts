@@ -139,30 +139,10 @@ export function executeSqliteQuery(
   sql: string,
   params: unknown[],
   method: string,
-  requiresReduction: boolean,
-  includeSpec: Record<string, any> | undefined,
-  model: any,
-  allModels: readonly any[],
 ): unknown[] {
   const normalizedParams = normalizeParams(params)
   const shouldTransform =
     method === 'groupBy' || method === 'aggregate' || method === 'count'
-
-  if (requiresReduction && includeSpec) {
-    const config = buildReducerConfig(model, includeSpec, allModels)
-    const stmt = getOrPrepareStatement(client, sql)
-
-    const useGet = shouldSqliteUseGet(method)
-    const rawResults = useGet
-      ? stmt.get(...normalizedParams)
-      : stmt.all(...normalizedParams)
-    const results = Array.isArray(rawResults) ? rawResults : [rawResults]
-
-    const transformed = shouldTransform
-      ? results.map(transformAggregateRow)
-      : results
-    return reduceFlatRows(transformed, config)
-  }
 
   const stmt = getOrPrepareStatement(client, sql)
   const useGet = shouldSqliteUseGet(method)

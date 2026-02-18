@@ -1,6 +1,7 @@
 import type { Model } from '../../types'
 import { isPlainObject } from '../shared/validators/type-guards'
 import { resolveIncludeRelations } from '../shared/include-tree-walker'
+import { LIMITS } from '../shared/constants'
 
 type RelStats = {
   avg: number
@@ -92,7 +93,10 @@ function buildCostTree(
   includeSpec: Record<string, any>,
   model: Model,
   schemas: readonly Model[],
+  depth: number = 0,
 ): RelationCostNode[] {
+  if (depth > LIMITS.MAX_INCLUDE_DEPTH) return []
+
   const relations = resolveIncludeRelations(includeSpec, model, schemas)
   const nodes: RelationCostNode[] = []
 
@@ -103,7 +107,7 @@ function buildCostTree(
 
     const children =
       Object.keys(rel.nestedSpec).length > 0
-        ? buildCostTree(rel.nestedSpec, rel.relModel, schemas)
+        ? buildCostTree(rel.nestedSpec, rel.relModel, schemas, depth + 1)
         : []
 
     nodes.push({
@@ -195,14 +199,22 @@ export function countIncludeDepth(
   includeSpec: Record<string, any>,
   model: Model,
   schemas: readonly Model[],
+  depth: number = 0,
 ): number {
+  if (depth > LIMITS.MAX_INCLUDE_DEPTH) return 0
+
   const relations = resolveIncludeRelations(includeSpec, model, schemas)
   let maxDepth = 0
 
   for (const rel of relations) {
     let childDepth = 1
     if (Object.keys(rel.nestedSpec).length > 0) {
-      childDepth += countIncludeDepth(rel.nestedSpec, rel.relModel, schemas)
+      childDepth += countIncludeDepth(
+        rel.nestedSpec,
+        rel.relModel,
+        schemas,
+        depth + 1,
+      )
     }
     if (childDepth > maxDepth) maxDepth = childDepth
   }
@@ -214,7 +226,10 @@ export function hasChildPaginationAnywhere(
   includeSpec: Record<string, any>,
   model: Model,
   schemas: readonly Model[],
+  depth: number = 0,
 ): boolean {
+  if (depth > LIMITS.MAX_INCLUDE_DEPTH) return false
+
   for (const [, value] of Object.entries(includeSpec)) {
     if (value === false) continue
     if (hasPaginationArgs(value)) return true
@@ -224,7 +239,14 @@ export function hasChildPaginationAnywhere(
 
   for (const rel of relations) {
     if (Object.keys(rel.nestedSpec).length > 0) {
-      if (hasChildPaginationAnywhere(rel.nestedSpec, rel.relModel, schemas)) {
+      if (
+        hasChildPaginationAnywhere(
+          rel.nestedSpec,
+          rel.relModel,
+          schemas,
+          depth + 1,
+        )
+      ) {
         return true
       }
     }

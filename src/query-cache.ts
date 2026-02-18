@@ -132,6 +132,7 @@ function buildSQLFull(
         tableName,
         alias,
         model,
+        dialect,
       )
       break
     case 'groupBy':
@@ -149,8 +150,10 @@ function buildSQLFull(
         whereResult,
         tableName,
         alias,
-        args.skip as number,
+        args,
         dialect,
+        model,
+        models,
       )
       break
     default:
@@ -164,10 +167,11 @@ function buildSQLFull(
         dialect,
       })
   }
-  const sqlResult =
-    dialect === 'sqlite'
-      ? pgToSqlitePlaceholders(result.sql, result.params)
-      : { sql: result.sql, params: [...result.params] }
+  const needsPlaceholderConversion =
+    dialect === 'sqlite' && result.sql.includes('$')
+  const sqlResult = needsPlaceholderConversion
+    ? pgToSqlitePlaceholders(result.sql, result.params)
+    : { sql: result.sql, params: [...result.params] }
   return {
     ...sqlResult,
     paramMappings: result.paramMappings,

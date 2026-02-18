@@ -249,6 +249,8 @@ function generateImports(runtimeImportPath: string): string {
   createTransactionExecutor, 
   transformQueryResults, 
   normalizeValue, 
+  setNormalizeDateMode,
+  detectSqliteDateMode,
   planQueryStrategy, 
   executeWhereInSegments,
   buildReducerConfig,
@@ -633,7 +635,11 @@ function generateExtension(runtimeImportPath: string): string {
     throw new Error(\`Generated code is for \${DIALECT}, but you provided \${actualDialect}\`)
   }
 
-async function executeQuery(
+  if (DIALECT === 'sqlite') {
+    setNormalizeDateMode(detectSqliteDateMode(client))
+  }
+
+  async function executeQuery(
     sql: string,
     params: unknown[],
     method: string,
@@ -657,8 +663,14 @@ async function executeQuery(
         lateralMeta,
       })
     }
-    
-    return executeSqliteQuery(client, sql, params, method, requiresReduction, includeSpec, model, MODELS)
+  
+    try {
+      const result = executeSqliteQuery(client, sql, params, method, requiresReduction, includeSpec, model, MODELS)
+      return result
+    } catch (err) {
+      console.log('[sqlite-debug] FAILED:', err instanceof Error ? err.message : err)
+      throw err
+    }
   }
 
   async function executeWhereInQuery(sql: string, params: unknown[]): Promise<unknown[]> {

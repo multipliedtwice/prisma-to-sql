@@ -15,6 +15,7 @@ import {
   extractScalarSelection,
   extractNestedIncludeSpec,
 } from '../shared/relation-utils'
+import { LIMITS } from '../shared/constants'
 
 export interface ReducerConfig {
   parentModel: Model
@@ -83,9 +84,9 @@ export function buildReducerConfig(
   prefix: string = '',
   depth: number = 0,
 ): ReducerConfig {
-  if (depth > 10) {
+  if (depth > LIMITS.MAX_NESTED_JOIN_DEPTH) {
     throw new Error(
-      `Reducer config exceeded maximum depth of 10 at path '${prefix}'`,
+      `Reducer config exceeded maximum depth of ${LIMITS.MAX_NESTED_JOIN_DEPTH} at path '${prefix}'`,
     )
   }
 

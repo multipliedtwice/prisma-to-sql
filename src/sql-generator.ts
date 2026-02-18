@@ -91,7 +91,14 @@ function buildSqlResult(args: {
   } = args
 
   if (method === 'aggregate') {
-    return buildAggregateSql(processed, whereResult, tableName, alias, modelDef)
+    return buildAggregateSql(
+      processed,
+      whereResult,
+      tableName,
+      alias,
+      modelDef,
+      dialect,
+    )
   }
 
   if (method === 'groupBy') {

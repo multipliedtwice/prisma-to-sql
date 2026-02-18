@@ -18,7 +18,7 @@ import { WhereClauseResult, SqlResult } from './shared/types'
 import {
   isValidWhereClause,
   validateSelectQuery,
-  validateParamConsistency,
+  validateParamConsistencyByDialect,
 } from './shared/validators/sql-validators'
 import {
   isNotNullish,
@@ -649,9 +649,12 @@ export function buildAggregateSql(
   tableName: string,
   alias: string,
   model: Model,
+  dialect?: SqlDialect,
 ): SqlResult {
   assertSafeAlias(alias)
   assertSafeTableRef(tableName)
+
+  const d = dialect ?? getGlobalDialect()
 
   const aggFields = buildAggregateFields(args, alias, model)
   if (!isNonEmptyArray(aggFields)) {
@@ -682,7 +685,7 @@ export function buildAggregateSql(
   const sql = parts.join(' ').trim()
 
   validateSelectQuery(sql)
-  validateParamConsistency(sql, whereResult.params)
+  validateParamConsistencyByDialect(sql, whereResult.params, d)
 
   return {
     sql,
@@ -813,7 +816,7 @@ export function buildGroupBySql(
   const allMappings = [...whereResult.paramMappings, ...snapshot.mappings]
 
   validateSelectQuery(sql)
-  validateParamConsistency(sql, allParams)
+  validateParamConsistencyByDialect(sql, allParams, d)
 
   return {
     sql,
@@ -838,6 +841,7 @@ function buildSimpleCountSql(
   whereResult: WhereClauseResult,
   tableName: string,
   alias: string,
+  dialect: SqlDialect,
 ): SqlResult {
   const joinsPart =
     whereResult.joins && whereResult.joins.length > 0
@@ -863,7 +867,7 @@ function buildSimpleCountSql(
   const sql = parts.join(' ').trim()
 
   validateSelectQuery(sql)
-  validateParamConsistency(sql, whereResult.params)
+  validateParamConsistencyByDialect(sql, whereResult.params, dialect)
 
   return {
     sql,
@@ -887,8 +891,10 @@ export function buildCountSql(
   const args = normalizeCountArgs(argsOrSkip)
   assertNoNegativeTake(args)
 
+  const d = dialect ?? getGlobalDialect()
+
   if (!model) {
-    return buildSimpleCountSql(whereResult, tableName, alias)
+    return buildSimpleCountSql(whereResult, tableName, alias, d)
   }
 
   const pkFields = getPrimaryKeyFields(model)
@@ -898,7 +904,7 @@ export function buildCountSql(
 
   const selectFields = distinctFields.length > 0 ? distinctFields : pkFields
   if (selectFields.length === 0) {
-    return buildSimpleCountSql(whereResult, tableName, alias)
+    return buildSimpleCountSql(whereResult, tableName, alias, d)
   }
 
   const select: Record<string, boolean> = {}
@@ -910,7 +916,6 @@ export function buildCountSql(
     select,
   }
 
-  const d = dialect ?? getGlobalDialect()
   const subSchemas =
     Array.isArray(schemas) && schemas.length > 0 ? schemas : [model]
 
@@ -932,7 +937,7 @@ export function buildCountSql(
     `${SQL_TEMPLATES.FROM} (${sub.sql}) ${SQL_TEMPLATES.AS} ${countAlias}`
 
   validateSelectQuery(sql)
-  validateParamConsistency(sql, sub.params)
+  validateParamConsistencyByDialect(sql, sub.params, d)
 
   return {
     sql,
