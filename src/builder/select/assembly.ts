@@ -1,6 +1,6 @@
 import type { PrismaQueryArgs } from '../../types'
 import { SQL_TEMPLATES, SQL_SEPARATORS } from '../shared/constants'
-import { col, quote } from '../shared/sql-utils'
+import { quote } from '../shared/sql-utils'
 import { SelectQuerySpec, SqlResult } from '../shared/types'
 import {
   validateSelectQuery,
@@ -14,52 +14,28 @@ import {
 } from '../shared/validators/type-guards'
 import { addAutoScoped } from '../shared/dynamic-params'
 import { jsonBuildObject } from '../../sql-builder-dialect'
-import { buildRelationCountSql } from './includes'
-import { joinNonEmpty } from '../shared/string-builder'
+import { buildRelationCountSql } from './include-count'
+import { emptyJsonArray } from './include-join'
+
 import { getRelationFieldSet } from '../shared/model-field-cache'
-import { parseOrderByValue } from '../pagination'
-import {
-  normalizeOrderByInput,
-  OrderBySortObject,
-} from '../shared/order-by-utils'
-import { buildFlatJoinSql, canUseFlatJoinForAll } from './flat-join'
-import { buildArrayAggSql, canUseArrayAggForAll } from './array-agg'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
 import {
-  countIncludeDepth,
-  shouldPreferFlatJoinStrategy,
+  hasChildPaginationAnywhere,
+  pickIncludeStrategy,
 } from './strategy-estimator'
+import { buildFlatJoinSql, canUseFlatJoinForAll } from './flat-join'
+import { buildLateralJoinSql, canUseLateralJoin } from './lateral-join'
+import {
+  getOrderByEntries,
+  renderOrderBySql,
+  ensurePostgresDistinctOrderEntries,
+  buildSqliteDistinctQuery,
+  buildPostgresDistinctOnClause,
+  COUNT_SELECT_KEY,
+} from './distinct'
+import { joinNonEmpty } from '../shared/array-utils'
 
-type OrderByEntry = {
-  field: string
-  direction: 'asc' | 'desc'
-  nulls?: 'first' | 'last'
-}
-
-const SELECT_FIELD_REGEX =
-  /^\s*("(?:[^"]|"")+"|[a-z_][a-z0-9_]*)\s*\.\s*("(?:[^"]|"")+"|[a-z_][a-z0-9_]*)(?:\s+AS\s+("(?:[^"]|"")+"|[a-z_][a-z0-9_]*))?\s*$/i
-
-function buildWhereSql(conditions: readonly string[]): string {
-  if (!isNonEmptyArray(conditions)) return ''
-  return (
-    ' ' +
-    SQL_TEMPLATES.WHERE +
-    ' ' +
-    conditions.join(SQL_SEPARATORS.CONDITION_AND)
-  )
-}
-
-function buildJoinsSql(
-  ...joinGroups: Array<readonly string[] | undefined>
-): string {
-  const all: string[] = []
-  for (const g of joinGroups) {
-    if (isNonEmptyArray(g)) {
-      for (const j of g) all.push(j)
-    }
-  }
-  return all.length > 0 ? ' ' + all.join(' ') : ''
-}
+const ALWAYS_TRUE_CONDITION = '1=1'
 
 function buildSelectList(baseSelect: string, extraCols: string): string {
   const base = baseSelect.trim()
@@ -82,283 +58,6 @@ function finalizeSql(
     params: [...snapshot.params],
     paramMappings: [...snapshot.mappings],
   }
-}
-
-function unquoteIdent(s: string): string {
-  if (s.startsWith('"') && s.endsWith('"')) {
-    return s.slice(1, -1).replace(/""/g, '"')
-  }
-  return s
-}
-
-function parseSelectField(p: string, fromAlias: string): string {
-  const match = SELECT_FIELD_REGEX.exec(p)
-  if (!match) {
-    throw new Error(
-      `SQLite distinct emulation requires simple column references.\n` +
-        `Complex expressions, functions, and computed fields are not supported.\n` +
-        `Got: ${p}\n\n` +
-        `Hint: When using distinct with SQLite:\n` +
-        `  - Use only direct field selections (e.g., { id: true, name: true })\n` +
-        `  - Remove computed fields from select\n` +
-        `  - Avoid selecting relation counts or aggregates\n` +
-        `  - Or switch to PostgreSQL which supports DISTINCT ON with expressions`,
-    )
-  }
-
-  const [, alias, column, outputAlias] = match
-
-  const actualAlias = unquoteIdent(alias)
-  if (actualAlias.toLowerCase() !== fromAlias.toLowerCase()) {
-    throw new Error(
-      `Expected alias '${fromAlias}', got '${actualAlias}' in: ${p}`,
-    )
-  }
-
-  if (outputAlias) {
-    return unquoteIdent(outputAlias)
-  }
-
-  return unquoteIdent(column)
-}
-
-function parseSimpleScalarSelect(select: string, fromAlias: string): string[] {
-  const raw = select.trim()
-  if (raw.length === 0) return []
-
-  const parts = raw.split(SQL_SEPARATORS.FIELD_LIST)
-  const names: string[] = []
-
-  for (const p of parts) {
-    const trimmed = p.trim()
-    if (trimmed.length === 0) continue
-    names.push(parseSelectField(trimmed, fromAlias))
-  }
-
-  return names
-}
-
-function buildDistinctColumns(
-  distinct: readonly string[],
-  fromAlias: string,
-  model?: any,
-): string {
-  return distinct
-    .map((f) => col(fromAlias, f, model))
-    .join(SQL_SEPARATORS.FIELD_LIST)
-}
-
-function buildOutputColumns(
-  scalarNames: string[],
-  includeNames: string[],
-  hasCount: boolean,
-): string {
-  const outputCols = hasCount
-    ? [...scalarNames, ...includeNames, '_count']
-    : [...scalarNames, ...includeNames]
-
-  const formatted = outputCols
-    .map((n) => quote(n))
-    .join(SQL_SEPARATORS.FIELD_LIST)
-  if (!isNonEmptyString(formatted)) {
-    throw new Error('distinct emulation requires at least one output column')
-  }
-  return formatted
-}
-
-function getOrderByEntries(spec: SelectQuerySpec): OrderByEntry[] {
-  if (!isNotNullish(spec.args.orderBy)) return []
-  const normalized = normalizeOrderByInput(spec.args.orderBy, parseOrderByValue)
-  const entries: OrderByEntry[] = []
-  for (const item of normalized) {
-    for (const field in item) {
-      if (!Object.prototype.hasOwnProperty.call(item, field)) continue
-      const value = item[field]
-      if (typeof value === 'string') {
-        entries.push({ field, direction: value as 'asc' | 'desc' })
-        continue
-      }
-      const obj = value as OrderBySortObject
-      entries.push({ field, direction: obj.direction, nulls: obj.nulls })
-    }
-  }
-  return entries
-}
-
-function renderOrderBySql(
-  entries: OrderByEntry[],
-  alias: string,
-  dialect: string,
-  model?: any,
-): string {
-  if (entries.length === 0) return ''
-  const out: string[] = []
-  for (const e of entries) {
-    const dir = e.direction.toUpperCase()
-    const c = col(alias, e.field, model)
-    if (dialect === 'postgres') {
-      const nulls = isNotNullish(e.nulls)
-        ? ` NULLS ${e.nulls.toUpperCase()}`
-        : ''
-      out.push(c + ' ' + dir + nulls)
-    } else if (isNotNullish(e.nulls)) {
-      const isNullExpr = `(${c} IS NULL)`
-      const nullRankDir = e.nulls === 'first' ? 'DESC' : 'ASC'
-      out.push(isNullExpr + ' ' + nullRankDir)
-      out.push(c + ' ' + dir)
-    } else {
-      out.push(c + ' ' + dir)
-    }
-  }
-  return out.join(SQL_SEPARATORS.ORDER_BY)
-}
-
-function renderOrderBySimple(entries: OrderByEntry[], alias: string): string {
-  if (entries.length === 0) return ''
-  const out: string[] = []
-  for (const e of entries) {
-    const dir = e.direction.toUpperCase()
-    const c = `${alias}.${quote(e.field)}`
-    if (isNotNullish(e.nulls)) {
-      const isNullExpr = `(${c} IS NULL)`
-      const nullRankDir = e.nulls === 'first' ? 'DESC' : 'ASC'
-      out.push(isNullExpr + ' ' + nullRankDir)
-      out.push(c + ' ' + dir)
-    } else {
-      out.push(c + ' ' + dir)
-    }
-  }
-  return out.join(SQL_SEPARATORS.ORDER_BY)
-}
-
-function ensureIdTiebreakerEntries(
-  entries: OrderByEntry[],
-  model: any,
-): OrderByEntry[] {
-  const idField = model?.fields?.find?.(
-    (f: any) => f.name === 'id' && !f.isRelation,
-  )
-  if (!idField) return entries
-  if (entries.some((e) => e.field === 'id')) return entries
-  return [...entries, { field: 'id', direction: 'asc' }]
-}
-
-function ensurePostgresDistinctOrderEntries(args: {
-  entries: OrderByEntry[]
-  distinct: readonly string[]
-  model: any
-}): OrderByEntry[] {
-  const { entries, distinct, model } = args
-
-  const distinctEntries: OrderByEntry[] = [...distinct].map((f) => ({
-    field: f,
-    direction: 'asc' as const,
-  }))
-
-  const canKeepAsIs =
-    entries.length >= distinctEntries.length &&
-    distinctEntries.every((de, i) => entries[i].field === de.field)
-
-  const merged = canKeepAsIs ? entries : [...distinctEntries, ...entries]
-
-  return ensureIdTiebreakerEntries(merged, model)
-}
-
-function extractDistinctOrderEntries(spec: SelectQuerySpec): OrderByEntry[] {
-  const entries = getOrderByEntries(spec)
-  if (entries.length > 0) return entries
-
-  if (isNotNullish(spec.distinct) && isNonEmptyArray(spec.distinct)) {
-    return [...spec.distinct].map((f) => ({
-      field: f,
-      direction: 'asc' as const,
-    }))
-  }
-
-  return []
-}
-
-function buildSqliteDistinctQuery(
-  spec: SelectQuerySpec,
-  selectWithIncludes: string,
-  countJoins?: string[],
-): string {
-  const { includes, from, whereClause, whereJoins, distinct, model } = spec
-  if (!isNotNullish(distinct) || !isNonEmptyArray(distinct)) {
-    throw new Error('buildSqliteDistinctQuery requires distinct fields')
-  }
-
-  const scalarNames = parseSimpleScalarSelect(spec.select, from.alias)
-  const includeNames = includes.map((i) => i.name)
-  const hasCount = Boolean(spec.args?.select?._count)
-
-  const outerSelectCols = buildOutputColumns(
-    scalarNames,
-    includeNames,
-    hasCount,
-  )
-  const distinctCols = buildDistinctColumns([...distinct], from.alias, model)
-
-  const baseEntries = getOrderByEntries(spec)
-  const fallbackEntries: OrderByEntry[] = [...distinct].map((f) => ({
-    field: f,
-    direction: 'asc' as const,
-  }))
-
-  const resolvedEntries = baseEntries.length > 0 ? baseEntries : fallbackEntries
-
-  const windowEntries = ensureIdTiebreakerEntries(resolvedEntries, model)
-  const windowOrder = renderOrderBySql(
-    windowEntries,
-    from.alias,
-    'sqlite',
-    model,
-  )
-
-  const outerEntries = extractDistinctOrderEntries(spec)
-  const outerOrder = renderOrderBySimple(outerEntries, '"__tp_distinct"')
-
-  const joins = buildJoinsSql(whereJoins, countJoins)
-
-  const conditions: string[] = []
-  if (whereClause && whereClause !== '1=1') conditions.push(whereClause)
-  const whereSql = buildWhereSql(conditions)
-
-  const innerSelectList = selectWithIncludes.trim()
-  const innerComma = innerSelectList.length > 0 ? SQL_SEPARATORS.FIELD_LIST : ''
-
-  const innerParts: string[] = [
-    SQL_TEMPLATES.SELECT,
-    innerSelectList + innerComma,
-    'ROW_NUMBER() OVER (PARTITION BY ' +
-      distinctCols +
-      ' ORDER BY ' +
-      windowOrder +
-      ')',
-    SQL_TEMPLATES.AS,
-    '"__tp_rn"',
-    SQL_TEMPLATES.FROM,
-    from.table,
-    from.alias,
-  ]
-  if (joins) innerParts.push(joins)
-  if (whereSql) innerParts.push(whereSql)
-  const inner = innerParts.join(' ')
-
-  const outerParts: string[] = [
-    SQL_TEMPLATES.SELECT,
-    outerSelectCols,
-    SQL_TEMPLATES.FROM,
-    '(' + inner + ')',
-    SQL_TEMPLATES.AS,
-    '"__tp_distinct"',
-    SQL_TEMPLATES.WHERE,
-    '"__tp_rn" = 1',
-  ]
-  if (isNonEmptyString(outerOrder)) {
-    outerParts.push(SQL_TEMPLATES.ORDER_BY, outerOrder)
-  }
-  return outerParts.join(' ')
 }
 
 function resolveCountSelect(
@@ -394,7 +93,7 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
   let countCols = ''
   let countJoins: string[] = []
 
-  const countSelectRaw = spec.args?.select?._count
+  const countSelectRaw = spec.args?.select?.[COUNT_SELECT_KEY]
   if (countSelectRaw) {
     const resolvedCountSelect = resolveCountSelect(countSelectRaw, model)
 
@@ -413,7 +112,7 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
           ' ' +
           SQL_TEMPLATES.AS +
           ' ' +
-          quote('_count')
+          quote(COUNT_SELECT_KEY)
       }
       countJoins = countBuild.joins
     }
@@ -431,7 +130,7 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
     }
   }
 
-  const emptyJson = dialect === 'postgres' ? `'[]'::json` : `json('[]')`
+  const emptyJson = emptyJsonArray(dialect)
 
   const correlatedParts: string[] = []
   const joinIncludeJoins: string[] = []
@@ -470,7 +169,7 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
   }
 }
 
-export function appendPagination(sql: string, spec: SelectQuerySpec): string {
+function appendPagination(sql: string, spec: SelectQuerySpec): string {
   const { method, pagination, params } = spec
   const isFindUniqueOrFirst = method === 'findUnique' || method === 'findFirst'
 
@@ -548,16 +247,6 @@ function withCountJoins(
   }
 }
 
-function buildPostgresDistinctOnClause(
-  fromAlias: string,
-  distinct?: readonly string[],
-  model?: any,
-): string | null {
-  if (!isNonEmptyArray(distinct)) return null
-  const distinctCols = buildDistinctColumns([...distinct], fromAlias, model)
-  return SQL_TEMPLATES.DISTINCT_ON + ' (' + distinctCols + ')'
-}
-
 function pushJoinGroups(
   parts: string[],
   ...groups: Array<readonly string[] | undefined>
@@ -572,7 +261,8 @@ function buildConditions(
   cursorClause?: string,
 ): string[] {
   const conditions: string[] = []
-  if (whereClause && whereClause !== '1=1') conditions.push(whereClause)
+  if (whereClause && whereClause !== ALWAYS_TRUE_CONDITION)
+    conditions.push(whereClause)
   if (isNotNullish(cursorClause) && isNonEmptyString(cursorClause))
     conditions.push(cursorClause)
   return conditions
@@ -641,68 +331,60 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const hasIncludes = hasNestedIncludes(includeSpec)
 
   const hasPagination = isNotNullish(pagination.take)
-
   const takeValue = typeof pagination.take === 'number' ? pagination.take : null
 
-  const includeDepth = hasIncludes
-    ? countIncludeDepth(includeSpec, model, schemas)
-    : 0
+  if (dialect === 'postgres' && hasIncludes) {
+    const canFlatJoin = canUseFlatJoinForAll(includeSpec, model, schemas)
+    const canLateral = canUseLateralJoin(includeSpec, model, schemas)
+    const hasChildPag = hasChildPaginationAnywhere(includeSpec, model, schemas)
 
-  const flatJoinEligible =
-    dialect === 'postgres' &&
-    hasIncludes &&
-    canUseFlatJoinForAll(includeSpec, model, schemas)
+    const strategy = pickIncludeStrategy({
+      includeSpec,
+      model,
+      schemas,
+      method,
+      args,
+      takeValue,
+      hasPagination,
+      canFlatJoin,
+      canLateral,
+      hasChildPagination: hasChildPag,
+    })
 
-  const shouldUseFlatJoin = shouldPreferFlatJoinStrategy({
-    includeSpec,
-    model,
-    schemas,
-    hasPagination,
-    takeValue,
-    canUseFlatJoin: flatJoinEligible,
-  })
+    if (strategy === 'flat-join') {
+      const flatResult = buildFlatJoinSql(spec)
 
-  if (shouldUseFlatJoin) {
-    const flatResult = buildFlatJoinSql(spec)
-
-    if (flatResult.sql) {
-      validateSelectQuery(flatResult.sql)
-      validateParamConsistencyByDialect(
-        flatResult.sql,
-        flatResult.params,
-        dialect,
-      )
-      return {
-        sql: flatResult.sql,
-        params: flatResult.params,
-        paramMappings: flatResult.params.map((v, i) => ({
-          index: i + 1,
-          value: v,
-        })),
-        requiresReduction: true,
-        includeSpec: flatResult.includeSpec,
+      if (flatResult.sql) {
+        validateSelectQuery(flatResult.sql)
+        validateParamConsistencyByDialect(
+          flatResult.sql,
+          flatResult.params,
+          dialect,
+        )
+        return {
+          sql: flatResult.sql,
+          params: flatResult.params,
+          paramMappings: flatResult.params.map((v: any, i: number) => ({
+            index: i + 1,
+            value: v,
+          })),
+          requiresReduction: true,
+          includeSpec: flatResult.includeSpec,
+        }
       }
     }
-  }
 
-  const shouldUseArrayAgg =
-    dialect === 'postgres' &&
-    hasIncludes &&
-    method === 'findMany' &&
-    canUseArrayAggForAll(includeSpec, model, schemas)
-
-  if (shouldUseArrayAgg) {
-    const aaResult = buildArrayAggSql(spec)
-
-    if (aaResult.sql) {
-      const baseSqlResult = finalizeSql(aaResult.sql, params, dialect)
-      return {
-        sql: baseSqlResult.sql,
-        params: baseSqlResult.params,
-        paramMappings: baseSqlResult.paramMappings,
-        requiresReduction: true,
-        includeSpec: aaResult.includeSpec,
-        isArrayAgg: true,
+    if (strategy === 'lateral') {
+      const lateralResult = buildLateralJoinSql(spec)
+      if (lateralResult.sql) {
+        return {
+          sql: lateralResult.sql,
+          params: lateralResult.params,
+          requiresReduction: true,
+          includeSpec: lateralResult.includeSpec,
+          isLateral: true,
+          lateralMeta: lateralResult.lateralMeta,
+        }
       }
     }
   }

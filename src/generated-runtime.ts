@@ -1,6 +1,5 @@
 import {
   transformAggregateRow,
-  extractCountValue,
   buildReducerConfig,
   reduceFlatRows,
   normalizeValue,
@@ -8,9 +7,10 @@ import {
   createStreamingReducer,
 } from './index'
 import {
-  buildArrayAggReducerConfig,
-  reduceArrayAggRows,
-} from './builder/select/array-agg-reducer'
+  buildLateralReducerConfig,
+  reduceLateralRows,
+} from './builder/select/lateral-reducer'
+import type { LateralRelationMeta } from './builder/select/lateral-join'
 
 export const SQLITE_STMT_CACHE = new WeakMap<any, Map<string, any>>()
 
@@ -54,28 +54,46 @@ export function normalizeParams(params: unknown[]): unknown[] {
   return params.map((p) => normalizeValue(p))
 }
 
+export interface PostgresQueryOptions {
+  client: any
+  sql: string
+  params: unknown[]
+  method: string
+  requiresReduction: boolean
+  includeSpec?: Record<string, any>
+  model: any
+  allModels: readonly any[]
+  isLateral?: boolean
+  lateralMeta?: LateralRelationMeta[]
+}
+
 export async function executePostgresQuery(
-  client: any,
-  sql: string,
-  params: unknown[],
-  method: string,
-  requiresReduction: boolean,
-  includeSpec: Record<string, any> | undefined,
-  model: any,
-  allModels: readonly any[],
-  isArrayAgg?: boolean,
+  opts: PostgresQueryOptions,
 ): Promise<unknown[]> {
+  const {
+    client,
+    sql,
+    params,
+    method,
+    requiresReduction,
+    includeSpec,
+    model,
+    allModels,
+    isLateral,
+    lateralMeta,
+  } = opts
+
   const normalizedParams = normalizeParams(params)
 
-  if (isArrayAgg && includeSpec) {
-    const config = buildArrayAggReducerConfig(model, includeSpec, allModels)
+  if (isLateral && lateralMeta) {
+    const config = buildLateralReducerConfig(model, lateralMeta)
     const results: any[] = []
 
     await client.unsafe(sql, normalizedParams).forEach((row: any) => {
       results.push(row)
     })
 
-    return reduceArrayAggRows(results, config)
+    return reduceLateralRows(results, config)
   }
 
   if (requiresReduction && includeSpec) {

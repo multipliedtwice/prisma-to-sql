@@ -7,7 +7,7 @@ import type {
 import type { SqlDialect } from '../../sql-builder-dialect'
 import type { ParamStore } from './param-store'
 
-export type { SqlResult, ParamMapping }
+export type { SqlResult }
 
 export interface BuildContext {
   readonly alias: string

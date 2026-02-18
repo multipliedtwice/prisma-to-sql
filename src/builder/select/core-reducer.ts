@@ -8,12 +8,12 @@ import {
   getJsonFieldSet,
 } from '../shared/model-field-cache'
 
-export interface CoreReducerConfig {
+interface CoreReducerConfig {
   parentModel: Model
   includedRelations: RelationMetadata[]
 }
 
-export interface CoreReducer {
+interface CoreReducer {
   processRow(row: any): unknown
   getParent(key: unknown): any | null
   getAllParents(): any[]

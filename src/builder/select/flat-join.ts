@@ -1,12 +1,9 @@
 import { Model } from '../../types'
-import { SQL_TEMPLATES, SQL_SEPARATORS } from '../shared/constants'
+import { SQL_TEMPLATES, SQL_SEPARATORS, LIMITS } from '../shared/constants'
 import { quote, buildTableReference, quoteColumn } from '../shared/sql-utils'
 import { joinCondition, isValidRelationField } from '../joins'
 import { SelectQuerySpec } from '../shared/types'
-import {
-  getFieldIndices,
-  getRelationFieldSet,
-} from '../shared/model-field-cache'
+import { getFieldIndices, getJsonFieldSet } from '../shared/model-field-cache'
 import { isPlainObject } from '../shared/validators/type-guards'
 import { SqlDialect } from '../../sql-builder-dialect'
 import {
@@ -15,16 +12,15 @@ import {
 } from '../shared/primary-key-utils'
 import { extractRelationEntries } from '../shared/relation-extraction-utils'
 import {
-  hasChildPagination,
   extractScalarSelection,
   extractNestedIncludeSpec,
 } from '../shared/relation-utils'
-import { deduplicatePreserveOrder } from '../shared/array-utils'
-import { Field } from '@dee-wan/schema-parser'
 import { resolveRelationKeys } from '../shared/relation-key-utils'
 import { ParamStore } from '../shared/param-store'
+import { buildScalarColumnSelect } from '../shared/relation-query-context'
+import { resolveIncludeRelations } from '../shared/include-tree-walker'
 
-export interface FlatJoinBuildResult {
+interface FlatJoinBuildResult {
   sql: string
   params: any[]
   requiresReduction: boolean
@@ -40,7 +36,10 @@ function createAliasCounter(): AliasCounter {
   return {
     count: 0,
     next(): number {
-      if (this.count >= Number.MAX_SAFE_INTEGER - 1000) {
+      if (
+        this.count >=
+        Number.MAX_SAFE_INTEGER - LIMITS.MAX_ALIAS_COUNTER_THRESHOLD
+      ) {
         throw new Error(
           'Alias counter overflow. This indicates an extremely complex query ' +
             'or a potential infinite loop in relation traversal.',
@@ -58,7 +57,8 @@ function getRelationModel(
   relationName: string,
   schemas: readonly Model[],
 ): Model {
-  const field = parentModel.fields.find((f) => f.name === relationName)
+  const indices = getFieldIndices(parentModel)
+  const field = indices.allFieldsByName.get(relationName)
   if (!field?.isRelation || !field.relatedModel) {
     throw new Error(`Invalid relation ${relationName} on ${parentModel.name}`)
   }
@@ -82,6 +82,7 @@ function buildChildColumns(args: {
   const fullPrefix = prefix ? `${prefix}.${relationName}` : relationName
 
   const indices = getFieldIndices(relModel)
+  const jsonSet = getJsonFieldSet(relModel)
   const scalarSelection = extractScalarSelection(relArgs, relModel)
 
   const required = indices.pkFields.concat(
@@ -99,41 +100,23 @@ function buildChildColumns(args: {
 
     const colName = field.dbName || field.name
     const quotedCol = quote(colName)
+    const colRef = jsonSet.has(fieldName)
+      ? `${childAlias}.${quotedCol}::text`
+      : `${childAlias}.${quotedCol}`
 
-    columns[idx++] =
-      `${childAlias}.${quotedCol} AS "${fullPrefix}.${field.name}"`
+    columns[idx++] = `${colRef} AS "${fullPrefix}.${field.name}"`
   }
 
   columns.length = idx
   return columns
 }
 
-function canUseNestedFlatJoin(relArgs: unknown, depth: number): boolean {
-  if (depth > 10) return false
-  if (!isPlainObject(relArgs)) return true
-  if (hasChildPagination(relArgs)) return false
-
-  const obj = relArgs as Record<string, unknown>
-
-  if (obj.include && isPlainObject(obj.include)) {
-    for (const childValue of Object.values(
-      obj.include as Record<string, unknown>,
-    )) {
-      if (childValue !== false && !canUseNestedFlatJoin(childValue, depth + 1))
-        return false
-    }
+function countActiveEntries(spec: Record<string, any>): number {
+  let count = 0
+  for (const value of Object.values(spec)) {
+    if (value !== false) count++
   }
-
-  if (obj.select && isPlainObject(obj.select)) {
-    for (const childValue of Object.values(
-      obj.select as Record<string, unknown>,
-    )) {
-      if (childValue !== false && !canUseNestedFlatJoin(childValue, depth + 1))
-        return false
-    }
-  }
-
-  return true
+  return count
 }
 
 export function canUseFlatJoinForAll(
@@ -142,18 +125,15 @@ export function canUseFlatJoinForAll(
   schemas: readonly Model[],
   debug?: boolean,
 ): boolean {
-  const modelMap = new Map(schemas.map((m) => [m.name, m]))
+  const relations = resolveIncludeRelations(includeSpec, model, schemas)
 
-  for (const [relName, value] of Object.entries(includeSpec)) {
-    if (value === false) continue
+  if (relations.length < countActiveEntries(includeSpec)) {
+    return false
+  }
 
-    const field = model.fields.find((f) => f.name === relName)
-    if (!field?.isRelation || !field.relatedModel) {
-      return false
-    }
-
-    if (isPlainObject(value)) {
-      const obj = value as Record<string, unknown>
+  for (const rel of relations) {
+    if (isPlainObject(rel.value)) {
+      const obj = rel.value as Record<string, unknown>
       if ('take' in obj && obj.take != null) {
         return false
       }
@@ -162,20 +142,11 @@ export function canUseFlatJoinForAll(
       }
     }
 
-    const relModel = modelMap.get(field.relatedModel)
-    if (!relModel) {
-      if (debug)
-        console.log(
-          `    [canFlatJoin] ${model.name}.${relName}: relModel not found for ${field.relatedModel}`,
-        )
-      return false
-    }
-
-    const keys = resolveRelationKeys(field as any, 'include')
+    const keys = resolveRelationKeys(rel.field as any, 'include')
     if (!keys || keys.parentKeys.length === 0 || keys.childKeys.length === 0) {
       if (debug)
         console.log(
-          `    [canFlatJoin] ${model.name}.${relName}: no join keys resolved`,
+          `    [canFlatJoin] ${model.name}.${rel.relName}: no join keys resolved`,
         )
       return false
     }
@@ -183,17 +154,13 @@ export function canUseFlatJoinForAll(
     if (keys.parentKeys.length > 1 || keys.childKeys.length > 1) {
       if (debug)
         console.log(
-          `    [canFlatJoin] ${model.name}.${relName}: composite keys (${keys.parentKeys.length} parent, ${keys.childKeys.length} child)`,
+          `    [canFlatJoin] ${model.name}.${rel.relName}: composite keys (${keys.parentKeys.length} parent, ${keys.childKeys.length} child)`,
         )
       return false
     }
 
-    const nestedSpec = isPlainObject(value)
-      ? extractNestedIncludeSpec(value, relModel)
-      : {}
-
-    if (Object.keys(nestedSpec).length > 0) {
-      if (!canUseFlatJoinForAll(nestedSpec, relModel, schemas, debug)) {
+    if (Object.keys(rel.nestedSpec).length > 0) {
+      if (!canUseFlatJoinForAll(rel.nestedSpec, rel.relModel, schemas, debug)) {
         return false
       }
     }
@@ -212,9 +179,9 @@ function buildNestedJoins(
   aliasCounter: AliasCounter,
   depth: number = 0,
 ): { joins: string[]; selects: string[]; orderBy: string[] } {
-  if (depth > 10) {
+  if (depth > LIMITS.MAX_NESTED_JOIN_DEPTH) {
     throw new Error(
-      `Nested joins exceeded maximum depth of 10 at prefix '${prefix}'`,
+      `Nested joins exceeded maximum depth of ${LIMITS.MAX_NESTED_JOIN_DEPTH} at prefix '${prefix}'`,
     )
   }
 
@@ -225,7 +192,8 @@ function buildNestedJoins(
   for (const [relName, relValue] of Object.entries(includeSpec)) {
     if (relValue === false) continue
 
-    const field = parentModel.fields.find((f) => f.name === relName)
+    const indices = getFieldIndices(parentModel)
+    const field = indices.allFieldsByName.get(relName)
     if (!isValidRelationField(field as any)) continue
 
     const relModel = getRelationModel(parentModel, relName, schemas)
@@ -283,15 +251,6 @@ function buildNestedJoins(
   }
 
   return { joins, selects, orderBy }
-}
-
-function buildSubqueryRawSelect(model: Model, alias: string): string {
-  const cols: string[] = []
-  for (const f of model.fields) {
-    if (f.isRelation) continue
-    cols.push(`${alias}.${quoteColumn(model, f.name)}`)
-  }
-  return cols.length > 0 ? cols.join(SQL_SEPARATORS.FIELD_LIST) : '*'
 }
 
 function extractReferencedParams(
@@ -383,7 +342,7 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
   const baseWhere = cleanWhere ? `WHERE ${cleanWhere}` : ''
   const baseOrderBy = orderBy ? `ORDER BY ${orderBy}` : ''
 
-  const subqueryScalarCols = buildSubqueryRawSelect(model, from.alias)
+  const subqueryScalarCols = buildScalarColumnSelect(model, from.alias)
   let baseSubquery = `
     SELECT ${subqueryScalarCols} FROM ${from.table} ${from.alias}
     ${baseJoins}

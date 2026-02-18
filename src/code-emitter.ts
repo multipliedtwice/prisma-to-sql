@@ -10,7 +10,7 @@ import { setGlobalDialect } from './sql-builder-dialect'
 import {
   emitPlannerGeneratedModule,
   type GeneratePlannerArtifacts,
-  collectRelationCardinalities,
+  collectPlannerArtifacts,
   createDatabaseExecutor,
 } from './cardinality-planner'
 import { createQueryKey, countTotalQueries } from './utils/pure-utils'
@@ -99,7 +99,9 @@ function processModelDirectives(
         paramMappings: sqlDirective.paramMappings,
         requiresReduction: sqlDirective.requiresReduction || false,
         includeSpec: sqlDirective.includeSpec || {},
-        isArrayAgg: sqlDirective.isArrayAgg || false,
+        isLateral: sqlDirective.isLateral || false,
+        lateralMeta: sqlDirective.lateralMeta,
+        skipWhereIn: sqlDirective.skipWhereIn || false,
       })
     } catch (error) {
       if (!config.skipInvalid) throw error
@@ -160,48 +162,56 @@ export async function generateClient(options: GenerateClientOptions) {
   await mkdir(absoluteOutputDir, { recursive: true })
 
   let plannerArtifacts = options.plannerArtifacts
-  let relationStats = plannerArtifacts?.relationStats
 
-  if (!relationStats && !options.executor && datasourceUrl) {
+  if (!plannerArtifacts) {
+    let executor = options.executor
     let cleanup: (() => Promise<void>) | undefined
-    try {
-      const dbConn = await createDatabaseExecutor({
-        databaseUrl: datasourceUrl,
-        dialect: config.dialect,
-      })
-      cleanup = dbConn.cleanup
 
-      console.log('📊 Collecting relation cardinalities...')
-      relationStats = await collectRelationCardinalities({
-        executor: dbConn.executor,
-        datamodel,
-        dialect: config.dialect,
-      })
-    } catch (error) {
-      console.warn(
-        '⚠ Failed to collect stats:',
-        error instanceof Error ? error.message : error,
-      )
-    } finally {
-      if (cleanup) {
-        await cleanup()
+    if (!executor && datasourceUrl) {
+      try {
+        const dbConn = await createDatabaseExecutor({
+          databaseUrl: datasourceUrl,
+          dialect: config.dialect,
+        })
+        executor = dbConn.executor
+        cleanup = dbConn.cleanup
+      } catch (error) {
+        console.warn(
+          '⚠ Failed to connect:',
+          error instanceof Error ? error.message : error,
+        )
       }
     }
-  } else if (!relationStats && options.executor) {
-    console.log('📊 Collecting relation cardinalities...')
-    relationStats = await collectRelationCardinalities({
-      executor: options.executor,
-      datamodel,
-      dialect: config.dialect,
-    })
-  }
 
-  if (!relationStats) {
-    relationStats = {}
+    if (executor) {
+      try {
+        console.log(
+          '📊 Collecting relation cardinalities and roundtrip cost...',
+        )
+        plannerArtifacts = await collectPlannerArtifacts({
+          executor,
+          datamodel,
+          dialect: config.dialect,
+        })
+      } catch (error) {
+        console.warn(
+          '⚠ Failed to collect stats:',
+          error instanceof Error ? error.message : error,
+        )
+      } finally {
+        if (cleanup) {
+          await cleanup()
+        }
+      }
+    }
   }
 
   if (!plannerArtifacts) {
-    plannerArtifacts = { relationStats }
+    plannerArtifacts = {
+      relationStats: {},
+      roundtripRowEquivalent: 73,
+      jsonRowFactor: 1.5,
+    }
   }
 
   const plannerCode = emitPlannerGeneratedModule(plannerArtifacts)
@@ -243,6 +253,9 @@ function generateImports(runtimeImportPath: string): string {
   executeWhereInSegments,
   buildReducerConfig,
   setRelationStats,
+  setRoundtripRowEquivalent,
+  setJsonRowFactor,
+  type LateralRelationMeta, 
   type PrismaMethod, 
   type Model, 
   type BatchQuery, 
@@ -258,9 +271,11 @@ function generateImports(runtimeImportPath: string): string {
 }
 
 function generateStatsInit(): string {
-  return `import { RELATION_STATS } from './planner.generated'
+  return `import { RELATION_STATS, ROUNDTRIP_ROW_EQUIVALENT, JSON_ROW_FACTOR } from './planner.generated'
 
-setRelationStats(RELATION_STATS as any)`
+setRelationStats(RELATION_STATS as any)
+setRoundtripRowEquivalent(ROUNDTRIP_ROW_EQUIVALENT)
+setJsonRowFactor(JSON_ROW_FACTOR)`
 }
 
 function generateCoreTypes(): string {
@@ -398,7 +413,9 @@ const QUERIES: Record<string, Record<string, Record<string, {
   paramMappings: any[]
   requiresReduction: boolean
   includeSpec: Record<string, any>
-  isArrayAgg: boolean
+  isLateral?: boolean
+  lateralMeta?: any[]
+  skipWhereIn?: boolean
 }>>> = ${formatQueries(queries)}
 
 const DIALECT = ${JSON.stringify(dialect)}
@@ -616,17 +633,29 @@ function generateExtension(runtimeImportPath: string): string {
     throw new Error(\`Generated code is for \${DIALECT}, but you provided \${actualDialect}\`)
   }
 
-  async function executeQuery(
+async function executeQuery(
     sql: string,
     params: unknown[],
     method: string,
     requiresReduction: boolean,
     includeSpec: Record<string, any> | undefined,
     model: any | undefined,
-    isArrayAgg?: boolean,
+    isLateral?: boolean,
+    lateralMeta?: LateralRelationMeta[],
   ): Promise<unknown[]> {
     if (DIALECT === 'postgres') {
-      return executePostgresQuery(client, sql, params, method, requiresReduction, includeSpec, model, MODELS, isArrayAgg)
+      return executePostgresQuery({
+        client,
+        sql,
+        params,
+        method,
+        requiresReduction,
+        includeSpec,
+        model,
+        allModels: MODELS,
+        isLateral,
+        lateralMeta,
+      })
     }
     
     return executeSqliteQuery(client, sql, params, method, requiresReduction, includeSpec, model, MODELS)
@@ -707,7 +736,8 @@ function generateExtension(runtimeImportPath: string): string {
         let prebaked = false
         let requiresReduction = false
         let includeSpec: Record<string, any> | undefined
-        let isArrayAgg = false
+        let isLateral = false
+        let lateralMeta: any[] | undefined
         let skipWhereIn = false
 
         if (prebakedQuery) {
@@ -716,7 +746,8 @@ function generateExtension(runtimeImportPath: string): string {
           prebaked = true
           requiresReduction = prebakedQuery.requiresReduction || false
           includeSpec = prebakedQuery.includeSpec
-          isArrayAgg = prebakedQuery.isArrayAgg || false
+          isLateral = prebakedQuery.isLateral || false
+          lateralMeta = prebakedQuery.lateralMeta
           skipWhereIn = prebakedQuery.skipWhereIn || false
         } else {
           const buildArgs = plan.whereInSegments.length > 0
@@ -727,13 +758,14 @@ function generateExtension(runtimeImportPath: string): string {
           params = result.params as unknown[]
           requiresReduction = result.requiresReduction || false
           includeSpec = result.includeSpec
-          isArrayAgg = result.isArrayAgg || false
+          isLateral = result.isLateral || false
+          lateralMeta = result.lateralMeta
           skipWhereIn = result.skipWhereIn || false
         }
 
         if (debug) {
           const strategy = DIALECT === 'postgres'
-            ? (isArrayAgg ? 'ARRAY AGG' : requiresReduction ? 'STREAMING REDUCTION' : 'STREAMING')
+            ? (isLateral ? 'LATERAL JOIN' : requiresReduction ? 'STREAMING REDUCTION' : 'STREAMING')
             : (requiresReduction ? 'BUFFERED REDUCTION' : 'DIRECT')
           
           const whereInMode = plan.whereInSegments.length > 0 && !skipWhereIn
@@ -765,6 +797,12 @@ function generateExtension(runtimeImportPath: string): string {
                 })
                 return results
               },
+              stream: async (sql: string, params: unknown[], onRow: (row: any) => void) => {
+                await client.unsafe(sql, normalizeParams(params)).forEach(onRow)
+              },
+              parentTake: typeof plan.filteredArgs?.take === 'number'
+                ? plan.filteredArgs.take
+                : undefined,
             })
 
             if (plan.injectedParentKeys.length > 0) {
@@ -780,7 +818,7 @@ function generateExtension(runtimeImportPath: string): string {
 
             return transformQueryResults(method, results)
           } else {
-            const parentRows = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isArrayAgg) as any[]
+            const parentRows = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isLateral, lateralMeta) as any[]
 
             if (parentRows.length > 0) {
               await executeWhereInSegments({
@@ -809,7 +847,7 @@ function generateExtension(runtimeImportPath: string): string {
           }
         }
 
-        const results = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isArrayAgg)
+        const results = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isLateral, lateralMeta)
         
         const duration = Date.now() - startTime
         onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
@@ -865,35 +903,38 @@ function generateExtension(runtimeImportPath: string): string {
       let params: unknown[]
       let requiresReduction = false
       let includeSpec: Record<string, any> | undefined
-      let isArrayAgg = false
+      let isLateral = false
+      let lateralMeta: any[] | undefined
       
       if (prebakedQuery) {
         sql = prebakedQuery.sql
         params = resolveParamsFromMappings(plan.filteredArgs, prebakedQuery.paramMappings)
         requiresReduction = prebakedQuery.requiresReduction
         includeSpec = prebakedQuery.includeSpec
-        isArrayAgg = prebakedQuery.isArrayAgg || false
+        isLateral = prebakedQuery.isLateral || false
+        lateralMeta = prebakedQuery.lateralMeta
       } else {
         const result = buildSQL(model, MODELS, 'findMany', plan.filteredArgs, DIALECT)
         sql = result.sql
         params = result.params as unknown[]
         requiresReduction = result.requiresReduction || false
         includeSpec = result.includeSpec
-        isArrayAgg = result.isArrayAgg || false
+        isLateral = result.isLateral || false
+        lateralMeta = result.lateralMeta
       }
       
       const normalizedParams = normalizeParams(params)
-      
-      if (isArrayAgg && includeSpec) {
-        const { buildArrayAggReducerConfig, reduceArrayAggRows } = await import(${JSON.stringify(runtimeImportPath)})
-        const config = buildArrayAggReducerConfig(model, includeSpec, MODELS)
+
+      if (isLateral && lateralMeta) {
+        const { buildLateralReducerConfig, reduceLateralRows } = await import(${JSON.stringify(runtimeImportPath)})
+        const config = buildLateralReducerConfig(model, lateralMeta)
         const results: any[] = []
 
         await client.unsafe(sql, normalizedParams).forEach((row: any) => {
           results.push(row)
         })
 
-        const reduced = reduceArrayAggRows(results, config)
+        const reduced = reduceLateralRows(results, config)
         for (const item of reduced) {
           yield item
         }
@@ -1192,28 +1233,38 @@ function formatQueries(
       const queryEntries: string[] = []
 
       for (const [queryKey, query] of queryMap) {
-        queryEntries.push(`    ${JSON.stringify(queryKey)}: {
-      sql: ${JSON.stringify(query.sql)},
-      params: ${JSON.stringify(query.params)},
-      dynamicKeys: ${JSON.stringify(query.dynamicKeys)},
-      paramMappings: ${JSON.stringify(query.paramMappings)},
-      requiresReduction: ${query.requiresReduction || false},
-      includeSpec: ${JSON.stringify(query.includeSpec || {})},
-      isArrayAgg: ${query.isArrayAgg || false},
-    }`)
+        const parts = [
+          `      sql: ${JSON.stringify(query.sql)}`,
+          `      params: ${JSON.stringify(query.params)}`,
+          `      dynamicKeys: ${JSON.stringify(query.dynamicKeys)}`,
+          `      paramMappings: ${JSON.stringify(query.paramMappings)}`,
+          `      requiresReduction: ${query.requiresReduction || false}`,
+          `      includeSpec: ${JSON.stringify(query.includeSpec || {})}`,
+        ]
+
+        if (query.isLateral) {
+          parts.push(`      isLateral: true`)
+          parts.push(`      lateralMeta: ${JSON.stringify(query.lateralMeta)}`)
+        }
+
+        if (query.skipWhereIn) {
+          parts.push(`      skipWhereIn: true`)
+        }
+
+        queryEntries.push(
+          `    ${JSON.stringify(queryKey)}: {\n${parts.join(',\n')}\n    }`,
+        )
       }
 
-      methodEntries.push(`    ${JSON.stringify(method)}: {
-${queryEntries.join(',\n')}
-    }`)
+      methodEntries.push(
+        `    ${JSON.stringify(method)}: {\n${queryEntries.join(',\n')}\n    }`,
+      )
     }
 
-    modelEntries.push(`  ${JSON.stringify(modelName)}: {
-${methodEntries.join(',\n')}
-  }`)
+    modelEntries.push(
+      `  ${JSON.stringify(modelName)}: {\n${methodEntries.join(',\n')}\n  }`,
+    )
   }
 
-  return `{
-${modelEntries.join(',\n')}
-}`
+  return `{\n${modelEntries.join(',\n')}\n}`
 }

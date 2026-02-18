@@ -13,3 +13,14 @@ export function deduplicatePreserveOrder<T>(items: readonly T[]): readonly T[] {
 
   return out
 }
+
+export function joinNonEmpty(parts: string[], sep: string): string {
+  let result = ''
+  for (const p of parts) {
+    if (p) {
+      if (result) result += sep
+      result += p
+    }
+  }
+  return result
+}

@@ -6,14 +6,7 @@ import {
   SQLDirective,
 } from './sql-generator'
 import { buildSQLWithCache } from './query-cache'
-import {
-  buildBatchSql,
-  parseBatchResults,
-  buildBatchCountSql,
-  parseBatchCountResults,
-  type BatchQuery,
-  type BatchCountQuery,
-} from './batch'
+
 import {
   createTransactionExecutor,
   type TransactionQuery,
@@ -30,12 +23,20 @@ import {
 } from './types'
 import { planQueryStrategy } from './builder/select/segment-planner'
 import { executeWhereInSegments } from './builder/where-in-executor'
-import {
-  buildArrayAggReducerConfig,
-  reduceArrayAggRows,
-} from './builder/select/array-agg-reducer'
 import { executeWithPreFetchedParents } from './builder/select/streaming-where-in-executor'
 import { getPrimaryKeyField } from './builder/shared/primary-key-utils'
+import {
+  buildLateralReducerConfig,
+  reduceLateralRows,
+} from './builder/select/lateral-reducer'
+import { LateralRelationMeta } from './builder/select/lateral-join'
+import {
+  BatchCountQuery,
+  BatchQuery,
+  buildBatchCountSql,
+  buildBatchSql,
+} from './batch/batch-builder'
+import { parseBatchCountResults, parseBatchResults } from './batch/batch-result'
 
 export function buildSQL(
   model: Model,
@@ -78,7 +79,7 @@ function createToSQLFunction(
   }
 }
 
-export function createToSQL(
+function createToSQL(
   modelsOrDmmf: Model[] | DMMF.Document,
   dialect: SqlDialect,
 ): (
@@ -93,7 +94,7 @@ export function createToSQL(
   return createToSQLFunction(models, dialect)
 }
 
-export function createPrismaSQL<TClient>(
+function createPrismaSQL<TClient>(
   config: PrismaSQLConfig<TClient>,
 ): PrismaSQLResult<TClient> {
   const { client, models: providedModels, dmmf, dialect, execute } = config
@@ -150,7 +151,7 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
   return generateSQLInternal(directive)
 }
 
-export function generateAllSQL(directives: DirectiveProps[]): SQLDirective[] {
+function generateAllSQL(directives: DirectiveProps[]): SQLDirective[] {
   const results: SQLDirective[] = []
   const errors: Array<{ directive: DirectiveProps; error: Error }> = []
 
@@ -179,7 +180,7 @@ export function generateAllSQL(directives: DirectiveProps[]): SQLDirective[] {
   return results
 }
 
-export function generateSQLByModel(
+function generateSQLByModel(
   directives: DirectiveProps[],
 ): Map<string, SQLDirective[]> {
   const byModel = new Map<string, SQLDirective[]>()
@@ -214,6 +215,7 @@ export {
   type PrismaSQLConfig,
   type PrismaSQLResult,
   type SqlResult,
+  type LateralRelationMeta,
 }
 
 export {
@@ -221,10 +223,10 @@ export {
   planQueryStrategy,
   createTransactionExecutor,
   executeWhereInSegments,
-  buildArrayAggReducerConfig,
-  reduceArrayAggRows,
   executeWithPreFetchedParents,
   getPrimaryKeyField,
+  buildLateralReducerConfig,
+  reduceLateralRows,
 }
 export { buildReducerConfig, reduceFlatRows } from './builder/select/reducer'
 export type { ReducerConfig } from './builder/select/reducer'
@@ -248,7 +250,7 @@ export {
 export {
   setRelationStats,
   getRelationStats,
-  estimateJoinExpansion,
+  setRoundtripRowEquivalent,
+  setJsonRowFactor,
   countIncludeDepth,
-  shouldPreferFlatJoinStrategy,
 } from './builder/select/strategy-estimator'

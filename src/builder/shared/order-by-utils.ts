@@ -5,12 +5,7 @@ import { getScalarFieldSet } from './model-field-cache'
 type OrderByObject = Record<string, unknown>
 type OrderByArray = Array<Record<string, unknown>>
 
-export type OrderByType =
-  | OrderByObject
-  | OrderByArray
-  | string
-  | null
-  | undefined
+type OrderByType = OrderByObject | OrderByArray | string | null | undefined
 
 type OrderByDirection = 'asc' | 'desc'
 type OrderByNulls = 'first' | 'last'
@@ -28,7 +23,7 @@ type ParseOrderByValue = (
   field?: string,
 ) => { direction: OrderByDirection; nulls?: OrderByNulls }
 
-export interface OrderByEntry {
+interface OrderByEntry {
   field: string
   direction: OrderByDirection
   nulls?: OrderByNulls

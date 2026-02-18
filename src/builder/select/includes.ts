@@ -5,56 +5,40 @@ import { jsonAgg, jsonBuildObject, SqlDialect } from '../../sql-builder-dialect'
 import { buildRelationSelect } from './fields'
 import { Model, PrismaQueryArgs, Field } from '../../types'
 import { createAliasGenerator } from '../shared/alias-generator'
-import { SQL_TEMPLATES, SQL_SEPARATORS } from '../shared/constants'
-import {
-  buildTableReference,
-  quote,
-  sqlStringLiteral,
-  normalizeKeyList,
-  quoteColumn,
-} from '../shared/sql-utils'
+import { SQL_TEMPLATES, SQL_SEPARATORS, LIMITS } from '../shared/constants'
+import { quote, sqlStringLiteral } from '../shared/sql-utils'
 import { ParamStore } from '../shared/param-store'
 import { IncludeSpec, AliasGenerator } from '../shared/types'
 import { isValidWhereClause } from '../shared/validators/sql-validators'
 import {
-  hasProperty,
   isNonEmptyArray,
   isNotNullish,
   isPlainObject,
 } from '../shared/validators/type-guards'
-import {
-  reverseOrderByInput,
-  normalizeOrderByInput as normalizeOrderByShared,
-} from '../shared/order-by-utils'
+import { normalizeOrderByInput as normalizeOrderByShared } from '../shared/order-by-utils'
 import { addAutoScoped } from '../shared/dynamic-params'
 import {
+  getFieldIndices,
   getRelationFieldSet,
   getScalarFieldSet,
 } from '../shared/model-field-cache'
 import { ensureDeterministicOrderByInput } from '../shared/order-by-determinism'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
-import { resolveRelationKeys } from '../shared/relation-key-utils'
+import { extractRelationEntries } from '../shared/relation-extraction-utils'
 import {
-  extractRelationEntries,
-  RelationEntry,
-} from '../shared/relation-extraction-utils'
+  buildIncludeScope,
+  getRelationTableReference,
+  emptyJsonArray,
+  canUseJoinInclude,
+  hasNestedRelationInArgs,
+  buildJoinBasedNonPaginated,
+  buildJoinBasedPaginated,
+} from './include-join'
+import { extractWhereInput } from '../shared/relation-query-context'
+import { isListRelation } from '../shared/field-type-utils'
+import { maybeReverseNegativeTake } from '../shared/negative-take-utils'
 
-const MAX_INCLUDE_DEPTH = 5
-const MAX_INCLUDES_PER_LEVEL = 10
-const MAX_TOTAL_SUBQUERIES = 100
-const FIELD_BY_NAME_CACHE = new WeakMap<Model, Map<string, any>>()
-
-function getFieldMap(model: Model): Map<string, any> {
-  let map = FIELD_BY_NAME_CACHE.get(model)
-  if (!map) {
-    map = new Map()
-    for (const f of model.fields) {
-      map.set(f.name, f)
-    }
-    FIELD_BY_NAME_CACHE.set(model, map)
-  }
-  return map
-}
+const ROW_SUBQUERY_ALIAS_SUFFIX = '_row'
 
 interface IncludeComplexityStats {
   totalIncludes: number
@@ -83,11 +67,6 @@ interface IncludeBuildContext {
   outerHasLimit?: boolean
 }
 
-interface FlatJoinEligibility {
-  canUse: boolean
-  reason?: string
-}
-
 interface NestedToOneRelation {
   name: string
   field: Field
@@ -95,71 +74,18 @@ interface NestedToOneRelation {
   args: unknown
 }
 
-export function canUseFlatJoinForInclude(
-  relationName: string,
-  relArgs: unknown,
-  relModel: Model,
-  depth: number,
-  outerHasLimit: boolean,
-): FlatJoinEligibility {
-  if (depth > 0) {
-    return { canUse: false, reason: 'nested_depth' }
-  }
-
-  const { hasSkip, hasTake } = readSkipTake(relArgs)
-  if (hasSkip || hasTake) {
-    return { canUse: false, reason: 'child_pagination' }
-  }
-
-  if (hasNestedRelationInArgs(relArgs, relModel)) {
-    return { canUse: false, reason: 'nested_includes' }
-  }
-
-  if (!outerHasLimit) {
-    return { canUse: false, reason: 'no_outer_limit' }
-  }
-
-  return { canUse: true }
-}
-
-function buildIncludeScope(includePath: readonly string[]): string {
-  if (includePath.length === 0) return 'include'
-  let scope = 'include'
-  for (let i = 0; i < includePath.length; i++) {
-    scope += `.${includePath[i]}`
-    if (i < includePath.length - 1) {
-      scope += '.include'
-    }
-  }
-  return scope
-}
-
-function getRelationTableReference(
-  relModel: Model,
-  dialect: SqlDialect,
-): string {
-  return buildTableReference(
-    SQL_TEMPLATES.PUBLIC_SCHEMA,
-    relModel.tableName,
-    dialect,
-  )
-}
-
 function resolveRelationOrThrow(
   model: Model,
   schemaByName: Map<string, Model>,
   relName: string,
 ): { field: Field; relModel: Model } {
-  const fieldMap = getFieldMap(model)
-  const field = fieldMap.get(relName)
+  const indices = getFieldIndices(model)
+  const field = indices.allFieldsByName.get(relName)
 
   if (!isNotNullish(field)) {
     throw new Error(
       `Unknown relation '${relName}' on model ${model.name}. ` +
-        `Available relation fields: ${model.fields
-          .filter((f) => f.isRelation)
-          .map((f) => f.name)
-          .join(', ')}`,
+        `Available relation fields: ${indices.relationNames.join(', ')}`,
     )
   }
 
@@ -243,13 +169,6 @@ function appendLimitOffset(
   return sql
 }
 
-function readWhereInput(relArgs: unknown): Record<string, unknown> {
-  if (!isPlainObject(relArgs)) return {}
-  if (!hasProperty(relArgs, 'where')) return {}
-  const w = (relArgs as Record<string, unknown>).where
-  return isPlainObject(w) ? w : {}
-}
-
 function readOrderByInput(relArgs: unknown): {
   hasOrderBy: boolean
   orderBy: OrderByInput
@@ -288,22 +207,6 @@ function extractRelationPaginationConfig(relArgs: unknown): {
   }
 }
 
-function maybeReverseNegativeTake(
-  takeVal: OptionalIntOrDynamic,
-  hasOrderBy: boolean,
-  orderByInput: unknown,
-): { takeVal: OptionalIntOrDynamic; orderByInput: unknown } {
-  if (typeof takeVal !== 'number') return { takeVal, orderByInput }
-  if (takeVal >= 0) return { takeVal, orderByInput }
-  if (!hasOrderBy) {
-    throw new Error('Negative take requires orderBy for deterministic results')
-  }
-  return {
-    takeVal: Math.abs(takeVal),
-    orderByInput: reverseOrderByInput(orderByInput),
-  }
-}
-
 function finalizeOrderByForInclude(args: {
   relModel: Model
   hasOrderBy: boolean
@@ -334,10 +237,11 @@ function extractNestedToOneRelations(
   const toOneRelations: NestedToOneRelation[] = []
 
   for (const entry of entries) {
-    const field = relModel.fields.find((f) => f.name === entry.name)
+    const indices = getFieldIndices(relModel)
+    const field = indices.allFieldsByName.get(entry.name)
     if (!field || !isValidRelationField(field as Field)) continue
 
-    const isList = typeof field.type === 'string' && field.type.endsWith('[]')
+    const isList = isListRelation(field as Field)
     if (isList) continue
 
     const nestedModel = schemaByName.get(field.relatedModel!)
@@ -439,7 +343,7 @@ function buildSelectWithNestedIncludes(
     }
 
     if (isNonEmptyArray(nestedIncludes)) {
-      const emptyJson = ctx.dialect === 'postgres' ? `'[]'::json` : `json('[]')`
+      const emptyJson = emptyJsonArray(ctx.dialect)
       const nestedSelects = nestedIncludes
         .map((inc) =>
           inc.isOneToOne
@@ -613,8 +517,7 @@ function buildListIncludeSpec(args: {
   const noTake = !isNotNullish(args.takeVal)
   const noSkip = !isNotNullish(args.skipVal)
 
-  const emptyJson =
-    args.ctx.dialect === 'postgres' ? `'[]'::json` : `json('[]')`
+  const emptyJson = emptyJsonArray(args.ctx.dialect)
 
   if (args.ctx.dialect === 'postgres' && noTake && noSkip) {
     const rawAgg = args.orderBySql
@@ -636,7 +539,9 @@ function buildListIncludeSpec(args: {
     return Object.freeze({ name: args.relName, sql, isOneToOne: false })
   }
 
-  const rowAlias = args.ctx.aliasGen.next(`${args.relName}_row`)
+  const rowAlias = args.ctx.aliasGen.next(
+    `${args.relName}${ROW_SUBQUERY_ALIAS_SUFFIX}`,
+  )
 
   let base = buildBaseSql({
     selectExpr: `${rowExpr} ${SQL_TEMPLATES.AS} row`,
@@ -671,250 +576,6 @@ function buildListIncludeSpec(args: {
   return Object.freeze({ name: args.relName, sql, isOneToOne: false })
 }
 
-function buildFkSelectList(
-  relAlias: string,
-  relModel: Model,
-  relKeyFields: string[],
-): string {
-  return relKeyFields
-    .map((f, i) => `${relAlias}.${quoteColumn(relModel, f)} AS "__fk${i}"`)
-    .join(SQL_SEPARATORS.FIELD_LIST)
-}
-
-function buildFkGroupByUnqualified(relKeyFields: string[]): string {
-  return relKeyFields
-    .map((_, i) => `"__fk${i}"`)
-    .join(SQL_SEPARATORS.FIELD_LIST)
-}
-
-function buildJoinOnCondition(
-  joinAlias: string,
-  parentAlias: string,
-  parentModel: Model,
-  parentKeyFields: string[],
-): string {
-  const parts = parentKeyFields.map(
-    (f, i) =>
-      `${joinAlias}."__fk${i}" = ${parentAlias}.${quoteColumn(parentModel, f)}`,
-  )
-  return parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`
-}
-
-function buildPartitionBy(
-  relAlias: string,
-  relModel: Model,
-  relKeyFields: string[],
-): string {
-  return relKeyFields
-    .map((f) => `${relAlias}.${quoteColumn(relModel, f)}`)
-    .join(SQL_SEPARATORS.FIELD_LIST)
-}
-
-export function hasNestedRelationInArgs(
-  relArgs: unknown,
-  relModel: Model,
-): boolean {
-  if (!isPlainObject(relArgs)) return false
-
-  const relationSet = getRelationFieldSet(relModel)
-  const checkSource = (src: unknown): boolean => {
-    if (!isPlainObject(src)) return false
-    for (const k of Object.keys(src)) {
-      if (relationSet.has(k) && (src as Record<string, unknown>)[k] !== false)
-        return true
-    }
-    return false
-  }
-
-  if (checkSource((relArgs as Record<string, unknown>).include)) return true
-  if (checkSource((relArgs as Record<string, unknown>).select)) return true
-
-  return false
-}
-
-function canUseJoinInclude(
-  dialect: string,
-  isList: boolean,
-  takeVal: OptionalIntOrDynamic,
-  skipVal: OptionalIntOrDynamic,
-  depth: number,
-  outerHasLimit: boolean,
-  hasNestedIncludes: boolean,
-): boolean {
-  if (dialect !== 'postgres') return false
-  if (!isList) return false
-  if (depth > 0) return false
-  if (outerHasLimit) return false
-  if (hasNestedIncludes) return false
-  if (isDynamicParameter(takeVal) || isDynamicParameter(skipVal)) return false
-  return true
-}
-
-function buildJoinBasedNonPaginated(args: {
-  relName: string
-  relTable: string
-  relAlias: string
-  relModel: Model
-  field: Field
-  whereJoins: string
-  rawWhereClause: string
-  orderBySql: string
-  relSelect: string
-  ctx: IncludeBuildContext
-  nestedJoins: string[]
-}): IncludeSpec {
-  const { childKeys: relKeyFields, parentKeys: parentKeyFields } =
-    resolveRelationKeys(args.field, 'include')
-
-  const joinAlias = args.ctx.aliasGen.next(`__inc_${args.relName}`)
-
-  const fkSelect = buildFkSelectList(args.relAlias, args.relModel, relKeyFields)
-  const fkGroupBy = buildPartitionBy(args.relAlias, args.relModel, relKeyFields)
-  const rowExpr = jsonBuildObject(args.relSelect, args.ctx.dialect)
-
-  const aggExpr = args.orderBySql
-    ? `json_agg(${rowExpr} ORDER BY ${args.orderBySql})`
-    : `json_agg(${rowExpr})`
-
-  const allJoins = [args.whereJoins, ...args.nestedJoins]
-    .filter((j) => j)
-    .join(' ')
-  const joinsPart = allJoins ? ` ${allJoins}` : ''
-  const wherePart = args.rawWhereClause
-    ? ` ${SQL_TEMPLATES.WHERE} ${args.rawWhereClause}`
-    : ''
-
-  const subquery =
-    `SELECT ${fkSelect}${SQL_SEPARATORS.FIELD_LIST}${aggExpr} AS __agg` +
-    ` FROM ${args.relTable} ${args.relAlias}${joinsPart}${wherePart}` +
-    ` GROUP BY ${fkGroupBy}`
-
-  const onCondition = buildJoinOnCondition(
-    joinAlias,
-    args.ctx.parentAlias,
-    args.ctx.model,
-    parentKeyFields,
-  )
-
-  const joinSql = `LEFT JOIN (${subquery}) ${joinAlias} ON ${onCondition}`
-  const selectExpr = `COALESCE(${joinAlias}.__agg, '[]'::json) AS ${quote(args.relName)}`
-
-  return Object.freeze({
-    name: args.relName,
-    sql: '',
-    isOneToOne: false,
-    joinSql,
-    selectExpr,
-  })
-}
-
-function buildJoinBasedPaginated(args: {
-  relName: string
-  relTable: string
-  relAlias: string
-  relModel: Model
-  field: Field
-  whereJoins: string
-  rawWhereClause: string
-  orderBySql: string
-  relSelect: string
-  takeVal: number | undefined
-  skipVal: number | undefined
-  ctx: IncludeBuildContext
-  nestedJoins: string[]
-}): IncludeSpec {
-  const { childKeys: relKeyFields, parentKeys: parentKeyFields } =
-    resolveRelationKeys(args.field, 'include')
-
-  const joinAlias = args.ctx.aliasGen.next(`__inc_${args.relName}`)
-  const rankedAlias = args.ctx.aliasGen.next(`__ranked_${args.relName}`)
-
-  const fkSelect = buildFkSelectList(args.relAlias, args.relModel, relKeyFields)
-  const partitionBy = buildPartitionBy(
-    args.relAlias,
-    args.relModel,
-    relKeyFields,
-  )
-  const rowExpr = jsonBuildObject(args.relSelect, args.ctx.dialect)
-
-  const orderExpr =
-    args.orderBySql ||
-    `${args.relAlias}.${quoteColumn(args.relModel, 'id')} ASC`
-
-  const allJoins = [args.whereJoins, ...args.nestedJoins]
-    .filter((j) => j)
-    .join(' ')
-  const joinsPart = allJoins ? ` ${allJoins}` : ''
-  const wherePart = args.rawWhereClause
-    ? ` ${SQL_TEMPLATES.WHERE} ${args.rawWhereClause}`
-    : ''
-
-  const innerSql =
-    `SELECT ${fkSelect}${SQL_SEPARATORS.FIELD_LIST}` +
-    `${rowExpr} AS __row${SQL_SEPARATORS.FIELD_LIST}` +
-    `ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY ${orderExpr}) AS __rn` +
-    ` FROM ${args.relTable} ${args.relAlias}${joinsPart}${wherePart}`
-
-  const scopeBase = buildIncludeScope(args.ctx.includePath)
-  const rnFilterParts: string[] = []
-
-  if (isNotNullish(args.skipVal) && args.skipVal > 0) {
-    const skipPh = addAutoScoped(
-      args.ctx.params,
-      args.skipVal,
-      `${scopeBase}.skip`,
-    )
-    rnFilterParts.push(`__rn > ${skipPh}`)
-
-    if (isNotNullish(args.takeVal)) {
-      const takePh = addAutoScoped(
-        args.ctx.params,
-        args.takeVal,
-        `${scopeBase}.take`,
-      )
-      rnFilterParts.push(`__rn <= (${skipPh} + ${takePh})`)
-    }
-  } else if (isNotNullish(args.takeVal)) {
-    const takePh = addAutoScoped(
-      args.ctx.params,
-      args.takeVal,
-      `${scopeBase}.take`,
-    )
-    rnFilterParts.push(`__rn <= ${takePh}`)
-  }
-
-  const rnFilter =
-    rnFilterParts.length > 0
-      ? ` ${SQL_TEMPLATES.WHERE} ${rnFilterParts.join(SQL_SEPARATORS.CONDITION_AND)}`
-      : ''
-
-  const fkGroupByOuter = buildFkGroupByUnqualified(relKeyFields)
-
-  const outerSql =
-    `SELECT ${fkGroupByOuter}${SQL_SEPARATORS.FIELD_LIST}` +
-    `json_agg(__row ORDER BY __rn) AS __agg` +
-    ` FROM (${innerSql}) ${rankedAlias}${rnFilter}` +
-    ` GROUP BY ${fkGroupByOuter}`
-
-  const onCondition = buildJoinOnCondition(
-    joinAlias,
-    args.ctx.parentAlias,
-    args.ctx.model,
-    parentKeyFields,
-  )
-
-  const joinSql = `LEFT JOIN (${outerSql}) ${joinAlias} ON ${onCondition}`
-  const selectExpr = `COALESCE(${joinAlias}.__agg, '[]'::json) AS ${quote(args.relName)}`
-
-  return Object.freeze({
-    name: args.relName,
-    sql: '',
-    isOneToOne: false,
-    joinSql,
-    selectExpr,
-  })
-}
-
 function buildSingleInclude(
   relName: string,
   relArgs: unknown,
@@ -925,7 +586,7 @@ function buildSingleInclude(
   const relTable = getRelationTableReference(relModel, ctx.dialect)
   const relAlias = ctx.aliasGen.next(relName)
 
-  const isList = typeof field.type === 'string' && field.type.endsWith('[]')
+  const isList = isListRelation(field)
   const joinPredicate = joinCondition(
     field,
     ctx.model,
@@ -934,7 +595,7 @@ function buildSingleInclude(
     relAlias,
   )
 
-  const whereInput = readWhereInput(relArgs)
+  const whereInput = extractWhereInput(relArgs)
   const { select: relSelect, nestedJoins } = buildSelectWithNestedIncludes(
     relArgs,
     relModel,
@@ -1066,9 +727,9 @@ function buildIncludeSqlInternal(
 ): IncludeSpec[] {
   const depth = ctx.depth
 
-  if (depth > MAX_INCLUDE_DEPTH) {
+  if (depth > LIMITS.MAX_INCLUDE_DEPTH) {
     throw new Error(
-      `Maximum include depth of ${MAX_INCLUDE_DEPTH} exceeded. ` +
+      `Maximum include depth of ${LIMITS.MAX_INCLUDE_DEPTH} exceeded. ` +
         `Path: ${Array.from(ctx.visitSet).join(' -> ')}. ` +
         `Deep includes cause exponential SQL complexity and performance issues.`,
     )
@@ -1082,11 +743,11 @@ function buildIncludeSqlInternal(
     .filter((p) => p.length > 0)
 
   const currentModelCount = modelPath.filter((m) => m === ctx.model.name).length
-  if (currentModelCount > 2) {
+  if (currentModelCount > LIMITS.MAX_SELF_REFERENTIAL_DEPTH) {
     throw new Error(
       `Circular relation detected: Model '${ctx.model.name}' appears ${currentModelCount} times ` +
         `in include path: ${ctx.includePath.join(' -> ')}. ` +
-        `Self-referential relations must be limited to 2 levels deep.`,
+        `Self-referential relations must be limited to ${LIMITS.MAX_SELF_REFERENTIAL_DEPTH} levels deep.`,
     )
   }
 
@@ -1095,9 +756,9 @@ function buildIncludeSqlInternal(
   const includes: IncludeSpec[] = []
   const entries = extractRelationEntries(args, ctx.model)
 
-  if (entries.length > MAX_INCLUDES_PER_LEVEL) {
+  if (entries.length > LIMITS.MAX_INCLUDES_PER_LEVEL) {
     throw new Error(
-      `Too many includes at depth ${depth} (${entries.length} > ${MAX_INCLUDES_PER_LEVEL}). ` +
+      `Too many includes at depth ${depth} (${entries.length} > ${LIMITS.MAX_INCLUDES_PER_LEVEL}). ` +
         `Path: ${Array.from(ctx.visitSet).join(' -> ')}`,
     )
   }
@@ -1109,10 +770,10 @@ function buildIncludeSqlInternal(
     if (relArgs === false) continue
 
     ctx.stats.totalIncludes++
-    if (ctx.stats.totalIncludes > MAX_TOTAL_SUBQUERIES) {
+    if (ctx.stats.totalIncludes > LIMITS.MAX_TOTAL_SUBQUERIES) {
       throw new Error(
         `Query complexity limit exceeded: ${ctx.stats.totalIncludes} includes generated. ` +
-          `Maximum allowed: ${MAX_TOTAL_SUBQUERIES}. ` +
+          `Maximum allowed: ${LIMITS.MAX_TOTAL_SUBQUERIES}. ` +
           `This indicates exponential include nesting. ` +
           `Stats: depth=${ctx.stats.maxDepth}, includes=${ctx.stats.totalIncludes}. ` +
           `Path: ${Array.from(ctx.visitSet).join(' -> ')}. ` +
@@ -1192,196 +853,4 @@ export function buildIncludeSql(
     stats,
     outerHasLimit,
   })
-}
-
-interface RelationCountBuild {
-  joins: string[]
-  jsonPairs: string
-}
-
-function resolveCountRelationOrThrow(
-  relName: string,
-  model: Model,
-  schemaByName: Map<string, Model>,
-): { field: Field; relModel: Model } {
-  const relationSet = getRelationFieldSet(model)
-  if (!relationSet.has(relName)) {
-    throw new Error(
-      `_count.${relName} references unknown relation on model ${model.name}`,
-    )
-  }
-
-  const field = model.fields.find((f) => f.name === relName) as
-    | Field
-    | undefined
-  if (!field) {
-    throw new Error(
-      `_count.${relName} references unknown relation on model ${model.name}`,
-    )
-  }
-
-  if (!isValidRelationField(field)) {
-    throw new Error(
-      `_count.${relName} has invalid relation metadata on model ${model.name}`,
-    )
-  }
-
-  const relatedModelName = field.relatedModel
-  if (
-    !isNotNullish(relatedModelName) ||
-    String(relatedModelName).trim().length === 0
-  ) {
-    throw new Error(
-      `_count.${relName} is missing relatedModel metadata on model ${model.name}`,
-    )
-  }
-
-  const relModel = schemaByName.get(relatedModelName)
-  if (!relModel) {
-    throw new Error(
-      `Related model '${relatedModelName}' not found for _count.${relName}`,
-    )
-  }
-
-  return { field, relModel }
-}
-
-function aliasQualifiedColumn(
-  alias: string,
-  model: Model,
-  field: string,
-): string {
-  return `${alias}.${quoteColumn(model, field)}`
-}
-
-function subqueryForCount(args: {
-  dialect: SqlDialect
-  relTable: string
-  countAlias: string
-  relModel: Model
-  relKeyFields: string[]
-}): string {
-  const selectKeys = args.relKeyFields
-    .map(
-      (f, i) =>
-        `${aliasQualifiedColumn(args.countAlias, args.relModel, f)} AS "__fk${i}"`,
-    )
-    .join(SQL_SEPARATORS.FIELD_LIST)
-
-  const groupByKeys = args.relKeyFields
-    .map((f) => aliasQualifiedColumn(args.countAlias, args.relModel, f))
-    .join(SQL_SEPARATORS.FIELD_LIST)
-
-  const cntExpr =
-    args.dialect === 'postgres' ? 'COUNT(*)::int AS __cnt' : 'COUNT(*) AS __cnt'
-
-  return `(SELECT ${selectKeys}${SQL_SEPARATORS.FIELD_LIST}${cntExpr} FROM ${args.relTable} ${args.countAlias} GROUP BY ${groupByKeys})`
-}
-
-function leftJoinOnForCount(args: {
-  joinAlias: string
-  parentAlias: string
-  parentModel: Model
-  parentKeyFields: string[]
-}): string {
-  const parts = args.parentKeyFields.map(
-    (f, i) =>
-      `${args.joinAlias}."__fk${i}" = ${aliasQualifiedColumn(args.parentAlias, args.parentModel, f)}`,
-  )
-  return parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`
-}
-
-function nextAliasAvoiding(
-  aliasGen: ReturnType<typeof createAliasGenerator>,
-  base: string,
-  forbidden: Set<string>,
-): string {
-  let a = aliasGen.next(base)
-  while (forbidden.has(a)) a = aliasGen.next(base)
-  return a
-}
-
-function buildCountJoinAndPair(args: {
-  relName: string
-  field: Field
-  relModel: Model
-  parentModel: Model
-  parentAlias: string
-  dialect: SqlDialect
-  aliasGen: ReturnType<typeof createAliasGenerator>
-}): { joinSql: string; pairSql: string } {
-  const relTable = getRelationTableReference(args.relModel, args.dialect)
-  const { childKeys: relKeyFields, parentKeys: parentKeyFields } =
-    resolveRelationKeys(args.field, 'count')
-
-  const forbidden = new Set<string>([args.parentAlias])
-
-  const countAlias = nextAliasAvoiding(
-    args.aliasGen,
-    `__tp_cnt_${args.relName}`,
-    forbidden,
-  )
-  forbidden.add(countAlias)
-
-  const subquery = subqueryForCount({
-    dialect: args.dialect,
-    relTable,
-    countAlias,
-    relModel: args.relModel,
-    relKeyFields,
-  })
-
-  const joinAlias = nextAliasAvoiding(
-    args.aliasGen,
-    `__tp_cnt_j_${args.relName}`,
-    forbidden,
-  )
-
-  const leftJoinOn = leftJoinOnForCount({
-    joinAlias,
-    parentAlias: args.parentAlias,
-    parentModel: args.parentModel,
-    parentKeyFields,
-  })
-
-  return {
-    joinSql: `LEFT JOIN ${subquery} ${joinAlias} ON ${leftJoinOn}`,
-    pairSql: `${sqlStringLiteral(args.relName)}, COALESCE(${joinAlias}.__cnt, 0)`,
-  }
-}
-
-export function buildRelationCountSql(
-  countSelect: Record<string, boolean>,
-  model: Model,
-  schemas: readonly Model[],
-  parentAlias: string,
-  _params: ParamStore,
-  dialect: SqlDialect,
-): RelationCountBuild {
-  const joins: string[] = []
-  const pairs: string[] = []
-  const aliasGen = createAliasGenerator()
-
-  const schemaByName = new Map<string, Model>()
-  for (const m of schemas) schemaByName.set(m.name, m)
-
-  for (const [relName, shouldCount] of Object.entries(countSelect)) {
-    if (!shouldCount) continue
-
-    const resolved = resolveCountRelationOrThrow(relName, model, schemaByName)
-    const built = buildCountJoinAndPair({
-      relName,
-      field: resolved.field,
-      relModel: resolved.relModel,
-      parentModel: model,
-      parentAlias,
-      dialect,
-      aliasGen,
-    })
-
-    joins.push(built.joinSql)
-    pairs.push(built.pairSql)
-  }
-
-  return { joins, jsonPairs: pairs.join(SQL_SEPARATORS.FIELD_LIST) }
 }

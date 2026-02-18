@@ -2,7 +2,7 @@ import { Model } from '../../types'
 import { getRelationFieldSet } from './model-field-cache'
 import { isPlainObject } from './validators/type-guards'
 
-export function hasChildPagination(relArgs: unknown): boolean {
+function hasChildPagination(relArgs: unknown): boolean {
   if (!isPlainObject(relArgs)) return false
   const args = relArgs as Record<string, unknown>
   if (args.take !== undefined && args.take !== null) return true
@@ -78,36 +78,4 @@ export function extractNestedIncludeSpec(
   }
 
   return out
-}
-
-export interface RelationEntry {
-  name: string
-  value: unknown
-}
-
-export function extractRelationEntries(
-  args: { include?: unknown; select?: unknown },
-  model: Model,
-): RelationEntry[] {
-  const relationSet = getRelationFieldSet(model)
-  const entries: RelationEntry[] = []
-  const seen = new Set<string>()
-
-  const scanSource = (source: unknown): void => {
-    if (!isPlainObject(source)) return
-
-    for (const [key, value] of Object.entries(source)) {
-      if (!relationSet.has(key)) continue
-      if (value === false) continue
-      if (seen.has(key)) continue
-
-      seen.add(key)
-      entries.push({ name: key, value })
-    }
-  }
-
-  scanSource(args.include)
-  scanSource(args.select)
-
-  return entries
 }

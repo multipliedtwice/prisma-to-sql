@@ -165,7 +165,7 @@ export function readSkipTake(relArgs: unknown): {
   return { hasSkip, hasTake, skipVal, takeVal }
 }
 
-function buildOrderByFragment(
+export function buildOrderByFragment(
   entries: OrderByEntry[],
   alias: string,
   dialect: SqlDialect,
@@ -583,7 +583,7 @@ function normalizeTakeLike(v: unknown): MaybeIntOrDynamic {
   return n as MaybeIntOrDynamic
 }
 
-export function normalizeSkipLike(v: unknown): MaybeIntOrDynamic {
+function normalizeSkipLike(v: unknown): MaybeIntOrDynamic {
   return normalizeIntLike('skip', v, {
     min: 0,
     max: MAX_LIMIT_OFFSET,

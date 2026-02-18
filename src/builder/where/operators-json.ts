@@ -68,8 +68,19 @@ export function buildJsonOperator(
 ): string {
   if (val === undefined) return ''
 
-  if (op === Ops.PATH && isPlainObject(val) && 'path' in val) {
-    return handleJsonPath(expr, val, params, dialect)
+  if (op === Ops.PATH) {
+    if (val === null) {
+      return `${expr} ${SQL_TEMPLATES.IS_NULL}`
+    }
+
+    if (isPlainObject(val) && 'path' in val) {
+      return handleJsonPath(expr, val, params, dialect)
+    }
+
+    throw createError(
+      'JSON path operator requires object with "path" key or null',
+      { operator: op },
+    )
   }
 
   const jsonWildcards: Record<string, (v: string) => string> = {

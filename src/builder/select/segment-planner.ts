@@ -2,9 +2,12 @@ import { isPlainObject } from '../shared/validators/type-guards'
 import { extractRelationEntries } from '../shared/relation-extraction-utils'
 import { resolveRelationKeys } from '../shared/relation-key-utils'
 import { Field, Model } from '../../types'
-import { extractNestedIncludeSpec } from '../shared/relation-utils'
 import { canUseFlatJoinForAll } from './flat-join'
-import { shouldPreferFlatJoinStrategy } from './strategy-estimator'
+import {
+  pickIncludeStrategy,
+  hasChildPaginationAnywhere,
+} from './strategy-estimator'
+import { canUseLateralJoin } from './lateral-join'
 
 export interface WhereInSegment {
   relationName: string
@@ -17,7 +20,7 @@ export interface WhereInSegment {
   perParentSkip?: number
 }
 
-export interface QueryPlan {
+interface QueryPlan {
   filteredArgs: any
   originalArgs: any
   whereInSegments: WhereInSegment[]
@@ -143,6 +146,17 @@ function ensureParentKeysInSelect(
   return { args: { ...args, select: newSelect }, injectedKeys: injected }
 }
 
+function extractIncludeSpec(args: any, model: Model): Record<string, any> {
+  const spec: Record<string, any> = {}
+  const entries = extractRelationEntries(args, model)
+  for (const e of entries) {
+    if (e.value !== false) {
+      spec[e.name] = e.value
+    }
+  }
+  return spec
+}
+
 export function planQueryStrategy(params: {
   model: Model
   method: string
@@ -165,29 +179,41 @@ export function planQueryStrategy(params: {
   }
 
   if (dialect === 'postgres') {
-    const includeSpec = extractNestedIncludeSpec(args, model)
+    const includeSpec = extractIncludeSpec(args, model)
 
     if (Object.keys(includeSpec).length > 0) {
       const hasPagination =
         isPlainObject(args) && 'take' in args && args.take != null
-
       const takeValue =
         isPlainObject(args) && typeof args.take === 'number' ? args.take : null
 
       const canFlatJoin = canUseFlatJoinForAll(includeSpec, model, allModels)
+      const canLateral = canUseLateralJoin(includeSpec, model, allModels)
+      const hasChildPag = hasChildPaginationAnywhere(
+        includeSpec,
+        model,
+        allModels,
+      )
 
-      if (
-        shouldPreferFlatJoinStrategy({
-          includeSpec,
-          model,
-          schemas: allModels,
-          hasPagination,
-          takeValue,
-          canUseFlatJoin: canFlatJoin,
-          debug,
-          source: 'planner',
-        })
-      ) {
+      const strategy = pickIncludeStrategy({
+        includeSpec,
+        model,
+        schemas: allModels,
+        method: params.method,
+        args,
+        takeValue,
+        hasPagination,
+        canFlatJoin,
+        canLateral,
+        hasChildPagination: hasChildPag,
+        debug,
+      })
+
+      if (debug) {
+        console.log(`  [planner] ${model.name}: strategy=${strategy}`)
+      }
+
+      if (strategy !== 'where-in') {
         return emptyPlan
       }
     }

@@ -1,7 +1,7 @@
 import { Field } from '../../types'
 import { normalizeKeyList } from './sql-utils'
 
-export interface RelationKeys {
+interface RelationKeys {
   childKeys: string[]
   parentKeys: string[]
 }

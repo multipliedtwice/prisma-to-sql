@@ -1,6 +1,7 @@
 import type { Model, PrismaMethod } from './types'
 import type { SqlDialect } from './sql-builder-dialect'
 import type { ParamMap } from '@dee-wan/schema-parser'
+import type { LateralRelationMeta } from './builder/select/lateral-join'
 import { buildWhereClause } from './builder/where'
 import { buildSelectSql } from './builder/select'
 import {
@@ -12,6 +13,7 @@ import { buildTableReference } from './builder/shared/sql-utils'
 import { SQL_TEMPLATES, SQL_RESERVED_WORDS } from './builder/shared/constants'
 import { createBoundedCache } from './utils/s3-fifo'
 import { tryFastPath } from './fast-path'
+import { pgToSqlitePlaceholders } from './builder/shared/sql-param-scanner'
 
 interface SqlResult {
   sql: string
@@ -19,7 +21,9 @@ interface SqlResult {
   paramMappings?: readonly ParamMap[]
   requiresReduction?: boolean
   includeSpec?: Record<string, any>
-  isArrayAgg?: boolean
+  isLateral?: boolean
+  lateralMeta?: LateralRelationMeta[]
+  skipWhereIn?: boolean
 }
 
 interface CacheStats {
@@ -50,8 +54,8 @@ class QueryCacheStats {
   }
 }
 
-export const queryCache = createBoundedCache<string, SqlResult>(1000)
-export const queryCacheStats = new QueryCacheStats()
+const queryCache = createBoundedCache<string, SqlResult>(1000)
+const queryCacheStats = new QueryCacheStats()
 
 export function makeAlias(name: string): string {
   const base = name
@@ -60,139 +64,6 @@ export function makeAlias(name: string): string {
     .slice(0, 50)
   const safe = /^[a-z_]/.test(base) ? base : `_${base}`
   return SQL_RESERVED_WORDS.has(safe) ? `${safe}_t` : safe
-}
-
-type SqliteScanMode = 'normal' | 'single' | 'double'
-
-interface ScanState {
-  mode: SqliteScanMode
-  position: number
-  output: string
-  reorderedParams: unknown[]
-}
-
-function handleSingleQuote(sql: string, state: ScanState): ScanState {
-  const n = sql.length
-  let i = state.position
-  let out = state.output + sql[i]
-  i++
-  while (i < n) {
-    out += sql[i]
-    if (sql.charCodeAt(i) === 39) {
-      if (i + 1 < n && sql.charCodeAt(i + 1) === 39) {
-        out += sql[i + 1]
-        i += 2
-        continue
-      }
-      return { ...state, mode: 'normal', position: i + 1, output: out }
-    }
-    i++
-  }
-  return { ...state, position: i, output: out }
-}
-
-function handleDoubleQuote(sql: string, state: ScanState): ScanState {
-  const n = sql.length
-  let i = state.position
-  let out = state.output + sql[i]
-  i++
-  while (i < n) {
-    out += sql[i]
-    if (sql.charCodeAt(i) === 34) {
-      if (i + 1 < n && sql.charCodeAt(i + 1) === 34) {
-        out += sql[i + 1]
-        i += 2
-        continue
-      }
-      return { ...state, mode: 'normal', position: i + 1, output: out }
-    }
-    i++
-  }
-  return { ...state, position: i, output: out }
-}
-
-function extractParameterNumber(
-  sql: string,
-  startPos: number,
-): { num: number; nextPos: number } | null {
-  const n = sql.length
-  let j = startPos + 1
-  let num = 0
-  let hasDigit = false
-  while (j < n) {
-    const d = sql.charCodeAt(j)
-    if (d >= 48 && d <= 57) {
-      num = num * 10 + (d - 48)
-      hasDigit = true
-      j++
-    } else {
-      break
-    }
-  }
-  if (hasDigit && num >= 1) {
-    return { num, nextPos: j }
-  }
-  return null
-}
-
-function handleParameterSubstitution(
-  sql: string,
-  params: readonly unknown[],
-  state: ScanState,
-): ScanState {
-  const result = extractParameterNumber(sql, state.position)
-  if (result) {
-    return {
-      ...state,
-      position: result.nextPos,
-      output: state.output + '?',
-      reorderedParams: [...state.reorderedParams, params[result.num - 1]],
-    }
-  }
-  return {
-    ...state,
-    position: state.position + 1,
-    output: state.output + sql[state.position],
-  }
-}
-
-function toSqliteParams(sql: string, params: readonly unknown[]): SqlResult {
-  const n = sql.length
-  let state: ScanState = {
-    mode: 'normal',
-    position: 0,
-    output: '',
-    reorderedParams: [],
-  }
-  while (state.position < n) {
-    const ch = sql.charCodeAt(state.position)
-    if (state.mode === 'single') {
-      state = handleSingleQuote(sql, state)
-      continue
-    }
-    if (state.mode === 'double') {
-      state = handleDoubleQuote(sql, state)
-      continue
-    }
-    if (ch === 39) {
-      state = { ...state, mode: 'single' }
-      continue
-    }
-    if (ch === 34) {
-      state = { ...state, mode: 'double' }
-      continue
-    }
-    if (ch === 36) {
-      state = handleParameterSubstitution(sql, params, state)
-      continue
-    }
-    state = {
-      ...state,
-      position: state.position + 1,
-      output: state.output + sql[state.position],
-    }
-  }
-  return { sql: state.output, params: state.reorderedParams }
 }
 
 function canonicalizeReplacer(key: string, value: unknown): unknown {
@@ -249,7 +120,9 @@ function buildSQLFull(
     paramMappings?: readonly ParamMap[]
     requiresReduction?: boolean
     includeSpec?: Record<string, any>
-    isArrayAgg?: boolean
+    isLateral?: boolean
+    lateralMeta?: LateralRelationMeta[]
+    skipWhereIn?: boolean
   }
   switch (method) {
     case 'aggregate':
@@ -293,14 +166,16 @@ function buildSQLFull(
   }
   const sqlResult =
     dialect === 'sqlite'
-      ? toSqliteParams(result.sql, result.params)
+      ? pgToSqlitePlaceholders(result.sql, result.params)
       : { sql: result.sql, params: [...result.params] }
   return {
     ...sqlResult,
     paramMappings: result.paramMappings,
     requiresReduction: result.requiresReduction,
     includeSpec: result.includeSpec,
-    isArrayAgg: result.isArrayAgg,
+    isLateral: result.isLateral,
+    lateralMeta: result.lateralMeta,
+    skipWhereIn: result.skipWhereIn,
   }
 }
 
@@ -321,7 +196,9 @@ export function buildSQLWithCache(
       paramMappings: cached.paramMappings,
       requiresReduction: cached.requiresReduction,
       includeSpec: cached.includeSpec,
-      isArrayAgg: cached.isArrayAgg,
+      isLateral: cached.isLateral,
+      lateralMeta: cached.lateralMeta,
+      skipWhereIn: cached.skipWhereIn,
     }
   }
   queryCacheStats.miss()
@@ -340,7 +217,9 @@ export function buildSQLWithCache(
     paramMappings: result.paramMappings,
     requiresReduction: result.requiresReduction,
     includeSpec: result.includeSpec,
-    isArrayAgg: result.isArrayAgg,
+    isLateral: result.isLateral,
+    lateralMeta: result.lateralMeta,
+    skipWhereIn: result.skipWhereIn,
   })
   return result
 }

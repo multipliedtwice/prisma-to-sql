@@ -106,42 +106,6 @@ function buildToOneNotExistsMatch(
   return `${SQL_TEMPLATES.NOT} EXISTS (${SQL_TEMPLATES.SELECT} 1 ${SQL_TEMPLATES.FROM} ${relTable} ${relAlias}${joins} ${SQL_TEMPLATES.WHERE} ${join} ${SQL_TEMPLATES.AND} ${sub.clause})`
 }
 
-function tryOptimizeNoneFilter(
-  noneValue: unknown,
-  ctx: BuildContext,
-  relModel: Model,
-  relTable: string,
-  relAlias: string,
-  join: string,
-  sub: QueryResult,
-): QueryResult | null {
-  const isEmptyFilter =
-    isPlainObject(noneValue) && Object.keys(noneValue).length === 0
-
-  const canOptimize =
-    !ctx.isSubquery &&
-    isEmptyFilter &&
-    sub.clause === DEFAULT_WHERE_CLAUSE &&
-    sub.joins.length === 0
-
-  if (!canOptimize) return null
-
-  const checkField =
-    relModel.fields.find(
-      (f) => !f.isRelation && f.isRequired && f.name !== 'id',
-    ) || relModel.fields.find((f) => !f.isRelation && f.name === 'id')
-
-  if (!checkField) return null
-
-  const leftJoinSql = `LEFT JOIN ${relTable} ${relAlias} ON ${join}`
-  const whereClause = `${relAlias}.${quoteColumn(relModel, checkField.name)} IS NULL`
-
-  return {
-    clause: whereClause,
-    joins: [leftJoinSql],
-  }
-}
-
 function processRelationFilter(
   key:
     | typeof RelationFilters.SOME

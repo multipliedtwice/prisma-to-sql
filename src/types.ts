@@ -1,4 +1,5 @@
 import { Model as DMMMModel } from '@dee-wan/schema-parser'
+import { LateralRelationMeta } from './builder/select/lateral-join'
 
 export type Model = DMMMModel
 
@@ -14,8 +15,9 @@ export interface SqlResult {
   paramMappings?: ParamMapping[]
   requiresReduction?: boolean
   includeSpec?: Record<string, any>
-  supportsStreaming?: boolean
-  isArrayAgg?: boolean
+  isLateral?: boolean
+  lateralMeta?: LateralRelationMeta[]
+  skipWhereIn?: boolean
 }
 
 export interface PrismaQueryArgs {

@@ -17,23 +17,6 @@ export function getGlobalDialect(): SqlDialect {
   return globalDialect
 }
 
-export function withDialect<T>(dialect: SqlDialect, fn: () => T): T {
-  const prev = globalDialect
-  globalDialect = dialect
-  try {
-    const result = fn()
-    if (result instanceof Promise) {
-      throw new Error(
-        'withDialect cannot be used with async functions. ' +
-          'Pass dialect explicitly to buildSQL() instead of relying on global state.',
-      )
-    }
-    return result
-  } finally {
-    globalDialect = prev
-  }
-}
-
 function assertNonEmpty(value: string, name: string): void {
   if (!value || value.trim().length === 0) {
     throw new Error(`${name} is required and cannot be empty`)

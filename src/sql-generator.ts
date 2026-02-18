@@ -18,6 +18,8 @@ import {
 import { PrismaMethod } from './types'
 import { isPlainObject } from './builder/shared/validators/type-guards'
 import { SqlResult } from './builder/shared/types'
+import { LateralRelationMeta } from './builder/select/lateral-join'
+import { scanSqlPlaceholders } from './builder/shared/sql-param-scanner'
 
 export interface SQLDirective {
   method: PrismaMethod
@@ -28,7 +30,9 @@ export interface SQLDirective {
   paramMappings: readonly ParamMap[]
   requiresReduction: boolean
   includeSpec: Record<string, any>
-  isArrayAgg: boolean
+  isLateral: boolean
+  lateralMeta?: LateralRelationMeta[]
+  skipWhereIn?: boolean
   originalDirective: DirectiveProps
 }
 
@@ -134,26 +138,23 @@ function normalizeSqlAndMappingsForDialect(
   const byIndex = new Map<number, ParamMap>()
   for (const m of paramMappings) byIndex.set(m.index, m)
 
-  const placeholderPositions: number[] = []
-  const normalizedSql = sql.replace(/\$(\d+)/g, (_, num) => {
-    placeholderPositions.push(parseInt(num, 10))
-    return '?'
-  })
+  const expandedMappings: ParamMap[] = []
 
-  const expandedMappings: ParamMap[] = placeholderPositions.map(
-    (originalIndex, i) => {
-      const originalMapping = byIndex.get(originalIndex)
+  const normalizedSql = scanSqlPlaceholders(
+    sql,
+    (oldIndex) => {
+      const originalMapping = byIndex.get(oldIndex)
       if (!originalMapping) {
-        throw new Error(
-          `CRITICAL: No mapping found for parameter $${originalIndex}`,
-        )
+        throw new Error(`CRITICAL: No mapping found for parameter $${oldIndex}`)
       }
-      return {
-        index: i + 1,
+      expandedMappings.push({
+        index: expandedMappings.length + 1,
         value: originalMapping.value,
         dynamicName: originalMapping.dynamicName,
-      }
+      })
+      return '?'
     },
+    { pgAware: false, strictPlaceholders: false },
   )
 
   return { sql: normalizedSql, paramMappings: expandedMappings }
@@ -297,7 +298,9 @@ function buildAndNormalizeSql(args: {
   paramMappings: readonly ParamMap[]
   requiresReduction: boolean
   includeSpec: Record<string, any>
-  isArrayAgg: boolean
+  isLateral: boolean
+  lateralMeta?: LateralRelationMeta[]
+  skipWhereIn?: boolean
 } {
   const {
     method,
@@ -332,15 +335,14 @@ function buildAndNormalizeSql(args: {
       ? (sqlResult.includeSpec as Record<string, any>)
       : null) ?? extractIncludeSpec(processed, modelDef)
 
-  const requiresReduction = sqlResult.requiresReduction === true
-  const isArrayAgg = sqlResult.isArrayAgg === true
-
   return {
     sql: normalized.sql,
     paramMappings: normalized.paramMappings,
-    requiresReduction,
+    requiresReduction: sqlResult.requiresReduction === true,
     includeSpec,
-    isArrayAgg,
+    isLateral: sqlResult.isLateral === true,
+    lateralMeta: sqlResult.lateralMeta,
+    skipWhereIn: sqlResult.skipWhereIn === true,
   }
 }
 
@@ -352,7 +354,9 @@ function finalizeDirective(args: {
   dialect: SqlDialect
   requiresReduction: boolean
   includeSpec: Record<string, any>
-  isArrayAgg: boolean
+  isLateral: boolean
+  lateralMeta?: LateralRelationMeta[]
+  skipWhereIn?: boolean
 }): SQLDirective {
   const {
     directive,
@@ -362,7 +366,9 @@ function finalizeDirective(args: {
     dialect,
     requiresReduction,
     includeSpec,
-    isArrayAgg,
+    isLateral,
+    lateralMeta,
+    skipWhereIn,
   } = args
 
   const params = normalizedMappings.map((m) => m.value ?? undefined)
@@ -380,7 +386,9 @@ function finalizeDirective(args: {
     paramMappings: normalizedMappings,
     requiresReduction,
     includeSpec,
-    isArrayAgg,
+    isLateral,
+    lateralMeta,
+    skipWhereIn,
     originalDirective: directive,
   }
 }
@@ -423,6 +431,8 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
     dialect,
     requiresReduction: built.requiresReduction,
     includeSpec: built.includeSpec,
-    isArrayAgg: built.isArrayAgg,
+    isLateral: built.isLateral,
+    lateralMeta: built.lateralMeta,
+    skipWhereIn: built.skipWhereIn,
   })
 }

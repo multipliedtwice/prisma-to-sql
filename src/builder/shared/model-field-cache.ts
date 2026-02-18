@@ -5,6 +5,7 @@ import { quote } from './sql-utils'
 interface FieldIndices {
   scalarFields: ReadonlyMap<string, Field>
   relationFields: ReadonlyMap<string, Field>
+  allFieldsByName: ReadonlyMap<string, Field>
   scalarNames: readonly string[]
   relationNames: readonly string[]
   jsonFields: ReadonlySet<string>
@@ -25,6 +26,7 @@ export function getFieldIndices(model: Model): FieldIndices {
 
   const scalarFields = new Map<string, Field>()
   const relationFields = new Map<string, Field>()
+  const allFieldsByName = new Map<string, Field>()
   const scalarNames: string[] = []
   const relationNames: string[] = []
   const jsonFields = new Set<string>()
@@ -34,6 +36,8 @@ export function getFieldIndices(model: Model): FieldIndices {
 
   for (const rawField of model.fields) {
     const field = normalizeField(rawField)
+
+    allFieldsByName.set(field.name, field)
 
     if (field.isRelation) {
       relationFields.set(field.name, field)
@@ -67,6 +71,7 @@ export function getFieldIndices(model: Model): FieldIndices {
   cached = Object.freeze({
     scalarFields,
     relationFields,
+    allFieldsByName,
     scalarNames,
     relationNames,
     jsonFields,
@@ -77,6 +82,13 @@ export function getFieldIndices(model: Model): FieldIndices {
 
   FIELD_INDICES_CACHE.set(model, cached)
   return cached
+}
+
+export function getFieldByNameCached(
+  model: Model,
+  name: string,
+): Field | undefined {
+  return getFieldIndices(model).allFieldsByName.get(name)
 }
 
 export function getRelationFieldSet(model: Model): ReadonlySet<string> {

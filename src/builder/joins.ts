@@ -14,7 +14,7 @@ export function isRelationField(fieldName: string, model: Model): boolean {
   return getRelationFieldSet(model).has(fieldName)
 }
 
-export function isValidRelationField(field: Field | undefined): field is Field {
+export function isValidRelationField(field: any): field is Field {
   if (!isNotNullish(field)) return false
   if (!field.isRelation) return false
   if (

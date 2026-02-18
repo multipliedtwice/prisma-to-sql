@@ -6,10 +6,9 @@ import {
   stableJson,
   cleanDatabaseUrl,
 } from './utils/pure-utils'
+import { SqlDialect } from './sql-builder-dialect'
 
-export type Dialect = 'postgres' | 'sqlite'
-
-export type Executor = {
+type Executor = {
   query: (
     sql: string,
     params?: unknown[],
@@ -28,6 +27,8 @@ export type RelationStatsMap = Record<string, Record<string, RelStats>>
 
 export type GeneratePlannerArtifacts = {
   relationStats: RelationStatsMap
+  roundtripRowEquivalent: number
+  jsonRowFactor: number
 }
 
 type RelEdge = {
@@ -41,13 +42,13 @@ type RelEdge = {
   isMany: boolean
 }
 
-function quoteIdent(dialect: Dialect, ident: string): string {
+function quoteIdent(dialect: SqlDialect, ident: string): string {
   return `"${ident.replace(/"/g, '""')}"`
 }
 
 export async function createDatabaseExecutor(params: {
   databaseUrl: string
-  dialect: Dialect
+  dialect: SqlDialect
 }): Promise<{ executor: Executor; cleanup: () => Promise<void> }> {
   const { databaseUrl, dialect } = params
 
@@ -71,9 +72,7 @@ export async function createDatabaseExecutor(params: {
   throw new Error(`Dialect ${dialect} not supported for stats collection`)
 }
 
-export function extractMeasurableOneToManyEdges(
-  datamodel: DMMF.Datamodel,
-): RelEdge[] {
+function extractMeasurableOneToManyEdges(datamodel: DMMF.Datamodel): RelEdge[] {
   const modelByName = new Map(datamodel.models.map((m) => [m.name, m]))
   const edges: RelEdge[] = []
 
@@ -215,10 +214,231 @@ SELECT
 `.trim()
 }
 
-export function buildFanoutStatsSql(dialect: Dialect, edge: RelEdge): string {
+function buildFanoutStatsSql(dialect: SqlDialect, edge: RelEdge): string {
   return dialect === 'postgres'
     ? buildPostgresStatsSql(edge)
     : buildSqliteStatsSql(edge)
+}
+
+async function findLargestTable(params: {
+  executor: Executor
+  dialect: SqlDialect
+  datamodel: DMMF.Datamodel
+}): Promise<{ tableName: string; rowCount: number } | null> {
+  const { executor, dialect, datamodel } = params
+
+  let best: { tableName: string; rowCount: number } | null = null
+
+  for (const model of datamodel.models) {
+    const table = quoteIdent(dialect, model.dbName || model.name)
+    try {
+      const rows = await executor.query(`SELECT COUNT(*) AS cnt FROM ${table}`)
+      const count = toNumberOrZero(rows[0]?.cnt)
+      if (!best || count > best.rowCount) {
+        best = { tableName: table, rowCount: count }
+      }
+    } catch (_) {}
+  }
+
+  return best
+}
+
+async function measureRoundtripCost(params: {
+  executor: Executor
+  dialect: SqlDialect
+  datamodel: DMMF.Datamodel
+}): Promise<number> {
+  const { executor, dialect, datamodel } = params
+  const WARMUP = 5
+  const SAMPLES = 15
+
+  for (let i = 0; i < WARMUP; i++) {
+    await executor.query('SELECT 1')
+  }
+
+  const roundtripTimes: number[] = []
+  for (let i = 0; i < SAMPLES; i++) {
+    const start = performance.now()
+    await executor.query('SELECT 1')
+    roundtripTimes.push(performance.now() - start)
+  }
+  roundtripTimes.sort((a, b) => a - b)
+  const medianRoundtrip = roundtripTimes[Math.floor(SAMPLES / 2)]
+
+  console.log(
+    `  [roundtrip] SELECT 1 times (ms): min=${roundtripTimes[0].toFixed(3)} median=${medianRoundtrip.toFixed(3)} max=${roundtripTimes[SAMPLES - 1].toFixed(3)}`,
+  )
+
+  const largest = await findLargestTable({ executor, dialect, datamodel })
+
+  if (!largest || largest.rowCount < 50) {
+    console.log(
+      `  [roundtrip] Largest table: ${largest?.tableName ?? 'none'} (${largest?.rowCount ?? 0} rows) — too small, using default 50`,
+    )
+    return 50
+  }
+
+  console.log(
+    `  [roundtrip] Using table ${largest.tableName} (${largest.rowCount} rows)`,
+  )
+
+  return estimateFromQueryPairRatio({
+    executor,
+    tableName: largest.tableName,
+    medianRoundtrip,
+    tableRowCount: largest.rowCount,
+  })
+}
+
+async function estimateFromQueryPairRatio(params: {
+  executor: Executor
+  tableName: string
+  medianRoundtrip: number
+  tableRowCount: number
+}): Promise<number> {
+  const { executor, tableName, medianRoundtrip, tableRowCount } = params
+  const WARMUP = 5
+  const SAMPLES = 10
+
+  const smallLimit = 1
+  const largeLimit = Math.min(1000, tableRowCount)
+
+  for (let i = 0; i < WARMUP; i++) {
+    await executor.query(`SELECT * FROM ${tableName} LIMIT ${largeLimit}`)
+  }
+
+  const smallTimes: number[] = []
+  for (let i = 0; i < SAMPLES; i++) {
+    const start = performance.now()
+    await executor.query(`SELECT * FROM ${tableName} LIMIT ${smallLimit}`)
+    smallTimes.push(performance.now() - start)
+  }
+  smallTimes.sort((a, b) => a - b)
+  const medianSmall = smallTimes[Math.floor(SAMPLES / 2)]
+
+  const largeTimes: number[] = []
+  let actualLargeRows = 0
+  for (let i = 0; i < SAMPLES; i++) {
+    const start = performance.now()
+    const rows = await executor.query(
+      `SELECT * FROM ${tableName} LIMIT ${largeLimit}`,
+    )
+    largeTimes.push(performance.now() - start)
+    actualLargeRows = rows.length
+  }
+  largeTimes.sort((a, b) => a - b)
+  const medianLarge = largeTimes[Math.floor(SAMPLES / 2)]
+
+  const rowDiff = actualLargeRows - smallLimit
+  const timeDiff = medianLarge - medianSmall
+
+  console.log(
+    `  [roundtrip] LIMIT ${smallLimit}: median=${medianSmall.toFixed(3)}ms`,
+  )
+  console.log(
+    `  [roundtrip] LIMIT ${largeLimit} (got ${actualLargeRows}): median=${medianLarge.toFixed(3)}ms`,
+  )
+  console.log(
+    `  [roundtrip] Time diff: ${timeDiff.toFixed(3)}ms for ${rowDiff} rows`,
+  )
+
+  if (rowDiff < 50 || timeDiff <= 0.05) {
+    console.log(
+      `  [roundtrip] Insufficient signal (need ≥50 row diff and >0.05ms time diff), defaulting to 50`,
+    )
+    return 50
+  }
+
+  const perRow = timeDiff / rowDiff
+
+  const sequentialTimes: number[] = []
+  for (let i = 0; i < SAMPLES; i++) {
+    const start = performance.now()
+    await executor.query(`SELECT * FROM ${tableName} LIMIT ${smallLimit}`)
+    await executor.query(`SELECT * FROM ${tableName} LIMIT ${smallLimit}`)
+    await executor.query(`SELECT * FROM ${tableName} LIMIT ${smallLimit}`)
+    sequentialTimes.push(performance.now() - start)
+  }
+  sequentialTimes.sort((a, b) => a - b)
+  const median3Sequential = sequentialTimes[Math.floor(SAMPLES / 2)]
+
+  const marginalQueryCost = (median3Sequential - medianSmall) / 2
+
+  console.log(
+    `  [roundtrip] 3x sequential LIMIT 1: median=${median3Sequential.toFixed(3)}ms`,
+  )
+  console.log(`  [roundtrip] Single query: ${medianSmall.toFixed(3)}ms`)
+  console.log(
+    `  [roundtrip] Marginal query cost: ${marginalQueryCost.toFixed(3)}ms`,
+  )
+  console.log(`  [roundtrip] Per-row cost: ${perRow.toFixed(4)}ms`)
+
+  const equivalent = Math.round(marginalQueryCost / perRow)
+
+  console.log(`  [roundtrip] Raw equivalent: ${equivalent} rows`)
+
+  const clamped = Math.max(10, Math.min(500, equivalent))
+  console.log(`  [roundtrip] Final (clamped): ${clamped} rows`)
+
+  return clamped
+}
+
+async function measureJsonOverhead(params: {
+  executor: Executor
+  tableName: string
+  tableRowCount: number
+}): Promise<number> {
+  const { executor, tableName, tableRowCount } = params
+  const WARMUP = 3
+  const SAMPLES = 10
+  const limit = Math.min(500, tableRowCount)
+
+  const rawSql = `SELECT * FROM ${tableName} LIMIT ${limit}`
+
+  const colsResult = await executor.query(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = ${tableName.replace(/"/g, "'")} LIMIT 10`,
+  )
+
+  let aggSql: string
+  if (colsResult.length >= 3) {
+    const cols = colsResult.slice(0, 6).map((r) => `"${r.column_name}"`)
+    const aggExprs = cols.map((c) => `array_agg(${c})`).join(', ')
+    const groupCol = cols[0]
+    aggSql = `SELECT ${groupCol}, ${aggExprs} FROM ${tableName} GROUP BY ${groupCol} LIMIT ${limit}`
+  } else {
+    aggSql = `SELECT json_agg(t) FROM (SELECT * FROM ${tableName} LIMIT ${limit}) t`
+  }
+
+  for (let i = 0; i < WARMUP; i++) {
+    await executor.query(rawSql)
+    await executor.query(aggSql)
+  }
+
+  const rawTimes: number[] = []
+  for (let i = 0; i < SAMPLES; i++) {
+    const start = performance.now()
+    await executor.query(rawSql)
+    rawTimes.push(performance.now() - start)
+  }
+  rawTimes.sort((a, b) => a - b)
+  const medianRaw = rawTimes[Math.floor(SAMPLES / 2)]
+
+  const aggTimes: number[] = []
+  for (let i = 0; i < SAMPLES; i++) {
+    const start = performance.now()
+    await executor.query(aggSql)
+    aggTimes.push(performance.now() - start)
+  }
+  aggTimes.sort((a, b) => a - b)
+  const medianAgg = aggTimes[Math.floor(SAMPLES / 2)]
+
+  const factor = medianRaw > 0.01 ? medianAgg / medianRaw : 3.0
+
+  console.log(`  [json] Raw ${limit} rows: ${medianRaw.toFixed(3)}ms`)
+  console.log(`  [json] array_agg grouped: ${medianAgg.toFixed(3)}ms`)
+  console.log(`  [json] Overhead factor: ${factor.toFixed(2)}x`)
+
+  return Math.max(1.5, Math.min(8.0, factor))
 }
 
 async function collectPostgresStatsFromCatalog(params: {
@@ -347,7 +567,7 @@ async function collectPostgresStatsFromCatalog(params: {
 async function collectPreciseCardinalities(params: {
   executor: Executor
   datamodel: DMMF.Datamodel
-  dialect: Dialect
+  dialect: SqlDialect
 }): Promise<RelationStatsMap> {
   const { executor, datamodel, dialect } = params
   const edges = extractMeasurableOneToManyEdges(datamodel)
@@ -366,10 +586,10 @@ async function collectPreciseCardinalities(params: {
   return out
 }
 
-export async function collectRelationCardinalities(params: {
+async function collectRelationCardinalities(params: {
   executor: Executor
   datamodel: DMMF.Datamodel
-  dialect: Dialect
+  dialect: SqlDialect
   mode?: 'fast' | 'precise'
 }): Promise<RelationStatsMap> {
   const { executor, datamodel, dialect, mode = 'precise' } = params
@@ -399,6 +619,35 @@ export async function collectRelationCardinalities(params: {
   return collectPreciseCardinalities({ executor, datamodel, dialect })
 }
 
+export async function collectPlannerArtifacts(params: {
+  executor: Executor
+  datamodel: DMMF.Datamodel
+  dialect: SqlDialect
+  mode?: 'fast' | 'precise'
+}): Promise<GeneratePlannerArtifacts> {
+  const { executor, datamodel, dialect, mode } = params
+
+  const largest = await findLargestTable({ executor, dialect, datamodel })
+
+  const [relationStats, roundtripRowEquivalent, jsonRowFactor] =
+    await Promise.all([
+      collectRelationCardinalities({ executor, datamodel, dialect, mode }),
+      measureRoundtripCost({ executor, dialect, datamodel }),
+      largest && largest.rowCount >= 50 && dialect === 'postgres'
+        ? measureJsonOverhead({
+            executor,
+            tableName: largest.tableName,
+            tableRowCount: largest.rowCount,
+          })
+        : Promise.resolve(1.5),
+    ])
+
+  console.log(`  Roundtrip cost: ~${roundtripRowEquivalent} row equivalents`)
+  console.log(`  JSON overhead factor: ${jsonRowFactor.toFixed(2)}x`)
+
+  return { relationStats, roundtripRowEquivalent, jsonRowFactor }
+}
+
 export function emitPlannerGeneratedModule(
   artifacts: GeneratePlannerArtifacts,
 ): string {
@@ -406,6 +655,10 @@ export function emitPlannerGeneratedModule(
     `export const RELATION_STATS = ${stableJson(artifacts.relationStats)} as const`,
     ``,
     `export type RelationStats = typeof RELATION_STATS`,
+    ``,
+    `export const ROUNDTRIP_ROW_EQUIVALENT = ${artifacts.roundtripRowEquivalent}`,
+    ``,
+    `export const JSON_ROW_FACTOR = ${artifacts.jsonRowFactor.toFixed(2)}`,
     ``,
   ].join('\n')
 }
