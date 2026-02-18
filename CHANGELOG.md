@@ -1,3 +1,11 @@
+# [1.69.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.68.0...v1.69.0) (2026-02-18)
+
+
+### Features
+
+* flat join & reduce ([e4d1ef6](https://github.com/multipliedtwice/prisma-to-sql/commit/e4d1ef6d56f09dea97a384b50ffd0e8dd0445c7b))
+* reduce code duplication ([2d98249](https://github.com/multipliedtwice/prisma-to-sql/commit/2d98249eae9a2de5393e13c2e7bc87026d1c8c66))
+
 # [1.68.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.67.0...v1.68.0) (2026-02-16)
 
 
