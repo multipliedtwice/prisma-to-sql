@@ -19,7 +19,6 @@ const DEFAULT_SELECT_CACHE = new WeakMap<Model, Map<string, string>>()
 function toSelectEntries(select: Record<string, unknown>): SelectEntry[] {
   const out: SelectEntry[] = []
   for (const [k, v] of Object.entries(select)) {
-    if (k === '_count') continue
     if (v !== false && v !== undefined) out.push([k, v])
   }
   return out
@@ -152,7 +151,9 @@ function validateFieldKeys(
     if (!scalarSet.has(k) && !relationSet.has(k)) unknown.push(k)
   }
   if (unknown.length > 0) {
-    throw new Error(`Select contains unknown fields: ${unknown.join(', ')}`)
+    throw new Error(
+      `Unknown field '${unknown.join("', '")}' does not exist on this model`,
+    )
   }
 }
 

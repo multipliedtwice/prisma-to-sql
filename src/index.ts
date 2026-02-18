@@ -48,6 +48,52 @@ export function buildSQL(
   return buildSQLWithCache(model, models, method, args, dialect) as any
 }
 
+function createToSQLFunction(
+  models: Model[],
+  dialect: SqlDialect,
+): (
+  model: string,
+  method: PrismaMethod,
+  args?: Record<string, unknown>,
+) => SqlResult {
+  if (!models || !Array.isArray(models) || models.length === 0) {
+    throw new Error('createToSQL requires non-empty models array')
+  }
+
+  const modelMap = new Map(models.map((m) => [m.name, m]))
+
+  setGlobalDialect(dialect)
+
+  return function toSQL(
+    model: string,
+    method: PrismaMethod,
+    args: Record<string, unknown> = {},
+  ): SqlResult {
+    const m = modelMap.get(model)
+    if (!m) {
+      throw new Error(
+        `Model '${model}' not found. Available: ${[...modelMap.keys()].join(', ')}`,
+      )
+    }
+    return buildSQL(m, models, method, args, dialect)
+  }
+}
+
+export function createToSQL(
+  modelsOrDmmf: Model[] | DMMF.Document,
+  dialect: SqlDialect,
+): (
+  model: string,
+  method: PrismaMethod,
+  args?: Record<string, unknown>,
+) => SqlResult {
+  const models = Array.isArray(modelsOrDmmf)
+    ? modelsOrDmmf
+    : convertDMMFToModels(modelsOrDmmf.datamodel)
+
+  return createToSQLFunction(models, dialect)
+}
+
 export function generateSQL(directive: DirectiveProps): SQLDirective {
   return generateSQLInternal(directive)
 }

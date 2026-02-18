@@ -3,15 +3,11 @@ import { createTestDB, type TestDB } from '../helpers/db'
 import { seedDatabase, type SeedResult } from '../helpers/seed-db'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
 import { getDatamodel } from '../helpers/datamodel'
-import { buildBatchSql, parseBatchResults } from '../../src/batch'
 import { convertDMMFToModels } from '@dee-wan/schema-parser'
 import { type Model } from '../../src/types'
 import postgres from 'postgres'
-import {
-  type BatchProxy,
-  type ExtendedPrismaClient,
-  speedExtension,
-} from '../../src'
+import { buildBatchSql, parseBatchResults } from '../../src'
+import { speedExtension } from '../generated/extension-postgres-v6'
 
 const PG_URL = 'postgresql://postgres:postgres@localhost:5433/prisma_test'
 
@@ -21,7 +17,7 @@ let pgClient: ReturnType<typeof postgres>
 let models: Model[]
 let modelMap: Map<string, Model>
 
-type SpeedClient = ExtendedPrismaClient<any>
+type SpeedClient = any
 
 interface PerfMetrics {
   buildTime: number
@@ -611,7 +607,6 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
         speedExtension({
           debug: true,
           postgres: pgClient,
-          models,
         }),
       ) as SpeedClient
     }
@@ -619,7 +614,7 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
     it('executes batch with mixed queries', async () => {
       const extended = createExtended()
 
-      const results = await extended.$batch((batch: BatchProxy) => ({
+      const results = await extended.$batch((batch: any) => ({
         users: batch.User.findMany({
           where: { status: 'ACTIVE' },
           orderBy: { id: 'asc' },
@@ -654,7 +649,7 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
     it('executes batch with all count queries', async () => {
       const extended = createExtended()
 
-      const results = await extended.$batch((batch: BatchProxy) => ({
+      const results = await extended.$batch((batch: any) => ({
         totalUsers: batch.User.count(),
         activeUsers: batch.User.count({ where: { status: 'ACTIVE' } }),
         todoTasks: batch.Task.count({ where: { status: 'TODO' } }),
@@ -683,7 +678,7 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
     it('executes batch with aggregate', async () => {
       const extended = createExtended()
 
-      const results = await extended.$batch((batch: BatchProxy) => ({
+      const results = await extended.$batch((batch: any) => ({
         taskStats: batch.Task.aggregate({
           _count: { _all: true },
           _avg: { id: true },
@@ -700,7 +695,7 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
     it('executes batch with groupBy', async () => {
       const extended = createExtended()
 
-      const results = await extended.$batch((batch: BatchProxy) => ({
+      const results = await extended.$batch((batch: any) => ({
         tasksByStatus: batch.Task.groupBy({
           by: ['status'],
           _count: { _all: true },
@@ -722,7 +717,7 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
       const extended = createExtended()
 
       await expect(
-        extended.$batch(async (batch: BatchProxy) => ({
+        extended.$batch(async (batch: any) => ({
           users: (await batch.User.findMany()) as any,
         })),
       ).rejects.toThrow(/Cannot await a batch query/)
@@ -732,7 +727,7 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
       const extended = createExtended()
 
       await expect(
-        extended.$batch((batch: BatchProxy) => ({
+        extended.$batch((batch: any) => ({
           result: (batch.User as any).create({
             data: { email: 'test@test.com' },
           }),
@@ -744,7 +739,7 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
       const extended = createExtended()
 
       await expect(
-        extended.$batch((batch: BatchProxy) => ({
+        extended.$batch((batch: any) => ({
           result: (batch as any).FakeModel.findMany(),
         })),
       ).rejects.toThrow(/not found/)
@@ -757,7 +752,6 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
         speedExtension({
           debug: true,
           postgres: pgClient,
-          models,
         }),
       ) as SpeedClient
 
@@ -772,7 +766,7 @@ Total:   ${metrics.totalTime.toFixed(2)}ms
       const sequentialTime = performance.now() - sequentialStart
 
       const batchStart = performance.now()
-      const batchResults = await extended.$batch((batch: BatchProxy) => ({
+      const batchResults = await extended.$batch((batch: any) => ({
         activeUsers: batch.User.count({ where: { status: 'ACTIVE' } }),
         todoTasks: batch.Task.count({ where: { status: 'TODO' } }),
         projectCount: batch.Project.count(),
@@ -800,7 +794,6 @@ Speedup:    ${(sequentialTime / batchTime).toFixed(2)}x
         speedExtension({
           debug: true,
           postgres: pgClient,
-          models,
         }),
       ) as SpeedClient
 
@@ -845,7 +838,7 @@ Speedup:    ${(sequentialTime / batchTime).toFixed(2)}x
       const sequentialTime = performance.now() - sequentialStart
 
       const batchStart = performance.now()
-      const batchResults = await extended.$batch((batch: BatchProxy) => ({
+      const batchResults = await extended.$batch((batch: any) => ({
         activeUsersWithTasks: batch.User.findMany({
           where: {
             AND: [

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { buildWhereClause } from '../../src/builder/where'
 import { buildCountSql } from '../../src/builder/aggregates'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
-import { queryCache } from '../../src/query-cache'
 import type { Model } from '../../src/types'
 
 const UserModel: Model = {
@@ -57,7 +56,6 @@ const UserModel: Model = {
 describe('Date Normalization - Direct Bug Detection', () => {
   beforeEach(() => {
     setGlobalDialect('postgres')
-    queryCache.clear()
   })
 
   it('Catches Date object leak in count queries', () => {

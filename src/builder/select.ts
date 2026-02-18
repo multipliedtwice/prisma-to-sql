@@ -134,7 +134,7 @@ function validateDistinct(
       const relationSet = getRelationFieldSet(model)
       if (relationSet.has(f)) {
         throw new Error(
-          `distinct field '${f}' is a relation. Only scalar fields are allowed.\n` +
+          `distinct field '${f}' is a relation field. Only scalar fields are allowed.\n` +
             `Available scalar fields: ${[...scalarSet].join(', ')}`,
         )
       }
@@ -185,7 +185,7 @@ function validateOrderBy(
     if (!scalarSet.has(f)) {
       if (relationSet.has(f)) {
         throw new Error(
-          `orderBy field '${f}' is a relation. Only scalar fields are allowed.\n` +
+          `orderBy field '${f}' is a relation field. Only scalar fields are allowed.\n` +
             `Available scalar fields: ${[...scalarSet].join(', ')}`,
         )
       }

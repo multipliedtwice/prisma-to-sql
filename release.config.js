@@ -6,8 +6,9 @@ module.exports = {
       {
         preset: 'angular',
         releaseRules: [
-          { type: 'chore', release: 'minor' },
-          { type: 'refactor', release: 'minor' },
+          { message: 'release: major*', release: 'major' },
+          { message: 'release: minor*', release: 'minor' },
+          { message: 'release:*', release: 'patch' },
         ],
       },
     ],

@@ -1,4 +1,3 @@
-// tests/sql-injection/relation-name-validation.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Prisma, PrismaClient } from '../generated/client'
 import { createToSQL } from '../../src'
