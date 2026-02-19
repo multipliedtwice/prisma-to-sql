@@ -1,3 +1,10 @@
+# [1.75.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.74.0...v1.75.0) (2026-02-19)
+
+
+### Features
+
+* **select.ts:** enhance orderBy validation to support relations and improve error handling ([4501957](https://github.com/multipliedtwice/prisma-to-sql/commit/4501957ab180e5db41deaabb8474e1acb2de8021))
+
 # [1.74.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.73.0...v1.74.0) (2026-02-19)
 
 
