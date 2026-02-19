@@ -93,7 +93,9 @@ function buildIncludeColumns(spec: SelectQuerySpec): {
   let countCols = ''
   let countJoins: string[] = []
 
-  const countSelectRaw = spec.args?.select?.[COUNT_SELECT_KEY]
+  const countSelectRaw =
+    spec.args?.select?.[COUNT_SELECT_KEY] ??
+    spec.args?.include?.[COUNT_SELECT_KEY]
   if (countSelectRaw) {
     const resolvedCountSelect = resolveCountSelect(countSelectRaw, model)
 
@@ -278,7 +280,7 @@ function extractIncludeSpec(args: PrismaQueryArgs): Record<string, any> {
 
   if (args.include && isPlainObject(args.include)) {
     for (const [key, value] of Object.entries(args.include)) {
-      if (value !== false) {
+      if (value !== false && key !== COUNT_SELECT_KEY) {
         includeSpec[key] = value
       }
     }

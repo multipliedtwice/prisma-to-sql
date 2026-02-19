@@ -885,6 +885,57 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
         },
       ))
 
+    it('_count inside include', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        '_count via include',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            _count: { select: { tasks: true, labels: true } },
+          },
+          take: 5,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              _count: { select: { tasks: true, labels: true } },
+            },
+            take: 5,
+            orderBy: { id: 'asc' },
+          }),
+      ))
+
+    it('_count inside include with other relations', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        '_count via include + relations',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            tasks: { take: 2 },
+            _count: { select: { tasks: true, milestones: true } },
+          },
+          take: 3,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              tasks: { take: 2 },
+              _count: { select: { tasks: true, milestones: true } },
+            },
+            take: 3,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
     it('with sum/avg', () =>
       runParityTest(
         db,
