@@ -428,7 +428,6 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
   const normalizedArgs = normalizeArgsForDialect(dialectToUse, argsForSql)
 
   validateDistinct(model, normalizedArgs.distinct)
-  validateOrderBy(model, normalizedArgs.orderBy, schemas)
   validateCursor(model, normalizedArgs.cursor, normalizedArgs.distinct)
 
   const spec = buildSelectSpec({
