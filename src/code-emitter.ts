@@ -785,6 +785,7 @@ function generateExtension(runtimeImportPath: string): string {
             : 'NONE'
           
           console.log(\`[\${DIALECT}] \${modelName}.\${method} - \${strategy} + WHERE IN: \${whereInMode}\`)
+          console.log(\`  Invoked: \${modelName}.\${method}(\`, args, \`)\`)
           console.log(\`  Prebaked: \${prebaked}, skipWhereIn: \${skipWhereIn}\`)
           console.log('  SQL:', sql)
           console.log('  Params:', params)
