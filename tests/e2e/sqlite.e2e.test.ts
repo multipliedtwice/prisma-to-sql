@@ -1517,13 +1517,76 @@ describe('Prisma Parity E2E - SQLite', () => {
           drizzleQuery: () =>
             drizzle.db
               .select()
-              .from(schema.sqliteTasks)
+              .from(schema.pgTasks)
               .orderBy(
-                asc(schema.sqliteTasks.status),
-                desc(schema.sqliteTasks.priority),
-                desc(schema.sqliteTasks.createdAt),
+                asc(schema.pgTasks.status),
+                desc(schema.pgTasks.priority),
+                desc(schema.pgTasks.createdAt),
               )
               .limit(20),
+        },
+      ))
+
+    it('relation orderBy to-one', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'orderBy relation to-one',
+        'Task',
+        {
+          method: 'findMany',
+          orderBy: { project: { name: 'asc' } },
+          take: 20,
+        },
+        () =>
+          db.prisma.task.findMany({
+            orderBy: { project: { name: 'asc' } },
+            take: 20,
+          }),
+        {
+          sortField: undefined,
+        },
+      ))
+
+    it('relation orderBy with scalar orderBy', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'orderBy relation + scalar',
+        'Task',
+        {
+          method: 'findMany',
+          orderBy: [{ project: { name: 'asc' } }, { createdAt: 'desc' }],
+          take: 20,
+        },
+        () =>
+          db.prisma.task.findMany({
+            orderBy: [{ project: { name: 'asc' } }, { createdAt: 'desc' }],
+            take: 20,
+          }),
+        {
+          sortField: undefined,
+        },
+      ))
+
+    it('relation orderBy nullable to-one', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'orderBy nullable relation',
+        'Task',
+        {
+          method: 'findMany',
+          orderBy: { assignee: { email: 'asc' } },
+          take: 20,
+        },
+        () =>
+          db.prisma.task.findMany({
+            orderBy: { assignee: { email: 'asc' } },
+            take: 20,
+          }),
+        {
+          sortField: undefined,
         },
       ))
   })

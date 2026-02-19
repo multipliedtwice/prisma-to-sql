@@ -1,6 +1,6 @@
 import { isNotNullish, isPlainObject } from './validators/type-guards'
 import { Model } from '../../types'
-import { getScalarFieldSet } from './model-field-cache'
+import { getScalarFieldSet, getRelationFieldSet } from './model-field-cache'
 
 type OrderByObject = Record<string, unknown>
 type OrderByArray = Array<Record<string, unknown>>
@@ -52,7 +52,7 @@ const getNextSort = (sortRaw: unknown): unknown => {
   return sortRaw
 }
 
-const flipObjectSort = (
+const flipScalarSortObject = (
   obj: Record<string, unknown>,
 ): Record<string, unknown> => {
   const out: Record<string, unknown> = { ...obj }
@@ -75,30 +75,82 @@ const flipObjectSort = (
   return out
 }
 
+function isScalarSortConfig(obj: Record<string, unknown>): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(obj, 'sort') ||
+    Object.prototype.hasOwnProperty.call(obj, 'direction')
+  )
+}
+
+function flipRelationOrderByValue(
+  obj: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    out[k] = flipValue(v)
+  }
+  return out
+}
+
 const flipValue = (v: unknown): unknown => {
   if (typeof v === 'string') return flipSortString(v)
-  if (isPlainObject(v)) return flipObjectSort(v)
+  if (isPlainObject(v)) {
+    if (isScalarSortConfig(v)) return flipScalarSortObject(v)
+    return flipRelationOrderByValue(v)
+  }
   return v
 }
 
-const assertSingleFieldObject = (item: unknown): [string, unknown] => {
+const expandToSingleFieldEntries = (
+  item: unknown,
+): Array<[string, unknown]> => {
   if (!isPlainObject(item)) {
     throw new Error('orderBy array entries must be objects')
   }
 
   const entries = Object.entries(item)
-  if (entries.length !== 1) {
-    throw new Error('orderBy array entries must have exactly one field')
+  if (entries.length === 0) {
+    throw new Error('orderBy array entries must have at least one field')
   }
 
-  return entries[0]
+  return entries
+}
+
+export function expandOrderByInput(orderBy: unknown): Array<[string, unknown]> {
+  if (!isNotNullish(orderBy)) return []
+
+  if (Array.isArray(orderBy)) {
+    const result: Array<[string, unknown]> = []
+    for (const item of orderBy) {
+      result.push(...expandToSingleFieldEntries(item))
+    }
+    return result
+  }
+
+  if (isPlainObject(orderBy)) {
+    return Object.entries(orderBy)
+  }
+
+  throw new Error('orderBy must be an object or array of objects')
+}
+
+function isScalarOrderByValue(v: unknown): boolean {
+  if (typeof v === 'string') {
+    const lower = v.toLowerCase()
+    return lower === 'asc' || lower === 'desc'
+  }
+  if (isPlainObject(v) && isScalarSortConfig(v)) return true
+  return false
 }
 
 const flipOrderByArray = (orderBy: unknown[]): { [x: string]: unknown }[] => {
-  return orderBy.map((item) => {
-    const [k, v] = assertSingleFieldObject(item)
-    return { [k]: flipValue(v) }
-  })
+  const result: { [x: string]: unknown }[] = []
+  for (const item of orderBy) {
+    for (const [k, v] of expandToSingleFieldEntries(item)) {
+      result.push({ [k]: flipValue(v) })
+    }
+  }
+  return result
 }
 
 const flipOrderByObject = (
@@ -129,15 +181,18 @@ const normalizePairs = (
   pairs: Array<[string, unknown]>,
   parseValue: ParseOrderByValue,
 ): NormalizedOrderBy => {
-  return pairs.map(([field, rawValue]) => {
+  const result: NormalizedOrderBy = []
+  for (const [field, rawValue] of pairs) {
+    if (!isScalarOrderByValue(rawValue)) continue
     const parsed = parseValue(rawValue, field)
-    return {
+    result.push({
       [field]:
         parsed.nulls !== undefined
           ? { direction: parsed.direction, nulls: parsed.nulls }
           : parsed.direction,
-    }
-  })
+    })
+  }
+  return result
 }
 
 export function normalizeOrderByInput(
@@ -147,8 +202,11 @@ export function normalizeOrderByInput(
   if (!isNotNullish(orderBy)) return []
 
   if (Array.isArray(orderBy)) {
-    const pairs = orderBy.map(assertSingleFieldObject)
-    return normalizePairs(pairs, parseValue)
+    const allPairs: Array<[string, unknown]> = []
+    for (const item of orderBy) {
+      allPairs.push(...expandToSingleFieldEntries(item))
+    }
+    return normalizePairs(allPairs, parseValue)
   }
 
   if (isPlainObject(orderBy)) {
@@ -168,11 +226,13 @@ export function normalizeAndValidateOrderBy(
   const normalized = normalizeOrderByInput(orderBy, parseValue)
   const entries: OrderByEntry[] = []
   const scalarSet = getScalarFieldSet(model)
+  const relationSet = getRelationFieldSet(model)
 
   for (const item of normalized) {
     const [[field, value]] = Object.entries(item)
 
     if (!scalarSet.has(field)) {
+      if (relationSet.has(field)) continue
       throw new Error(
         `orderBy field '${field}' not found on model ${model.name}`,
       )

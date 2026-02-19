@@ -12,7 +12,9 @@ import { buildIncludeSql } from './select/includes'
 import {
   reverseOrderByInput,
   normalizeOrderByInput as normalizeOrderByShared,
+  expandOrderByInput,
 } from './shared/order-by-utils'
+import { buildOrderByWithRelations } from './shared/order-by-relation'
 import { createParamStoreFrom } from './shared/param-store'
 import { assertSafeAlias, assertSafeTableRef } from './shared/sql-utils'
 import { WhereClauseResult, SqlResult, SelectQuerySpec } from './shared/types'
@@ -148,28 +150,35 @@ function validateDistinct(
   }
 }
 
+function isScalarSortValue(v: unknown): boolean {
+  if (typeof v === 'string') {
+    const lower = v.toLowerCase()
+    return lower === 'asc' || lower === 'desc'
+  }
+  if (
+    isPlainObject(v) &&
+    (Object.prototype.hasOwnProperty.call(v, 'sort') ||
+      Object.prototype.hasOwnProperty.call(v, 'direction'))
+  ) {
+    return true
+  }
+  return false
+}
+
 function validateOrderBy(
   model: Model,
   orderBy: PrismaQueryArgs['orderBy'],
+  schemas: Model[],
 ): void {
   if (!isNotNullish(orderBy)) return
 
-  const items = normalizeOrderByInput(orderBy)
-  if (items.length === 0) return
+  const expanded = expandOrderByInput(orderBy)
+  if (expanded.length === 0) return
 
   const scalarSet = getScalarFieldSet(model)
   const relationSet = getRelationFieldSet(model)
 
-  for (const it of items) {
-    const entries = Object.entries(it)
-    if (entries.length !== 1) {
-      throw new Error(
-        'orderBy array entries must have exactly one field. ' +
-          `Got ${entries.length} fields: ${Object.keys(it).join(', ')}`,
-      )
-    }
-
-    const [fieldName, value] = entries[0]
+  for (const [fieldName, value] of expanded) {
     const f = String(fieldName).trim()
 
     if (f.length === 0) {
@@ -182,21 +191,23 @@ function validateOrderBy(
       )
     }
 
-    if (!scalarSet.has(f)) {
-      if (relationSet.has(f)) {
-        throw new Error(
-          `orderBy field '${f}' is a relation field. Only scalar fields are allowed.\n` +
-            `Available scalar fields: ${[...scalarSet].join(', ')}`,
-        )
-      }
-      throw new Error(
-        `orderBy field '${f}' does not exist on model ${model.name}.\n` +
-          `Available fields: ${[...scalarSet].join(', ')}`,
-      )
+    if (scalarSet.has(f)) {
+      assertScalarField(model, f, 'orderBy')
+      parseOrderByValue(value, f)
+      continue
     }
 
-    assertScalarField(model, f, 'orderBy')
-    parseOrderByValue(value, f)
+    if (relationSet.has(f)) {
+      if (!isPlainObject(value)) {
+        throw new Error(`Relation orderBy for '${f}' must be an object`)
+      }
+      continue
+    }
+
+    throw new Error(
+      `orderBy field '${f}' does not exist on model ${model.name}.\n` +
+        `Available fields: ${[...scalarSet].join(', ')}`,
+    )
   }
 }
 
@@ -321,12 +332,14 @@ function buildSelectSpec(input: {
     alias,
   )
 
-  const orderByClause = buildOrderByClause(
-    normalizedArgs,
+  const orderByResult = buildOrderByWithRelations(
+    normalizedArgs.orderBy,
     alias,
     dialect,
     model,
+    schemas,
   )
+
   const { take, skip, cursor } = getPaginationParams(method, normalizedArgs)
 
   const params = createParamStoreFrom(
@@ -369,13 +382,20 @@ function buildSelectSpec(input: {
     )
   }
 
+  const orderByJoins = orderByResult.joins
+  const combinedWhereJoins: readonly string[] = whereResult.joins
+    ? [...whereResult.joins, ...orderByJoins]
+    : orderByJoins.length > 0
+      ? orderByJoins
+      : []
+
   return {
     select: selectFields,
     includes,
     from: { table: tableName, alias },
     whereClause: whereResult.clause,
-    whereJoins: whereResult.joins,
-    orderBy: orderByClause,
+    whereJoins: combinedWhereJoins,
+    orderBy: orderByResult.sql,
     pagination: { take, skip },
     distinct: normalizedArgs.distinct,
     method,
@@ -411,7 +431,7 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
   const normalizedArgs = normalizeArgsForDialect(dialectToUse, argsForSql)
 
   validateDistinct(model, normalizedArgs.distinct)
-  validateOrderBy(model, normalizedArgs.orderBy)
+  validateOrderBy(model, normalizedArgs.orderBy, schemas)
   validateCursor(model, normalizedArgs.cursor, normalizedArgs.distinct)
 
   const spec = buildSelectSpec({
