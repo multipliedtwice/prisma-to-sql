@@ -7,7 +7,7 @@ import { buildRelationCountSql } from './include-count'
 import { Model, PrismaQueryArgs, Field } from '../../types'
 import { createAliasGenerator } from '../shared/alias-generator'
 import { SQL_TEMPLATES, SQL_SEPARATORS, LIMITS } from '../shared/constants'
-import { quote, sqlStringLiteral } from '../shared/sql-utils'
+import { quote, quoteColumn, sqlStringLiteral } from '../shared/sql-utils'
 import { ParamStore } from '../shared/param-store'
 import { IncludeSpec, AliasGenerator } from '../shared/types'
 import { isValidWhereClause } from '../shared/validators/sql-validators'
@@ -38,6 +38,7 @@ import {
 import { extractWhereInput } from '../shared/relation-query-context'
 import { isListRelation } from '../shared/field-type-utils'
 import { maybeReverseNegativeTake } from '../shared/negative-take-utils'
+import { getPrimaryKeyField } from '../shared/primary-key-utils'
 
 const ROW_SUBQUERY_ALIAS_SUFFIX = '_row'
 
@@ -290,6 +291,7 @@ function buildNestedToOneJoins(
 function buildNestedToOneSelects(
   relations: NestedToOneRelation[],
   aliasMap: Map<string, string>,
+  dialect: SqlDialect,
 ): string[] {
   const selects: string[] = []
 
@@ -300,7 +302,12 @@ function buildNestedToOneSelects(
     const relSelect = buildRelationSelect(rel.args, rel.model, relAlias)
     if (!relSelect || relSelect.trim().length === 0) continue
 
-    selects.push(`${sqlStringLiteral(rel.name)}, ${relSelect}`)
+    const jsonExpr = jsonBuildObject(relSelect, dialect)
+    const pkField = getPrimaryKeyField(rel.model)
+    const pkCol = `${relAlias}.${quoteColumn(rel.model, pkField)}`
+    const nullSafeExpr = `CASE WHEN ${pkCol} IS NOT NULL THEN ${jsonExpr} ELSE NULL END`
+
+    selects.push(`${sqlStringLiteral(rel.name)}, ${nullSafeExpr}`)
   }
 
   return selects
@@ -409,7 +416,11 @@ function buildSelectWithNestedIncludes(
   )
 
   const baseSelect = buildRelationSelect(relArgs, relModel, relAlias)
-  const nestedSelects = buildNestedToOneSelects(nestedToOnes, aliasMap)
+  const nestedSelects = buildNestedToOneSelects(
+    nestedToOnes,
+    aliasMap,
+    ctx.dialect,
+  )
 
   const allParts: string[] = []
   if (baseSelect && baseSelect.trim().length > 0) {

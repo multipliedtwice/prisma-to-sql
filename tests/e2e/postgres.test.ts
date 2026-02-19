@@ -937,6 +937,78 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
   })
 
   describe('include (nested)', () => {
+    it('include list with nested to-one relations', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'include list + nested to-one',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            tasks: {
+              include: {
+                assignee: true,
+                creator: true,
+              },
+              take: 3,
+            },
+          },
+          take: 3,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              tasks: {
+                include: {
+                  assignee: true,
+                  creator: true,
+                },
+                take: 3,
+              },
+            },
+            take: 3,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
+    it('include list with nullable to-one relation', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'include list + nullable to-one',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            tasks: {
+              include: {
+                assignee: true,
+                milestone: true,
+              },
+            },
+          },
+          take: 3,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              tasks: {
+                include: {
+                  assignee: true,
+                  milestone: true,
+                },
+              },
+            },
+            take: 3,
+            orderBy: { id: 'asc' },
+          }),
+        { sortField: undefined },
+      ))
+
     it('include one-to-many', () =>
       runParityTest(
         db,
