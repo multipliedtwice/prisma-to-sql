@@ -108,7 +108,7 @@ const expandToSingleFieldEntries = (
     throw new Error('orderBy array entries must be objects')
   }
 
-  const entries = Object.entries(item)
+  const entries = Object.entries(item).filter(([, v]) => v !== undefined)
   if (entries.length === 0) {
     throw new Error('orderBy array entries must have at least one field')
   }
