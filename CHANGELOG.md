@@ -1,3 +1,10 @@
+# [1.73.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.72.0...v1.73.0) (2026-02-19)
+
+
+### Features
+
+* **select/includes.ts:** enhance nested to-one selects to handle nullable relations and add primary key support ([4af9909](https://github.com/multipliedtwice/prisma-to-sql/commit/4af990913d68a6922874bfcf301258888fc5e3a5))
+
 # [1.72.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.71.0...v1.72.0) (2026-02-19)
 
 
