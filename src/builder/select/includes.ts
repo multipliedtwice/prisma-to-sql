@@ -3,6 +3,7 @@ import { buildOrderBy, readSkipTake, parseOrderByValue } from '../pagination'
 import { buildWhereClause } from '../where'
 import { jsonAgg, jsonBuildObject, SqlDialect } from '../../sql-builder-dialect'
 import { buildRelationSelect } from './fields'
+import { buildRelationCountSql } from './include-count'
 import { Model, PrismaQueryArgs, Field } from '../../types'
 import { createAliasGenerator } from '../shared/alias-generator'
 import { SQL_TEMPLATES, SQL_SEPARATORS, LIMITS } from '../shared/constants'
@@ -305,6 +306,21 @@ function buildNestedToOneSelects(
   return selects
 }
 
+function extractCountSelectFromRelArgs(
+  relArgs: unknown,
+): Record<string, boolean> | null {
+  if (!isPlainObject(relArgs)) return null
+  const obj = relArgs as Record<string, unknown>
+  if (!isPlainObject(obj.select)) return null
+  const sel = obj.select as Record<string, unknown>
+  const countRaw = sel['_count']
+  if (!countRaw) return null
+  if (isPlainObject(countRaw) && 'select' in countRaw) {
+    return (countRaw as { select: Record<string, boolean> }).select
+  }
+  return null
+}
+
 function buildSelectWithNestedIncludes(
   relArgs: unknown,
   relModel: Model,
@@ -316,6 +332,27 @@ function buildSelectWithNestedIncludes(
     relModel,
     ctx.schemaByName,
   )
+
+  const countSelect = extractCountSelectFromRelArgs(relArgs)
+  const countJoins: string[] = []
+
+  function appendCountToSelect(baseSelect: string): string {
+    if (!countSelect || Object.keys(countSelect).length === 0) return baseSelect
+    const countBuild = buildRelationCountSql(
+      countSelect,
+      relModel,
+      ctx.schemas,
+      relAlias,
+      ctx.params,
+      ctx.dialect,
+    )
+    if (!countBuild.jsonPairs) return baseSelect
+    countJoins.push(...countBuild.joins)
+    const countExpr = `'_count', ${jsonBuildObject(countBuild.jsonPairs, ctx.dialect)}`
+    return baseSelect
+      ? `${baseSelect}${SQL_SEPARATORS.FIELD_LIST}${countExpr}`
+      : countExpr
+  }
 
   if (nestedToOnes.length === 0) {
     let relSelect = buildRelationSelect(relArgs, relModel, relAlias)
@@ -358,7 +395,9 @@ function buildSelectWithNestedIncludes(
           : nestedSelects
     }
 
-    return { select: relSelect, nestedJoins: [] }
+    relSelect = appendCountToSelect(relSelect)
+
+    return { select: relSelect, nestedJoins: countJoins }
   }
 
   const { joins, aliasMap } = buildNestedToOneJoins(
@@ -380,9 +419,12 @@ function buildSelectWithNestedIncludes(
     allParts.push(ns)
   }
 
+  let finalSelect = allParts.join(SQL_SEPARATORS.FIELD_LIST)
+  finalSelect = appendCountToSelect(finalSelect)
+
   return {
-    select: allParts.join(SQL_SEPARATORS.FIELD_LIST),
-    nestedJoins: joins,
+    select: finalSelect,
+    nestedJoins: [...joins, ...countJoins],
   }
 }
 

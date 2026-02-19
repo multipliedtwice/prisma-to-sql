@@ -1660,6 +1660,158 @@ describe('Prisma Parity E2E - SQLite', () => {
             orderBy: { id: 'asc' },
           }),
       ))
+
+    it('_count inside include', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        '_count inside include',
+        'Project',
+        {
+          method: 'findMany',
+          include: {
+            tasks: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                _count: { select: { comments: true, attachments: true } },
+              },
+              orderBy: { id: 'asc' },
+              take: 3,
+            },
+          },
+          take: 3,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.project.findMany({
+            include: {
+              tasks: {
+                select: {
+                  id: true,
+                  title: true,
+                  status: true,
+                  _count: { select: { comments: true, attachments: true } },
+                },
+                orderBy: { id: 'asc' },
+                take: 3,
+              },
+            },
+            take: 3,
+            orderBy: { id: 'asc' },
+          }),
+      ))
+
+    it('_count inside nested select relation', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        '_count inside nested select',
+        'User',
+        {
+          method: 'findMany',
+          select: {
+            id: true,
+            email: true,
+            assignedTasks: {
+              select: {
+                id: true,
+                title: true,
+                _count: { select: { comments: true } },
+              },
+              orderBy: { id: 'asc' },
+              take: 3,
+            },
+            _count: { select: { assignedTasks: true, comments: true } },
+          },
+          take: 5,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.user.findMany({
+            select: {
+              id: true,
+              email: true,
+              assignedTasks: {
+                select: {
+                  id: true,
+                  title: true,
+                  _count: { select: { comments: true } },
+                },
+                orderBy: { id: 'asc' },
+                take: 3,
+              },
+              _count: { select: { assignedTasks: true, comments: true } },
+            },
+            take: 5,
+            orderBy: { id: 'asc' },
+          }),
+      ))
+
+    it('_count inside deep include', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        '_count deep include',
+        'Organization',
+        {
+          method: 'findMany',
+          select: {
+            id: true,
+            name: true,
+            _count: { select: { projects: true, members: true } },
+            projects: {
+              select: {
+                id: true,
+                name: true,
+                _count: { select: { tasks: true, labels: true } },
+                tasks: {
+                  select: {
+                    id: true,
+                    title: true,
+                    _count: { select: { comments: true } },
+                  },
+                  take: 2,
+                  orderBy: { id: 'asc' },
+                },
+              },
+              take: 2,
+              orderBy: { id: 'asc' },
+            },
+          },
+          take: 2,
+          orderBy: { id: 'asc' },
+        },
+        () =>
+          db.prisma.organization.findMany({
+            select: {
+              id: true,
+              name: true,
+              _count: { select: { projects: true, members: true } },
+              projects: {
+                select: {
+                  id: true,
+                  name: true,
+                  _count: { select: { tasks: true, labels: true } },
+                  tasks: {
+                    select: {
+                      id: true,
+                      title: true,
+                      _count: { select: { comments: true } },
+                    },
+                    take: 2,
+                    orderBy: { id: 'asc' },
+                  },
+                },
+                take: 2,
+                orderBy: { id: 'asc' },
+              },
+            },
+            take: 2,
+            orderBy: { id: 'asc' },
+          }),
+      ))
   })
 
   describe('Date handling', () => {
