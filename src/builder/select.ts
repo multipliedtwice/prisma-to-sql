@@ -1,7 +1,6 @@
 import { SqlDialect, getGlobalDialect } from '../sql-builder-dialect'
 import { PrismaQueryArgs, Model } from '../types'
 import {
-  buildOrderByClause,
   getPaginationParams,
   buildCursorCondition,
   parseOrderByValue,
@@ -22,7 +21,6 @@ import {
   isNotNullish,
   isNonEmptyArray,
   isPlainObject,
-  isNonEmptyString,
 } from './shared/validators/type-guards'
 import { assertScalarField } from './shared/validators/field-assertions'
 import {
@@ -193,7 +191,6 @@ function validateOrderBy(
 
     if (scalarSet.has(f)) {
       assertScalarField(model, f, 'orderBy')
-      parseOrderByValue(value, f)
       continue
     }
 
