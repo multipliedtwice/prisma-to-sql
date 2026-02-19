@@ -1,3 +1,10 @@
+# [1.72.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.71.0...v1.72.0) (2026-02-19)
+
+
+### Features
+
+* **select/includes.ts:** add support for _count in nested includes to enhance query capabilities ([40d4799](https://github.com/multipliedtwice/prisma-to-sql/commit/40d479920f6113d8f4a34783b98de1736ed654f7))
+
 # [1.71.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.70.0...v1.71.0) (2026-02-18)
 
 # [1.70.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.69.0...v1.70.0) (2026-02-18)
