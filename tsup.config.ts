@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     generator: 'src/generator.ts',
+    'collect-planner-stats': 'src/collect-planner-stats.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,
