@@ -63,7 +63,7 @@ function resolveRelationOrderByChain(
     )
   }
 
-  if ('_count' in value) {
+  if ('_count' in value && value._count !== undefined) {
     throw new Error(
       `Relation orderBy with _count on '${relationFieldName}' is not yet supported by prisma-sql`,
     )
@@ -96,7 +96,7 @@ function resolveRelationOrderByChain(
 
   const relScalarSet = getScalarFieldSet(relatedModel)
   const relRelationSet = getRelationFieldSet(relatedModel)
-  const nestedEntries = Object.entries(value)
+  const nestedEntries = Object.entries(value).filter(([, v]) => v !== undefined)
   const orderFragments: string[] = []
 
   for (const [nestedField, nestedValue] of nestedEntries) {
