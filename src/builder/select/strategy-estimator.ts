@@ -134,6 +134,13 @@ function maxDepthFromTree(nodes: RelationCostNode[]): number {
   return max
 }
 
+function anyChildHasWhere(nodes: RelationCostNode[]): boolean {
+  for (const n of nodes) {
+    if (n.hasChildWhere) return true
+  }
+  return false
+}
+
 function computeWhereInCost(
   nodes: RelationCostNode[],
   parentCount: number,
@@ -255,27 +262,6 @@ export function hasChildPaginationAnywhere(
   return false
 }
 
-/**
- * Cost-model strategy picker.
- *
- * Structural rules (deterministic, skip cost computation):
- *   1. allOneToOne + canFlatJoin → flat-join
- *      No row multiplication. JOIN adds columns only.
- *   2. singleParent + canFlatJoin + depth<=1 → flat-join
- *      P=1 eliminates dedup cost. Depth>1 excluded because
- *      nested product grows faster than roundtrip savings.
- *
- * Cost formulas (row-equivalent units):
- *   R  = roundtripRowEquivalent (default 73, calibrate per-db)
- *   S  = correlated scan factor (bounded=0.5, unbounded=3.0)
- *        ×3.0 when child has WHERE (per-parent filter overhead)
- *
- *   costW = (1 + roundtrips) × R + Σ(P_level × eff)
- *   costC = R + P × Σ(eff × S + eff × subCost(children))
- *
- * Validated against forced-strategy benchmarks across
- * depth-1..4, fan-1..100, paginated/unbounded topologies.
- */
 export function pickIncludeStrategy(params: {
   includeSpec: Record<string, any>
   model: Model
@@ -313,15 +299,22 @@ export function pickIncludeStrategy(params: {
   }
 
   const costTree = buildCostTree(includeSpec, model, schemas)
+  const treeDepth = maxDepthFromTree(costTree)
+
+  if (treeDepth === 1 && anyChildHasWhere(costTree)) {
+    if (debug)
+      console.log(`  [strategy] ${model.name}: depth-1 + childWhere → where-in`)
+    return 'where-in'
+  }
+
   const P = isSingleParent ? 1 : takeValue ?? DEFAULT_PARENT_COUNT
 
   const costW = computeWhereInCost(costTree, P)
   const costC = computeCorrelatedCost(costTree, P)
 
   if (debug) {
-    const depth = maxDepthFromTree(costTree)
     console.log(
-      `  [strategy] ${model.name}: P=${P} D=${depth}` +
+      `  [strategy] ${model.name}: P=${P} D=${treeDepth}` +
         ` costW=${costW.toFixed(0)} costC=${costC.toFixed(0)}`,
     )
   }

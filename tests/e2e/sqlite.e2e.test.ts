@@ -1589,6 +1589,54 @@ describe('Prisma Parity E2E - SQLite', () => {
           sortField: undefined,
         },
       ))
+
+    it('relation orderBy deep nested', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'orderBy deep relation',
+        'Task',
+        {
+          method: 'findMany',
+          orderBy: { project: { organization: { name: 'asc' } } },
+          take: 20,
+        },
+        () =>
+          db.prisma.task.findMany({
+            orderBy: { project: { organization: { name: 'asc' } } },
+            take: 20,
+          }),
+        {
+          sortField: undefined,
+        },
+      ))
+
+    it('relation orderBy deep nested with scalar', () =>
+      runParityTest(
+        db,
+        benchmarkResults,
+        'orderBy deep relation + scalar',
+        'Task',
+        {
+          method: 'findMany',
+          orderBy: [
+            { project: { organization: { name: 'asc' } } },
+            { createdAt: 'desc' },
+          ],
+          take: 20,
+        },
+        () =>
+          db.prisma.task.findMany({
+            orderBy: [
+              { project: { organization: { name: 'asc' } } },
+              { createdAt: 'desc' },
+            ],
+            take: 20,
+          }),
+        {
+          sortField: undefined,
+        },
+      ))
   })
 
   describe('distinct', () => {
@@ -2137,7 +2185,7 @@ describe('Prisma Parity E2E - SQLite', () => {
       runParityTest(
         db,
         benchmarkResults,
-        'depth-1 wide Project→tasks+labels+milestones',
+        'depth-1 wide',
         'Project',
         {
           method: 'findMany',

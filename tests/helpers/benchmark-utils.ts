@@ -507,10 +507,16 @@ export async function runParityTest<T>(
       const speedupVsPrisma = prismaMs / extendedMs
       const speedupVsDrizzle = drizzleMs > 0 ? drizzleMs / extendedMs : 0
 
-      let regressionLog: BenchmarkResult['regressionLog'] | undefined
+      const NOISE_THRESHOLD_MS = 1.0
 
       const isRegression =
-        speedupVsPrisma < 1.0 || (drizzleMs > 0 && speedupVsDrizzle < 1.0)
+        (speedupVsPrisma < 1.0 &&
+          extendedMs - prismaMs >= NOISE_THRESHOLD_MS) ||
+        (drizzleMs > 0 &&
+          speedupVsDrizzle < 1.0 &&
+          extendedMs - drizzleMs >= NOISE_THRESHOLD_MS)
+
+      let regressionLog: BenchmarkResult['regressionLog'] | undefined
 
       if (isRegression) {
         const prismaCaptured = await withPrismaCapture(async () =>

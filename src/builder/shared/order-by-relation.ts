@@ -11,9 +11,19 @@ import {
 } from './order-by-utils'
 import { parseOrderByValue, buildOrderByFragment } from '../pagination'
 
+const MAX_RELATION_ORDER_BY_DEPTH = 10
+
 interface OrderByWithRelationsResult {
   sql: string
   joins: string[]
+}
+
+interface RelationOrderByContext {
+  schemas: Model[]
+  dialect: SqlDialect
+  joins: string[]
+  usedAliases: Set<string>
+  aliasCounter: { value: number }
 }
 
 function resolveTableRef(model: Model, dialect: SqlDialect): string {
@@ -28,6 +38,108 @@ function resolveTableRef(model: Model, dialect: SqlDialect): string {
 
 function findRelationField(model: Model, fieldName: string) {
   return model.fields.find((f) => f.name === fieldName && f.isRelation)
+}
+
+function nextJoinAlias(ctx: RelationOrderByContext): string {
+  let alias: string
+  do {
+    alias = `ob_${ctx.aliasCounter.value++}`
+  } while (ctx.usedAliases.has(alias))
+  ctx.usedAliases.add(alias)
+  return alias
+}
+
+function resolveRelationOrderByChain(
+  relationFieldName: string,
+  value: Record<string, unknown>,
+  currentModel: Model,
+  currentAlias: string,
+  ctx: RelationOrderByContext,
+  depth: number,
+): string[] {
+  if (depth > MAX_RELATION_ORDER_BY_DEPTH) {
+    throw new Error(
+      `Relation orderBy nesting too deep (max ${MAX_RELATION_ORDER_BY_DEPTH} levels)`,
+    )
+  }
+
+  if ('_count' in value) {
+    throw new Error(
+      `Relation orderBy with _count on '${relationFieldName}' is not yet supported by prisma-sql`,
+    )
+  }
+
+  const field = findRelationField(currentModel, relationFieldName)
+  if (!field) {
+    throw new Error(
+      `Relation field '${relationFieldName}' not found on model ${currentModel.name}`,
+    )
+  }
+
+  const relatedModel = getModelByName(ctx.schemas, field.relatedModel!)
+  if (!relatedModel) {
+    throw new Error(
+      `Related model '${field.relatedModel}' not found for relation '${relationFieldName}'`,
+    )
+  }
+
+  const joinAlias = nextJoinAlias(ctx)
+  const tableRef = resolveTableRef(relatedModel, ctx.dialect)
+  const cond = joinCondition(
+    field as unknown as Field,
+    currentModel,
+    relatedModel,
+    currentAlias,
+    joinAlias,
+  )
+  ctx.joins.push(`LEFT JOIN ${tableRef} ${joinAlias} ON ${cond}`)
+
+  const relScalarSet = getScalarFieldSet(relatedModel)
+  const relRelationSet = getRelationFieldSet(relatedModel)
+  const nestedEntries = Object.entries(value)
+  const orderFragments: string[] = []
+
+  for (const [nestedField, nestedValue] of nestedEntries) {
+    if (relScalarSet.has(nestedField)) {
+      const entries = normalizeAndValidateOrderBy(
+        [{ [nestedField]: nestedValue }],
+        relatedModel,
+        parseOrderByValue,
+      )
+      const sql = buildOrderByFragment(
+        entries,
+        joinAlias,
+        ctx.dialect,
+        relatedModel,
+      )
+      if (sql) orderFragments.push(sql)
+      continue
+    }
+
+    if (relRelationSet.has(nestedField)) {
+      if (!isPlainObject(nestedValue)) {
+        throw new Error(
+          `Relation orderBy for '${nestedField}' must be an object`,
+        )
+      }
+      const nested = resolveRelationOrderByChain(
+        nestedField,
+        nestedValue,
+        relatedModel,
+        joinAlias,
+        ctx,
+        depth + 1,
+      )
+      orderFragments.push(...nested)
+      continue
+    }
+
+    throw new Error(
+      `orderBy field '${nestedField}' does not exist on related model '${relatedModel.name}'`,
+    )
+  }
+
+  return orderFragments
 }
 
 export function buildOrderByWithRelations(
@@ -45,9 +157,14 @@ export function buildOrderByWithRelations(
   const relationSet = getRelationFieldSet(model)
   const scalarSet = getScalarFieldSet(model)
   const orderFragments: string[] = []
-  const joins: string[] = []
-  const usedAliases = new Set<string>()
-  let relAliasCounter = 0
+
+  const ctx: RelationOrderByContext = {
+    schemas,
+    dialect,
+    joins: [],
+    usedAliases: new Set<string>(),
+    aliasCounter: { value: 0 },
+  }
 
   for (const [fieldName, value] of expanded) {
     if (scalarSet.has(fieldName)) {
@@ -66,73 +183,15 @@ export function buildOrderByWithRelations(
         throw new Error(`Relation orderBy for '${fieldName}' must be an object`)
       }
 
-      const nestedEntries = Object.entries(value)
-      if (nestedEntries.length === 0) continue
-
-      if ('_count' in value) {
-        throw new Error(
-          `Relation orderBy with _count on '${fieldName}' is not yet supported by prisma-sql`,
-        )
-      }
-
-      const field = findRelationField(model, fieldName)
-      if (!field) {
-        throw new Error(
-          `Relation field '${fieldName}' not found on model ${model.name}`,
-        )
-      }
-
-      const relatedModel = getModelByName(schemas, field.relatedModel!)
-      if (!relatedModel) {
-        throw new Error(
-          `Related model '${field.relatedModel}' not found for relation '${fieldName}'`,
-        )
-      }
-
-      const relScalarSet = getScalarFieldSet(relatedModel)
-      const relRelationSet = getRelationFieldSet(relatedModel)
-
-      for (const [nestedField] of nestedEntries) {
-        if (relRelationSet.has(nestedField)) {
-          throw new Error(
-            `Nested relation orderBy (${fieldName}.${nestedField}) is not yet supported by prisma-sql`,
-          )
-        }
-        if (!relScalarSet.has(nestedField)) {
-          throw new Error(
-            `orderBy field '${nestedField}' does not exist on related model '${relatedModel.name}'`,
-          )
-        }
-      }
-
-      let joinAlias: string
-      do {
-        joinAlias = `ob_${relAliasCounter++}`
-      } while (usedAliases.has(joinAlias))
-      usedAliases.add(joinAlias)
-
-      const tableRef = resolveTableRef(relatedModel, dialect)
-      const cond = joinCondition(
-        field as unknown as Field,
+      const fragments = resolveRelationOrderByChain(
+        fieldName,
+        value,
         model,
-        relatedModel,
         alias,
-        joinAlias,
+        ctx,
+        0,
       )
-      joins.push(`LEFT JOIN ${tableRef} ${joinAlias} ON ${cond}`)
-
-      const entries = normalizeAndValidateOrderBy(
-        [value],
-        relatedModel,
-        parseOrderByValue,
-      )
-      const sql = buildOrderByFragment(
-        entries,
-        joinAlias,
-        dialect,
-        relatedModel,
-      )
-      if (sql) orderFragments.push(sql)
+      orderFragments.push(...fragments)
       continue
     }
 
@@ -143,6 +202,6 @@ export function buildOrderByWithRelations(
 
   return {
     sql: orderFragments.join(SQL_SEPARATORS.ORDER_BY),
-    joins,
+    joins: ctx.joins,
   }
 }

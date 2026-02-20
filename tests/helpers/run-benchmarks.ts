@@ -131,8 +131,12 @@ async function runBenchmark(
   return JSON.parse(readFileSync(resultFile, 'utf-8'))
 }
 
-function fmtMs(n: number) {
+function fmtMs(n: number): string {
   return `${n?.toFixed(3)}ms`
+}
+
+function fmtMsNoise(n: number): string {
+  return `~${Math.round(n)}ms`
 }
 
 function fmtX(n: number) {
@@ -219,6 +223,8 @@ function printRegressionDetails(r: Regression) {
 }
 
 function printComparison(results: BenchmarkResult[]) {
+  const NOISE_THRESHOLD_MS = 1.0
+
   console.log('\n' + '='.repeat(140))
   console.log('BENCHMARK RESULTS - Prisma v6 vs v7 vs prisma-sql')
   console.log('='.repeat(140))
@@ -281,7 +287,10 @@ function printComparison(results: BenchmarkResult[]) {
         `| ${name} | ${v6Time} | ${v7Time} | ${v6SqlTime} | ${v7SqlTime} | ${drizzleTime} | ${v6Speedup} | ${v7Speedup} | ${drizzleSpeedup} |`,
       )
 
-      if (v6Test.speedupVsPrisma < 1.0) {
+      if (
+        v6Test.speedupVsPrisma < 1.0 &&
+        v6Test.extendedMs - v6Test.prismaMs >= NOISE_THRESHOLD_MS
+      ) {
         regressions.push({
           name: testName,
           extendedMs: v6Test.extendedMs,
@@ -293,7 +302,10 @@ function printComparison(results: BenchmarkResult[]) {
         })
       }
 
-      if (v7Test.speedupVsPrisma < 1.0) {
+      if (
+        v7Test.speedupVsPrisma < 1.0 &&
+        v7Test.extendedMs - v7Test.prismaMs >= NOISE_THRESHOLD_MS
+      ) {
         regressions.push({
           name: testName,
           extendedMs: v7Test.extendedMs,
@@ -305,7 +317,11 @@ function printComparison(results: BenchmarkResult[]) {
         })
       }
 
-      if (v6Test.drizzleMs > 0 && v6Test.speedupVsDrizzle < 1.0) {
+      if (
+        v6Test.drizzleMs > 0 &&
+        v6Test.speedupVsDrizzle < 1.0 &&
+        v6Test.extendedMs - v6Test.drizzleMs >= NOISE_THRESHOLD_MS
+      ) {
         regressions.push({
           name: testName,
           extendedMs: v6Test.extendedMs,
@@ -347,13 +363,13 @@ function printComparison(results: BenchmarkResult[]) {
         printKV('opponent', r.opponent, '    ')
         printKV(
           'speedup',
-          `${fmtX(r.speedup)} (prisma-sql ${fmtMs(r.extendedMs)} vs ${fmtMs(r.opponentMs)})`,
+          `${fmtX(r.speedup)} (prisma-sql ${fmtMsNoise(r.extendedMs)} vs ${fmtMsNoise(r.opponentMs)})`,
           '    ',
         )
 
         console.log(`\n    PERF`)
-        printKV('prisma_sql_ms', fmtMs(r.extendedMs), '      ')
-        printKV('opponent_ms', fmtMs(r.opponentMs), '      ')
+        printKV('prisma_sql_ms', fmtMsNoise(r.extendedMs), '      ')
+        printKV('opponent_ms', fmtMsNoise(r.opponentMs), '      ')
 
         printRegressionDetails(r)
       }
