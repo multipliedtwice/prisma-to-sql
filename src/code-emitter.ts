@@ -140,7 +140,7 @@ function processAllModelDirectives(
 }
 
 export async function generateClient(options: GenerateClientOptions) {
-  const { datamodel, outputDir, config, datasourceUrl } = options
+  const { datamodel, outputDir, config } = options
   const runtimeImportPath = options.runtimeImportPath ?? 'prisma-sql'
 
   setGlobalDialect(config.dialect)
@@ -161,32 +161,10 @@ export async function generateClient(options: GenerateClientOptions) {
   const absoluteOutputDir = resolve(process.cwd(), outputDir)
   await mkdir(absoluteOutputDir, { recursive: true })
 
-  let plannerArtifacts = options.plannerArtifacts
-
-  if (!plannerArtifacts) {
-    const skipPlanner =
-      process.env.PRISMA_SQL_SKIP_PLANNER === '1' ||
-      process.env.PRISMA_SQL_SKIP_PLANNER === 'true'
-
-    if (skipPlanner) {
-      console.log(
-        '⏭ Skipping planner stats collection (PRISMA_SQL_SKIP_PLANNER)',
-      )
-    } else {
-      plannerArtifacts = await collectPlannerWithTimeout(
-        options,
-        config,
-        datasourceUrl,
-      )
-    }
-  }
-
-  if (!plannerArtifacts) {
-    plannerArtifacts = {
-      relationStats: {},
-      roundtripRowEquivalent: 73,
-      jsonRowFactor: 1.5,
-    }
+  const plannerArtifacts = options.plannerArtifacts ?? {
+    relationStats: {},
+    roundtripRowEquivalent: 73,
+    jsonRowFactor: 1.5,
   }
 
   const plannerCode = emitPlannerGeneratedModule(plannerArtifacts)
