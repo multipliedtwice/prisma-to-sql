@@ -15,6 +15,13 @@ type Executor = {
   ) => Promise<Array<Record<string, unknown>>>
 }
 
+interface DatabaseExecutor {
+  query: (
+    sql: string,
+    params?: unknown[],
+  ) => Promise<Array<Record<string, unknown>>>
+}
+
 export type RelStats = {
   avg: number
   p95: number
@@ -46,21 +53,24 @@ function quoteIdent(dialect: SqlDialect, ident: string): string {
   return `"${ident.replace(/"/g, '""')}"`
 }
 
-export async function createDatabaseExecutor(params: {
+export async function createDatabaseExecutor(options: {
   databaseUrl: string
-  dialect: SqlDialect
-}): Promise<{ executor: Executor; cleanup: () => Promise<void> }> {
-  const { databaseUrl, dialect } = params
+  dialect: 'postgres' | 'sqlite'
+  connectTimeoutMs?: number
+}): Promise<{ executor: DatabaseExecutor; cleanup: () => Promise<void> }> {
+  const { databaseUrl, dialect, connectTimeoutMs = 30000 } = options
 
   if (dialect === 'postgres') {
     const postgres = await import('postgres')
-    const cleanUrl = cleanDatabaseUrl(databaseUrl)
-    const sql = postgres.default(databaseUrl, { max: 1 })
+    const sql = postgres.default(databaseUrl, {
+      connect_timeout: Math.ceil(connectTimeoutMs / 1000),
+      max: 1,
+    })
 
     return {
       executor: {
-        query: async (sqlStr: string, params?: unknown[]) => {
-          return await sql.unsafe(sqlStr, (params || []) as any[])
+        query: async (q: string, params?: unknown[]) => {
+          return await sql.unsafe(q, (params ?? []) as any[])
         },
       },
       cleanup: async () => {
@@ -69,7 +79,7 @@ export async function createDatabaseExecutor(params: {
     }
   }
 
-  throw new Error(`Dialect ${dialect} not supported for stats collection`)
+  throw new Error(`createDatabaseExecutor does not support dialect: ${dialect}`)
 }
 
 function extractMeasurableOneToManyEdges(datamodel: DMMF.Datamodel): RelEdge[] {

@@ -15,6 +15,8 @@ import {
 } from './cardinality-planner'
 import { createQueryKey, countTotalQueries } from './utils/pure-utils'
 
+const DB_CONNECT_TIMEOUT_MS = 5000
+
 interface GenerateConfig {
   dialect: 'postgres' | 'sqlite'
   skipInvalid: boolean
@@ -137,8 +139,6 @@ function processAllModelDirectives(
   return { queries, skippedCount }
 }
 
-const DB_CONNECT_TIMEOUT_MS = 5000
-
 export async function generateClient(options: GenerateClientOptions) {
   const { datamodel, outputDir, config, datasourceUrl } = options
   const runtimeImportPath = options.runtimeImportPath ?? 'prisma-sql'
@@ -168,31 +168,14 @@ export async function generateClient(options: GenerateClientOptions) {
     let cleanup: (() => Promise<void>) | undefined
 
     if (!executor && datasourceUrl) {
-      let timedOut = false
-      const timeoutHandle = new Promise<never>((_, reject) => {
-        const id = setTimeout(() => {
-          timedOut = true
-          reject(
-            new Error(
-              `DB connection timed out after ${DB_CONNECT_TIMEOUT_MS}ms`,
-            ),
-          )
-        }, DB_CONNECT_TIMEOUT_MS)
-        id.unref?.()
-      })
-
       try {
-        const dbConn = await Promise.race([
-          createDatabaseExecutor({
-            databaseUrl: datasourceUrl,
-            dialect: config.dialect,
-          }),
-          timeoutHandle,
-        ])
-        if (!timedOut) {
-          executor = dbConn.executor
-          cleanup = dbConn.cleanup
-        }
+        const dbConn = await createDatabaseExecutor({
+          databaseUrl: datasourceUrl,
+          dialect: config.dialect,
+          connectTimeoutMs: DB_CONNECT_TIMEOUT_MS,
+        })
+        executor = dbConn.executor
+        cleanup = dbConn.cleanup
       } catch (error) {
         console.warn(
           '⚠ Failed to connect:',
