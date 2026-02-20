@@ -74,6 +74,17 @@ async function connectWithTimeout(
 }
 
 async function main() {
+  const skipPlanner =
+    process.env.PRISMA_SQL_SKIP_PLANNER === '1' ||
+    process.env.PRISMA_SQL_SKIP_PLANNER === 'true'
+
+  if (skipPlanner) {
+    console.log(
+      '[prisma-sql] ⏭ Skipping planner stats (PRISMA_SQL_SKIP_PLANNER)',
+    )
+    process.exit(0)
+  }
+
   const { output, clientPath } = parseArgs(process.argv.slice(2))
   const outputPath = resolveOutput(output)
 

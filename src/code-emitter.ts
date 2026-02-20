@@ -164,46 +164,20 @@ export async function generateClient(options: GenerateClientOptions) {
   let plannerArtifacts = options.plannerArtifacts
 
   if (!plannerArtifacts) {
-    let executor = options.executor
-    let cleanup: (() => Promise<void>) | undefined
+    const skipPlanner =
+      process.env.PRISMA_SQL_SKIP_PLANNER === '1' ||
+      process.env.PRISMA_SQL_SKIP_PLANNER === 'true'
 
-    if (!executor && datasourceUrl) {
-      try {
-        const dbConn = await createDatabaseExecutor({
-          databaseUrl: datasourceUrl,
-          dialect: config.dialect,
-          connectTimeoutMs: DB_CONNECT_TIMEOUT_MS,
-        })
-        executor = dbConn.executor
-        cleanup = dbConn.cleanup
-      } catch (error) {
-        console.warn(
-          '⚠ Failed to connect:',
-          error instanceof Error ? error.message : error,
-        )
-      }
-    }
-
-    if (executor) {
-      try {
-        console.log(
-          '📊 Collecting relation cardinalities and roundtrip cost...',
-        )
-        plannerArtifacts = await collectPlannerArtifacts({
-          executor,
-          datamodel,
-          dialect: config.dialect,
-        })
-      } catch (error) {
-        console.warn(
-          '⚠ Failed to collect stats:',
-          error instanceof Error ? error.message : error,
-        )
-      } finally {
-        if (cleanup) {
-          await cleanup()
-        }
-      }
+    if (skipPlanner) {
+      console.log(
+        '⏭ Skipping planner stats collection (PRISMA_SQL_SKIP_PLANNER)',
+      )
+    } else {
+      plannerArtifacts = await collectPlannerWithTimeout(
+        options,
+        config,
+        datasourceUrl,
+      )
     }
   }
 
@@ -238,6 +212,73 @@ export async function generateClient(options: GenerateClientOptions) {
     console.log(`⚠ Skipped ${skippedCount} directive(s) due to errors`)
   }
   console.log(`✓ Output: ${outputPath}`)
+}
+
+const PLANNER_TOTAL_TIMEOUT_MS = 15000
+
+async function collectPlannerWithTimeout(
+  options: GenerateClientOptions,
+  config: GenerateConfig,
+  datasourceUrl: string | undefined,
+): Promise<GeneratePlannerArtifacts | undefined> {
+  const timeoutMs =
+    Number(process.env.PRISMA_SQL_PLANNER_TIMEOUT_MS) ||
+    PLANNER_TOTAL_TIMEOUT_MS
+
+  let cleanup: (() => Promise<void>) | undefined
+  let settled = false
+
+  const work = async (): Promise<GeneratePlannerArtifacts | undefined> => {
+    let executor = options.executor
+
+    if (!executor && datasourceUrl) {
+      const dbConn = await createDatabaseExecutor({
+        databaseUrl: datasourceUrl,
+        dialect: config.dialect,
+        connectTimeoutMs: DB_CONNECT_TIMEOUT_MS,
+      })
+      executor = dbConn.executor
+      cleanup = dbConn.cleanup
+    }
+
+    if (!executor) return undefined
+
+    console.log('📊 Collecting relation cardinalities and roundtrip cost...')
+    return await collectPlannerArtifacts({
+      executor,
+      datamodel: options.datamodel,
+      dialect: config.dialect,
+    })
+  }
+
+  const timeout = new Promise<undefined>((resolve) => {
+    const id = setTimeout(() => {
+      settled = true
+      console.warn(
+        `⚠ Planner stats collection timed out after ${timeoutMs}ms, using defaults`,
+      )
+      resolve(undefined)
+    }, timeoutMs)
+    if (typeof id === 'object' && 'unref' in id) id.unref()
+  })
+
+  try {
+    const result = await Promise.race([work(), timeout])
+    if (settled) return undefined
+    return result
+  } catch (error) {
+    if (!settled) {
+      console.warn(
+        '⚠ Failed to collect planner stats:',
+        error instanceof Error ? error.message : error,
+      )
+    }
+    return undefined
+  } finally {
+    if (cleanup) {
+      await cleanup().catch(() => {})
+    }
+  }
 }
 
 function generateImports(runtimeImportPath: string): string {
