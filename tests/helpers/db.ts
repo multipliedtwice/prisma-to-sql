@@ -195,6 +195,7 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
   const pgClient = postgres(PG_URL)
 
   if (prismaVersion === 6) {
+    // @ts-ignore
     const { PrismaClient } = await import('../generated/postgres/client')
     const prisma = new PrismaClient({
       datasources: { db: { url: PG_URL } },
@@ -223,6 +224,7 @@ async function createPostgresDB(version?: number): Promise<TestDB> {
       },
     }
   } else {
+    // @ts-ignore
     const { PrismaClient } = await import('../generated/postgres-v7/client')
     const { PrismaPg } = await import('@prisma/adapter-pg')
 
@@ -266,6 +268,7 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
   const sqliteClient = new Database(SQLITE_DB_PATH)
 
   if (prismaVersion === 6) {
+    // @ts-ignore
     const { PrismaClient } = await import('../generated/sqlite/client')
     const prisma = new PrismaClient({
       datasources: { db: { url: SQLITE_URL } },
@@ -305,7 +308,9 @@ async function createSqliteDB(version?: number): Promise<TestDB> {
       },
     }
   } else {
+    // @ts-ignore
     const { PrismaClient } = await import('../generated/sqlite-v7/client')
+    // @ts-ignore
     const { PrismaBetterSqlite3 } = await import(
       '@prisma/adapter-better-sqlite3'
     )

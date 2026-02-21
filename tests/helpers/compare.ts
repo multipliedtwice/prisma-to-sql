@@ -1,5 +1,5 @@
 // @ts-ignore
-import { Decimal } from '../generated/client/runtime/library'
+import { Decimal } from '../generated/postgres/runtime/library.js'
 
 export function normalizeValue(value: unknown): unknown {
   if (value === null || value === undefined) return value

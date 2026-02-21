@@ -717,6 +717,8 @@ function generateExtension(runtimeImportPath: string): string {
       postgresClient: postgres,
     })
 
+    const originalTransaction = prisma.$transaction.bind(prisma)
+
     interface ModelContext {
       name?: string
       $name?: string
@@ -1121,9 +1123,15 @@ function generateExtension(runtimeImportPath: string): string {
     }
 
     async function transaction(
-      queries: TransactionQuery[] | any[],
+      queriesOrFn: TransactionQuery[] | any[] | ((...args: any[]) => Promise<any>),
       options?: TransactionOptions,
     ): Promise<unknown[]> {
+      if (typeof queriesOrFn === 'function') {
+        return originalTransaction(queriesOrFn, options)
+      }
+
+      const queries = queriesOrFn
+
       if (!queries || queries.length === 0) {
         return []
       }

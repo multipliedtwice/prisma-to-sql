@@ -3000,5 +3000,151 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
         },
       )
     })
+
+    it('interactive transaction: simple count', async () => {
+      const prismaResult = await db.prisma.$transaction(async (tx: any) => {
+        return tx.user.count({ where: { status: 'ACTIVE' } })
+      })
+
+      const speedResult = await db.extended.$transaction(async (tx: any) => {
+        return tx.user.count({ where: { status: 'ACTIVE' } })
+      })
+
+      expect(speedResult).toEqual(prismaResult)
+    })
+
+    it('interactive transaction: multiple reads', async () => {
+      const prismaResult = await db.prisma.$transaction(async (tx: any) => {
+        const users = await tx.user.findMany({
+          orderBy: { id: 'asc' },
+          take: 3,
+        })
+        const count = await tx.task.count()
+        const firstProject = await tx.project.findFirst({
+          orderBy: { id: 'asc' },
+        })
+        return { users, count, firstProject }
+      })
+
+      const speedResult = await db.extended.$transaction(async (tx: any) => {
+        const users = await tx.user.findMany({
+          orderBy: { id: 'asc' },
+          take: 3,
+        })
+        const count = await tx.task.count()
+        const firstProject = await tx.project.findFirst({
+          orderBy: { id: 'asc' },
+        })
+        return { users, count, firstProject }
+      })
+
+      expect(normalizeValue(speedResult)).toEqual(normalizeValue(prismaResult))
+    })
+
+    it('interactive transaction: dependent reads', async () => {
+      const prismaResult = await db.prisma.$transaction(async (tx: any) => {
+        const project = await tx.project.findFirst({
+          orderBy: { id: 'asc' },
+          select: { id: true, name: true },
+        })
+        if (!project) return null
+        const tasks = await tx.task.findMany({
+          where: { projectId: project.id },
+          orderBy: { id: 'asc' },
+          take: 5,
+          select: { id: true, title: true, status: true },
+        })
+        return { project, tasks }
+      })
+
+      const speedResult = await db.extended.$transaction(async (tx: any) => {
+        const project = await tx.project.findFirst({
+          orderBy: { id: 'asc' },
+          select: { id: true, name: true },
+        })
+        if (!project) return null
+        const tasks = await tx.task.findMany({
+          where: { projectId: project.id },
+          orderBy: { id: 'asc' },
+          take: 5,
+          select: { id: true, title: true, status: true },
+        })
+        return { project, tasks }
+      })
+
+      expect(normalizeValue(speedResult)).toEqual(normalizeValue(prismaResult))
+    })
+
+    it('interactive transaction: rollback on throw', async () => {
+      const usersBefore = await db.prisma.user.count()
+
+      await expect(
+        db.extended.$transaction(async (tx: any) => {
+          await tx.user.create({
+            data: {
+              email: `rollback-test-${Date.now()}@example.com`,
+              status: 'ACTIVE',
+            },
+          })
+          throw new Error('Intentional rollback')
+        }),
+      ).rejects.toThrow('Intentional rollback')
+
+      const usersAfter = await db.prisma.user.count()
+      expect(usersAfter).toBe(usersBefore)
+    })
+
+    it('interactive transaction: with isolation level', async () => {
+      const prismaResult = await db.prisma.$transaction(
+        async (tx: any) => {
+          return tx.task.findMany({
+            orderBy: { id: 'asc' },
+            take: 3,
+            select: { id: true, title: true },
+          })
+        },
+        { isolationLevel: 'Serializable' },
+      )
+
+      const speedResult = await db.extended.$transaction(
+        async (tx: any) => {
+          return tx.task.findMany({
+            orderBy: { id: 'asc' },
+            take: 3,
+            select: { id: true, title: true },
+          })
+        },
+        { isolationLevel: 'Serializable' },
+      )
+
+      expect(normalizeValue(speedResult)).toEqual(normalizeValue(prismaResult))
+    })
+
+    it('interactive transaction: return value propagates', async () => {
+      const result = await db.extended.$transaction(async (tx: any) => {
+        const count = await tx.user.count()
+        return { count, extra: 'metadata' }
+      })
+
+      expect(result).toHaveProperty('count')
+      expect(result).toHaveProperty('extra', 'metadata')
+      expect(typeof result.count).toBe('number')
+    })
+
+    it('sequential array transaction still works', async () => {
+      const prismaResult = await db.prisma.$transaction([
+        db.prisma.user.count(),
+        db.prisma.task.count(),
+        db.prisma.project.findMany({ orderBy: { id: 'asc' }, take: 2 }),
+      ])
+
+      const speedResult = await db.extended.$transaction([
+        db.extended.user.count(),
+        db.extended.task.count(),
+        db.extended.project.findMany({ orderBy: { id: 'asc' }, take: 2 }),
+      ])
+
+      expect(normalizeValue(speedResult)).toEqual(normalizeValue(prismaResult))
+    })
   })
 })

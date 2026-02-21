@@ -32,6 +32,16 @@ function resolveOutput(output: string): string {
   return isAbsolute(output) ? output : resolve(process.cwd(), output)
 }
 
+function resolveClientPath(p: string): string {
+  if (p.startsWith('.') || isAbsolute(p)) {
+    return resolve(process.cwd(), p)
+  }
+  if (p.includes('/') && !p.startsWith('@')) {
+    return resolve(process.cwd(), p)
+  }
+  return p
+}
+
 function emitCJS(artifacts: GeneratePlannerArtifacts): string {
   const ts = emitPlannerGeneratedModule(artifacts)
   return ts
@@ -76,6 +86,7 @@ async function connectWithTimeout(
 
 async function main() {
   config()
+
   const skipPlanner =
     process.env.PRISMA_SQL_SKIP_PLANNER === '1' ||
     process.env.PRISMA_SQL_SKIP_PLANNER === 'true'
@@ -116,7 +127,8 @@ async function main() {
   try {
     let dmmf: any
     try {
-      const client = require(clientPath)
+      const resolvedClientPath = resolveClientPath(clientPath)
+      const client = require(resolvedClientPath)
       dmmf = client.Prisma?.dmmf ?? client.dmmf
       if (!dmmf?.datamodel) {
         throw new Error(`Could not read dmmf.datamodel from ${clientPath}`)
