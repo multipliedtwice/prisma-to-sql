@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { config } from 'dotenv'
 import { writeFile } from 'fs/promises'
 import { resolve, isAbsolute } from 'path'
 import {
@@ -74,6 +75,7 @@ async function connectWithTimeout(
 }
 
 async function main() {
+  config()
   const skipPlanner =
     process.env.PRISMA_SQL_SKIP_PLANNER === '1' ||
     process.env.PRISMA_SQL_SKIP_PLANNER === 'true'
