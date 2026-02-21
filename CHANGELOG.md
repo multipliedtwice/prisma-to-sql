@@ -1,3 +1,5 @@
+## [1.75.12](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.75.11...v1.75.12) (2026-02-21)
+
 ## [1.75.11](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.75.10...v1.75.11) (2026-02-21)
 
 ## [1.75.10](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.75.9...v1.75.10) (2026-02-20)
