@@ -2,6 +2,7 @@ import type { Model } from '../../types'
 import { isPlainObject } from '../shared/validators/type-guards'
 import { resolveIncludeRelations } from '../shared/include-tree-walker'
 import { LIMITS } from '../shared/constants'
+import { isDynamicParameter } from '@dee-wan/schema-parser'
 
 type RelStats = {
   avg: number
@@ -62,11 +63,15 @@ function getFanOut(modelName: string, relName: string): number {
   return relStat.avg
 }
 
+const DYNAMIC_TAKE_ESTIMATE = 10
+
 function readTake(relArgs: unknown): number {
   if (!isPlainObject(relArgs)) return Infinity
   const obj = relArgs as Record<string, unknown>
   if ('take' in obj && typeof obj.take === 'number' && obj.take > 0)
     return obj.take
+  if ('take' in obj && obj.take != null && isDynamicParameter(obj.take))
+    return DYNAMIC_TAKE_ESTIMATE
   return Infinity
 }
 
@@ -85,7 +90,10 @@ function hasPaginationArgs(value: unknown): boolean {
   const obj = value as Record<string, unknown>
   return (
     ('take' in obj && obj.take != null) ||
-    ('skip' in obj && typeof obj.skip === 'number' && obj.skip > 0)
+    ('skip' in obj &&
+      obj.skip != null &&
+      ((typeof obj.skip === 'number' && obj.skip > 0) ||
+        isDynamicParameter(obj.skip)))
   )
 }
 
@@ -275,8 +283,16 @@ export function pickIncludeStrategy(params: {
   hasChildPagination: boolean
   debug?: boolean
 }): IncludeStrategy {
-  const { includeSpec, model, schemas, method, takeValue, canFlatJoin, debug } =
-    params
+  const {
+    includeSpec,
+    model,
+    schemas,
+    method,
+    takeValue,
+    canFlatJoin,
+    hasChildPagination,
+    debug,
+  } = params
 
   if (Object.keys(includeSpec).length === 0) return 'where-in'
 
@@ -300,6 +316,42 @@ export function pickIncludeStrategy(params: {
 
   const costTree = buildCostTree(includeSpec, model, schemas)
   const treeDepth = maxDepthFromTree(costTree)
+
+  if (hasChildPagination && treeDepth >= 2) {
+    if (debug)
+      console.log(
+        `  [strategy] ${model.name}: childPagination + depth=${treeDepth} ≥ 2 → fallback`,
+      )
+    return 'fallback'
+  }
+
+  if (hasChildPagination && treeDepth === 1) {
+    if (anyChildHasWhere(costTree)) {
+      if (debug)
+        console.log(
+          `  [strategy] ${model.name}: childPagination + depth=1 + childWhere → where-in`,
+        )
+      return 'where-in'
+    }
+
+    const hasSelectNarrowing =
+      isPlainObject(params.args) &&
+      isPlainObject((params.args as Record<string, unknown>).select)
+
+    if (hasSelectNarrowing) {
+      if (debug)
+        console.log(
+          `  [strategy] ${model.name}: childPagination + depth=1 + selectNarrowing → fallback`,
+        )
+      return 'fallback'
+    }
+
+    if (debug)
+      console.log(
+        `  [strategy] ${model.name}: childPagination + depth=1 → where-in`,
+      )
+    return 'where-in'
+  }
 
   if (treeDepth === 1 && anyChildHasWhere(costTree)) {
     if (debug)
