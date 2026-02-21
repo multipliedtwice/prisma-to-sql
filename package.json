@@ -69,12 +69,14 @@
     "@dee-wan/schema-parser": "1.4.0",
     "@prisma/generator-helper": "^7.4.0",
     "@prisma/internals": "^7.4.0",
+    "dotenv": "^17.3.1",
     "postgres": "^3.4.8"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.2.0",
     "@prisma/adapter-better-sqlite3": "^7.4.0",
     "@prisma/adapter-pg": "^7.4.0",
+    "@prisma/client": "7.4.0",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
@@ -83,12 +85,11 @@
     "better-sqlite3": "^12.6.2",
     "drizzle-kit": "^0.31.8",
     "drizzle-orm": "^0.45.1",
+    "prisma": "7.4.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.18",
-    "@prisma/client": "7.4.0",
-    "prisma": "7.4.0"
+    "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=16.0.0"
