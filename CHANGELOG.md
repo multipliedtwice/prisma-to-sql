@@ -1,3 +1,10 @@
+# [1.76.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.75.12...v1.76.0) (2026-02-21)
+
+
+### Features
+
+* **strategy-estimator.ts:** add dynamic parameter handling for pagination take values to enhance flexibility ([0760bef](https://github.com/multipliedtwice/prisma-to-sql/commit/0760bef10208ae4e95599d7257475083bf20257e))
+
 ## [1.75.12](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.75.11...v1.75.12) (2026-02-21)
 
 ## [1.75.11](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.75.10...v1.75.11) (2026-02-21)
