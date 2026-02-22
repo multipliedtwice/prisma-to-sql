@@ -1,0 +1,471 @@
+---
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { resolve, join } from 'node:path'
+
+interface Props {
+  t: any
+}
+
+const { t } = Astro.props
+
+interface BenchmarkStats {
+  mean: number
+  median: number
+  stdDev: number
+  min: number
+  max: number
+  cv: number
+  p95: number
+  p99: number
+  iterations: number
+}
+
+interface BenchmarkTest {
+  name: string
+  prismaMs: number
+  extendedMs: number
+  drizzleMs: number
+  speedupVsPrisma: number
+  speedupVsDrizzle: number
+  prismaStats: BenchmarkStats
+  extendedStats: BenchmarkStats
+  drizzleStats?: BenchmarkStats
+}
+
+interface BenchmarkResult {
+  version: number
+  dialect: 'postgres' | 'sqlite'
+  tests: BenchmarkTest[]
+  avgSpeedupVsPrisma: number
+  avgSpeedupVsDrizzle: number
+  timestamp: string
+}
+
+interface Significance {
+  tStat: number
+  df: number
+  pBucket: string
+  significant: boolean
+  stars: string
+  practicallySignificant: boolean
+}
+
+const PRACTICAL_THRESHOLD_MS = 1.0
+
+function welchTTest(
+  mean1: number, std1: number, n1: number,
+  mean2: number, std2: number, n2: number,
+): Significance {
+  const empty: Significance = {
+    tStat: 0, df: 0, pBucket: 'N/A',
+    significant: false, stars: '', practicallySignificant: false,
+  }
+
+  if (n1 < 2 || n2 < 2) return empty
+
+  const absDiff = Math.abs(mean1 - mean2)
+  if (absDiff < PRACTICAL_THRESHOLD_MS) {
+    return {
+      tStat: 0, df: 0, pBucket: `Δ < ${PRACTICAL_THRESHOLD_MS}ms`,
+      significant: false, stars: '', practicallySignificant: false,
+    }
+  }
+
+  const v1 = (std1 * std1) / n1
+  const v2 = (std2 * std2) / n2
+  const se = Math.sqrt(v1 + v2)
+  if (se === 0) return empty
+
+  const tStat = (mean1 - mean2) / se
+  const num = (v1 + v2) ** 2
+  const den = (v1 * v1) / (n1 - 1) + (v2 * v2) / (n2 - 1)
+  const df = den > 0 ? num / den : 1
+  const absT = Math.abs(tStat)
+
+  let pBucket: string
+  let significant: boolean
+  let stars: string
+
+  if (absT > 3.891) { pBucket = 'p < 0.001'; significant = true; stars = '***' }
+  else if (absT > 2.576) { pBucket = 'p < 0.01'; significant = true; stars = '**' }
+  else if (absT > 1.96) { pBucket = 'p < 0.05'; significant = true; stars = '*' }
+  else { pBucket = 'p ≥ 0.05'; significant = false; stars = '' }
+
+  return {
+    tStat: Math.round(tStat * 100) / 100,
+    df: Math.round(df * 10) / 10,
+    pBucket, significant, stars,
+    practicallySignificant: significant && absDiff >= PRACTICAL_THRESHOLD_MS,
+  }
+}
+
+function fmtMs(n: number): string {
+  if (n < 0.01) return n.toFixed(4)
+  if (n < 1) return n.toFixed(3)
+  return n.toFixed(2)
+}
+
+function fmtX(n: number): string {
+  return n.toFixed(2) + 'x'
+}
+
+function ciMargin(stats: BenchmarkStats): number {
+  if (stats.iterations < 2) return 0
+  return 1.96 * stats.stdDev / Math.sqrt(stats.iterations)
+}
+
+function tpl(template: string, vars: Record<string, string | number>): string {
+  let out = template
+  for (const [k, v] of Object.entries(vars)) {
+    out = out.replaceAll(`{${k}}`, String(v))
+  }
+  return out
+}
+
+const candidatePaths = [
+  resolve(process.cwd(), 'benchmark-results'),
+  resolve(process.cwd(), '..', 'benchmark-results'),
+  resolve(process.cwd(), '..', '..', 'benchmark-results'),
+]
+
+let benchmarkDir = ''
+for (const p of candidatePaths) {
+  if (existsSync(p)) { benchmarkDir = p; break }
+}
+
+const results: BenchmarkResult[] = []
+
+if (benchmarkDir) {
+  const latestPattern = /^v(\d+)-(\w+)-latest\.json$/
+  const fileEntries = readdirSync(benchmarkDir)
+    .filter(f => latestPattern.test(f))
+    .map(f => {
+      const fullPath = join(benchmarkDir, f)
+      const stat = statSync(fullPath)
+      const match = f.match(latestPattern)!
+      return { path: fullPath, mtime: stat.mtimeMs, key: `v${match[1]}-${match[2]}` }
+    })
+
+  const byKey = new Map<string, typeof fileEntries[0]>()
+  for (const entry of fileEntries) {
+    const existing = byKey.get(entry.key)
+    if (!existing || entry.mtime > existing.mtime) byKey.set(entry.key, entry)
+  }
+
+  for (const entry of [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key))) {
+    try { results.push(JSON.parse(readFileSync(entry.path, 'utf-8'))) } catch {}
+  }
+}
+
+interface ProcessedTest {
+  test: BenchmarkTest
+  vsPrisma: Significance
+  vsDrizzle: Significance | null
+  extendedCi: number
+  prismaCi: number
+  drizzleCi: number | null
+  absDiff: number
+}
+
+interface ProcessedResult {
+  result: BenchmarkResult
+  tests: ProcessedTest[]
+  hasDrizzle: boolean
+  tabId: string
+  tabLabel: string
+  tabLabelShort: string
+  significantWins: number
+  significantRegressions: number
+  withinNoise: number
+}
+
+const processed: ProcessedResult[] = results.map(r => {
+  const hasDrizzle = r.tests.some(t => t.drizzleMs > 0)
+  const tests: ProcessedTest[] = r.tests.map(test => {
+    const vsPrisma = welchTTest(
+      test.prismaStats.mean, test.prismaStats.stdDev, test.prismaStats.iterations,
+      test.extendedStats.mean, test.extendedStats.stdDev, test.extendedStats.iterations,
+    )
+    const vsDrizzle = test.drizzleStats
+      ? welchTTest(
+          test.drizzleStats.mean, test.drizzleStats.stdDev, test.drizzleStats.iterations,
+          test.extendedStats.mean, test.extendedStats.stdDev, test.extendedStats.iterations,
+        )
+      : null
+    const absDiff = Math.abs(test.prismaStats.mean - test.extendedStats.mean)
+    return { test, vsPrisma, vsDrizzle, extendedCi: ciMargin(test.extendedStats), prismaCi: ciMargin(test.prismaStats), drizzleCi: test.drizzleStats ? ciMargin(test.drizzleStats) : null, absDiff }
+  })
+
+  const tabId = `${r.dialect}-v${r.version}`
+  const dialectLabel = r.dialect === 'postgres' ? 'PostgreSQL' : 'SQLite'
+  const tabLabelShort = r.dialect === 'postgres' ? 'PG' : 'SQLite'
+
+  return {
+    result: r, tests, hasDrizzle, tabId,
+    tabLabel: `${dialectLabel} v${r.version}`,
+    tabLabelShort: `${tabLabelShort} v${r.version}`,
+    significantWins: tests.filter(t => t.vsPrisma.practicallySignificant && t.test.speedupVsPrisma >= 1.0).length,
+    significantRegressions: tests.filter(t => t.vsPrisma.practicallySignificant && t.test.speedupVsPrisma < 1.0).length,
+    withinNoise: tests.filter(t => t.absDiff < PRACTICAL_THRESHOLD_MS).length,
+  }
+})
+
+const hasData = processed.length > 0
+const b = t.benchmarks
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-gray-950 text-white" id="benchmarks">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-10 sm:mb-14">
+      <h2 class="text-3xl sm:text-4xl font-bold mb-3">{b.title}</h2>
+      <p class="text-lg text-gray-400 max-w-3xl mx-auto">{b.subtitle}</p>
+      <p class="text-sm text-gray-500 mt-3 max-w-2xl mx-auto">
+        <Fragment set:html={
+          b.modeNote
+            .replace('<runtime>', '<span class="text-gray-300 font-medium">')
+            .replace('</runtime>', '</span>')
+            .replace('<prerendered>', '<span class="text-green-400 font-medium">')
+            .replace('</prerendered>', '</span>')
+        } />
+      </p>
+    </div>
+
+    {!hasData && (
+      <div class="text-center text-gray-500 py-12">
+        <p>{b.noData}</p>
+        <p class="mt-2 text-sm" set:html={
+          b.noDataHint.replace('<code>', '<code class="bg-gray-800 px-2 py-1 rounded text-sm">').replace('</code>', '</code>')
+        } />
+      </div>
+    )}
+
+    {hasData && (
+      <div data-benchmark-tabs>
+        <div class="flex flex-wrap gap-2 mb-8 justify-center" role="tablist">
+          {processed.map((p, i) => (
+            <button
+              role="tab"
+              aria-selected={i === 0 ? 'true' : 'false'}
+              aria-controls={`panel-${p.tabId}`}
+              data-tab={p.tabId}
+              class:list={[
+                'benchmark-tab px-4 sm:px-6 py-2.5 rounded-lg text-sm font-medium transition-all',
+                i === 0
+                  ? 'bg-accent text-white shadow-lg shadow-green-900/30'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200',
+              ]}
+            >
+              <span class="hidden sm:inline">{p.tabLabel}</span>
+              <span class="sm:hidden">{p.tabLabelShort}</span>
+              <span class="ml-2 text-xs opacity-70">{p.result.avgSpeedupVsPrisma.toFixed(1)}x</span>
+            </button>
+          ))}
+        </div>
+
+        {processed.map((p, i) => (
+          <div
+            id={`panel-${p.tabId}`}
+            role="tabpanel"
+            data-panel={p.tabId}
+            class:list={[i !== 0 && 'hidden']}
+          >
+            <div class="flex flex-wrap items-baseline gap-3 mb-6">
+              <h3 class="text-2xl font-bold">
+                {p.result.dialect === 'postgres' ? 'PostgreSQL' : 'SQLite'}
+                <span class="text-gray-500 font-normal text-lg ml-2">Prisma v{p.result.version}</span>
+              </h3>
+              <div class="flex flex-wrap gap-3 text-sm">
+                <span class="bg-green-900/50 text-green-400 px-3 py-1 rounded-full">
+                  {tpl(b.avgVsPrisma, { speed: fmtX(p.result.avgSpeedupVsPrisma) })}
+                </span>
+                {p.result.avgSpeedupVsDrizzle > 0 && (
+                  <span class="bg-blue-900/50 text-blue-400 px-3 py-1 rounded-full">
+                    {tpl(b.avgVsDrizzle, { speed: fmtX(p.result.avgSpeedupVsDrizzle) })}
+                  </span>
+                )}
+                <span class="bg-gray-800 text-gray-400 px-3 py-1 rounded-full">
+                  {tpl(b.significantWins, { count: String(p.significantWins), total: String(p.tests.length) })}
+                </span>
+                {p.withinNoise > 0 && (
+                  <span class="bg-gray-800 text-gray-500 px-3 py-1 rounded-full">
+                    {tpl(b.withinNoise, { count: String(p.withinNoise) })}
+                  </span>
+                )}
+              </div>
+              {p.result.timestamp && (
+                <span class="text-xs text-gray-600 ml-auto">
+                  {new Date(p.result.timestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                </span>
+              )}
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-gray-800">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="bg-gray-900 text-gray-400 text-xs uppercase tracking-wider">
+                    <th class="text-left px-4 py-3 font-medium">{b.col.test}</th>
+                    <th class="text-right px-4 py-3 font-medium">{b.col.prisma}</th>
+                    <th class="text-right px-4 py-3 font-medium">{b.col.prismaSql}</th>
+                    {p.hasDrizzle && <th class="text-right px-4 py-3 font-medium">{b.col.drizzle}</th>}
+                    <th class="text-right px-4 py-3 font-medium">{b.col.speedup}</th>
+                    <th class="text-center px-4 py-3 font-medium">{b.col.sig}</th>
+                    <th class="text-right px-4 py-3 font-medium">{b.col.cv}</th>
+                    <th class="text-right px-4 py-3 font-medium">{b.col.n}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {p.tests.map(({ test, vsPrisma, vsDrizzle, extendedCi, prismaCi, absDiff }, i) => {
+                    const isNoiseFloor = absDiff < PRACTICAL_THRESHOLD_MS
+                    const isWin = !isNoiseFloor && test.speedupVsPrisma >= 1.0
+                    const highCv = test.extendedStats.cv > 15 || test.prismaStats.cv > 15
+                    const rowBg = i % 2 === 0 ? 'bg-gray-900/30' : 'bg-gray-900/60'
+
+                    const speedupColor = isNoiseFloor
+                      ? 'text-gray-500'
+                      : isWin
+                        ? (vsPrisma.practicallySignificant ? 'text-green-400' : 'text-green-700')
+                        : (vsPrisma.practicallySignificant ? 'text-red-400' : 'text-red-700')
+
+                    const timingColor = isNoiseFloor
+                      ? 'text-gray-500'
+                      : isWin ? 'text-green-400' : 'text-red-400'
+
+                    const sigTooltip = isNoiseFloor
+                      ? `Δ = ${fmtMs(absDiff)}ms < ${PRACTICAL_THRESHOLD_MS}ms`
+                      : `t=${vsPrisma.tStat}, df=${vsPrisma.df}, ${vsPrisma.pBucket}`
+
+                    return (
+                      <tr class={`${rowBg} border-t border-gray-800/50 hover:bg-gray-800/50 transition-colors`}>
+                        <td class="px-4 py-3 font-medium text-gray-200 max-w-[280px] truncate" title={test.name}>
+                          {test.name}
+                        </td>
+                        <td class="px-4 py-3 text-right text-gray-400 tabular-nums whitespace-nowrap" title={`±${fmtMs(prismaCi)}ms (95% CI)`}>
+                          {fmtMs(test.prismaMs)}ms
+                          <span class="text-gray-600 text-xs ml-1">±{fmtMs(prismaCi)}</span>
+                        </td>
+                        <td class={`px-4 py-3 text-right tabular-nums whitespace-nowrap ${timingColor}`} title={`±${fmtMs(extendedCi)}ms (95% CI)`}>
+                          <span class="font-semibold">{fmtMs(test.extendedMs)}ms</span>
+                          <span class="text-gray-600 text-xs ml-1">±{fmtMs(extendedCi)}</span>
+                        </td>
+                        {p.hasDrizzle && (
+                          <td class="px-4 py-3 text-right text-gray-400 tabular-nums whitespace-nowrap">
+                            {test.drizzleMs > 0 ? `${fmtMs(test.drizzleMs)}ms` : '—'}
+                          </td>
+                        )}
+                        <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                          <span class={`font-bold ${speedupColor}`}>
+                            {isNoiseFloor ? '~1.00x' : fmtX(test.speedupVsPrisma)}
+                          </span>
+                          {p.hasDrizzle && test.speedupVsDrizzle > 0 && !isNoiseFloor && (
+                            <span class={`ml-2 text-xs ${test.speedupVsDrizzle >= 1 ? 'text-blue-400' : 'text-orange-400'}`}>
+                              {fmtX(test.speedupVsDrizzle)} D
+                            </span>
+                          )}
+                        </td>
+                        <td class="px-4 py-3 text-center whitespace-nowrap" title={sigTooltip}>
+                          {isNoiseFloor ? (
+                            <span class="text-gray-600 text-xs">≈</span>
+                          ) : vsPrisma.significant ? (
+                            <span class="text-green-400 font-mono text-xs">{vsPrisma.stars}</span>
+                          ) : (
+                            <span class="text-gray-600 text-xs">ns</span>
+                          )}
+                        </td>
+                        <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                          <span
+                            class={highCv ? 'text-yellow-500' : 'text-gray-500'}
+                            title={`Prisma CV: ${test.prismaStats.cv.toFixed(1)}%, prisma-sql CV: ${test.extendedStats.cv.toFixed(1)}%`}
+                          >
+                            {test.extendedStats.cv.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td class="px-4 py-3 text-right text-gray-500 tabular-nums">
+                          {test.extendedStats.iterations}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500 px-1">
+              <span><span class="text-green-400 font-mono">***</span> {b.legend.p001}</span>
+              <span><span class="text-green-400 font-mono">**</span>&ensp;{b.legend.p01}</span>
+              <span><span class="text-green-400 font-mono">*</span>&ensp;&ensp;{b.legend.p05}</span>
+              <span><span class="text-gray-600">ns</span>&ensp;{b.legend.ns}</span>
+              <span><span class="text-gray-600">≈</span>&ensp;{tpl(b.legend.noiseFloor, { threshold: String(PRACTICAL_THRESHOLD_MS) })}</span>
+              <span>±&ensp;{b.legend.ci}</span>
+              <span><span class="text-yellow-500">CV% &gt; 15%</span> = {b.legend.highVariance}</span>
+            </div>
+
+            <div class="mt-4 bg-gray-900/60 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-400 flex items-start gap-3">
+              <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span>
+                <span class="text-gray-300 font-medium">{b.modeCallout}</span>{' '}
+                {b.modeCalloutDetail}
+              </span>
+            </div>
+
+            {p.significantRegressions > 0 && (
+              <div class="mt-4 bg-red-900/20 border border-red-800/30 rounded-lg px-4 py-3 text-sm text-red-400/80">
+                {tpl(b.regressionWarning, { count: String(p.significantRegressions), threshold: String(PRACTICAL_THRESHOLD_MS) })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    )}
+
+    {hasData && (
+      <div class="text-center mt-8">
+        <a
+          target="_blank"
+          href="https://github.com/multipliedtwice/prisma-to-sql/tree/main/benchmark-results"
+          class="text-accent hover:text-green-400 underline decoration-2 underline-offset-2 text-sm"
+        >
+          {b.viewRawData}
+        </a>
+      </div>
+    )}
+  </div>
+</section>
+
+<script>
+  document.addEventListener('astro:page-load', initBenchmarkTabs)
+  document.addEventListener('DOMContentLoaded', initBenchmarkTabs)
+
+  function initBenchmarkTabs() {
+    const container = document.querySelector('[data-benchmark-tabs]')
+    if (!container) return
+
+    const tabs = container.querySelectorAll<HTMLButtonElement>('[data-tab]')
+    const panels = container.querySelectorAll<HTMLElement>('[data-panel]')
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const target = tab.getAttribute('data-tab')
+        if (!target) return
+
+        tabs.forEach(t => {
+          const isActive = t.getAttribute('data-tab') === target
+          t.setAttribute('aria-selected', String(isActive))
+          t.classList.toggle('bg-accent', isActive)
+          t.classList.toggle('text-white', isActive)
+          t.classList.toggle('shadow-lg', isActive)
+          t.classList.toggle('shadow-green-900/30', isActive)
+          t.classList.toggle('bg-gray-800', !isActive)
+          t.classList.toggle('text-gray-400', !isActive)
+          t.classList.toggle('hover:bg-gray-700', !isActive)
+          t.classList.toggle('hover:text-gray-200', !isActive)
+        })
+
+        panels.forEach(p => {
+          p.classList.toggle('hidden', p.getAttribute('data-panel') !== target)
+        })
+      })
+    })
+  }
+</script>

@@ -943,5 +943,39 @@
       "button1": "Ver pruebas de seguridad →",
       "button2": "Ver código fuente"
     }
+  },
+  "benchmarks": {
+    "title": "Resultados detallados de benchmark",
+    "subtitle": "Comparación estadística con la prueba t de Welch y un umbral de significancia práctica de 1 ms",
+    "modeNote": "Estos resultados reflejan el modo <runtime>de ejecución</runtime>, donde las consultas se convierten a SQL en cada solicitud. En el modo <prerendered>preprocesado</prerendered>, el SQL se genera en tiempo de compilación — el tiempo de ejecución ejecuta consultas parametrizadas en bruto sin sobrecarga de conversión.",
+    "modeCallout": "Modo de ejecución evaluado.",
+    "modeCalloutDetail": "El modo preprocesado omite por completo la conversión de consulta a SQL en tiempo de ejecución — se espera una latencia menor que la mostrada aquí, especialmente para consultas complejas donde el costo de conversión es proporcionalmente mayor.",
+    "noData": "No se encontraron datos de benchmark.",
+    "noDataHint": "Ejecute los benchmarks con <code>BENCHMARK_JSON_OUTPUT=1</code> para generar datos.",
+    "avgVsPrisma": "Promedio {speed} frente a Prisma",
+    "avgVsDrizzle": "Promedio {speed} frente a Drizzle",
+    "significantWins": "{count}/{total} victorias estadísticamente significativas",
+    "withinNoise": "{count} dentro del umbral de ruido",
+    "col": {
+      "test": "Prueba",
+      "prisma": "Prisma",
+      "prismaSql": "prisma-sql",
+      "drizzle": "Drizzle",
+      "speedup": "Aceleración",
+      "sig": "Sig.",
+      "cv": "CV%",
+      "n": "n"
+    },
+    "legend": {
+      "p001": "p < 0.001",
+      "p01": "p < 0.01",
+      "p05": "p < 0.05",
+      "ns": "no significativo",
+      "noiseFloor": "dentro del umbral de ruido de {threshold} ms",
+      "ci": "IC del 95%",
+      "highVariance": "alta variación"
+    },
+    "regressionWarning": "{count} prueba(s) con regresiones estadísticamente significativas que superan el umbral de {threshold} ms.",
+    "viewRawData": "Ver datos brutos de benchmark en GitHub →"
   }
 }

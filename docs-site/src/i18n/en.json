@@ -943,5 +943,39 @@
       "button1": "View Security Tests →",
       "button2": "View Source Code"
     }
+  },
+  "benchmarks": {
+    "title": "Detailed Benchmark Results",
+    "subtitle": "Statistical comparison with Welch's t-test and a 1ms practical significance threshold",
+    "modeNote": "These results reflect <runtime>runtime mode</runtime>, where queries are converted to SQL on each request. In <prerendered>prerendered mode</prerendered>, SQL is generated at build time — runtime executes raw parameterized queries with zero conversion overhead.",
+    "modeCallout": "Runtime mode benchmarked.",
+    "modeCalloutDetail": "Prerendered mode skips query-to-SQL conversion entirely at runtime — expect lower latency than shown here, especially for complex queries where conversion cost is proportionally higher.",
+    "noData": "No benchmark data found.",
+    "noDataHint": "Run benchmarks with <code>BENCHMARK_JSON_OUTPUT=1</code> to generate data.",
+    "avgVsPrisma": "Avg {speed} vs Prisma",
+    "avgVsDrizzle": "Avg {speed} vs Drizzle",
+    "significantWins": "{count}/{total} significant wins",
+    "withinNoise": "{count} within noise floor",
+    "col": {
+      "test": "Test",
+      "prisma": "Prisma",
+      "prismaSql": "prisma-sql",
+      "drizzle": "Drizzle",
+      "speedup": "Speedup",
+      "sig": "Sig.",
+      "cv": "CV%",
+      "n": "n"
+    },
+    "legend": {
+      "p001": "p < 0.001",
+      "p01": "p < 0.01",
+      "p05": "p < 0.05",
+      "ns": "not significant",
+      "noiseFloor": "within {threshold}ms noise floor",
+      "ci": "95% CI",
+      "highVariance": "high variance"
+    },
+    "regressionWarning": "{count} test(s) with statistically significant regressions beyond the {threshold}ms threshold.",
+    "viewRawData": "View raw benchmark data on GitHub →"
   }
 }

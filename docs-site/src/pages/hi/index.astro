@@ -16,6 +16,7 @@ import Footer from '../../components/Footer.astro';
 import hi from '../../i18n/hi.json';
 import TestingCallout from '../../components/TestingCallout.astro';
 import SecurityCallout from '../../components/SecurityCallout.astro';
+import Benchmarks from '../../components/Benchmarks.astro';
 
 const t = hi;
 const locale = 'hi';
@@ -32,6 +33,7 @@ const locale = 'hi';
   <Stats t={t} />
   <Problem t={t} />
   <Performance t={t} />
+  <Benchmarks t={t} />
   <TestingCallout t={t} locale={locale} />
   <HowItWorks t={t} />
   <SecurityCallout t={t} locale={locale} />

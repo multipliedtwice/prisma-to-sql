@@ -941,5 +941,39 @@
       "button1": "View Security Tests →",
       "button2": "View Source Code"
     }
+  },
+  "benchmarks": {
+    "title": "تفصیلی بینچ مارک نتائج",
+    "subtitle": "Welch کے t-test اور 1ms عملی اہمیت کی حد کے ساتھ شماریاتی موازنہ",
+    "modeNote": "یہ نتائج <runtime>رن ٹائم موڈ</runtime> کی عکاسی کرتے ہیں، جہاں ہر درخواست پر کوئریز کو SQL میں تبدیل کیا جاتا ہے۔ <prerendered>پری رینڈرڈ موڈ</prerendered> میں، SQL بلڈ کے وقت تیار کیا جاتا ہے — رن ٹائم بغیر کسی تبدیلی کے اضافی بوجھ کے خام پیرامیٹرائزڈ کوئریز کو چلایا جاتا ہے۔",
+    "modeCallout": "رن ٹائم موڈ کا بینچ مارک کیا گیا۔",
+    "modeCalloutDetail": "پری رینڈرڈ موڈ رن ٹائم پر کوئری سے SQL میں تبدیلی کو مکمل طور پر نظر انداز کرتا ہے — یہاں دکھائی گئی تاخیر سے کم تاخیر کی توقع کریں، خاص طور پر پیچیدہ کوئریز میں جہاں تبدیلی کی لاگت نسبتاً زیادہ ہوتی ہے۔",
+    "noData": "کوئی بینچ مارک ڈیٹا نہیں ملا۔",
+    "noDataHint": "ڈیٹا تیار کرنے کے لیے <code>BENCHMARK_JSON_OUTPUT=1</code> کے ساتھ بینچ مارک چلائیں۔",
+    "avgVsPrisma": "اوسط {speed} بمقابلہ Prisma",
+    "avgVsDrizzle": "اوسط {speed} بمقابلہ Drizzle",
+    "significantWins": "{count}/{total} شماریاتی طور پر اہم کامیابیاں",
+    "withinNoise": "{count} شور کی حد کے اندر",
+    "col": {
+      "test": "ٹیسٹ",
+      "prisma": "Prisma",
+      "prismaSql": "prisma-sql",
+      "drizzle": "Drizzle",
+      "speedup": "رفتار میں اضافہ",
+      "sig": "اہمیت",
+      "cv": "CV%",
+      "n": "n"
+    },
+    "legend": {
+      "p001": "p < 0.001",
+      "p01": "p < 0.01",
+      "p05": "p < 0.05",
+      "ns": "شماریاتی طور پر اہم نہیں",
+      "noiseFloor": "{threshold}ms شور کی حد کے اندر",
+      "ci": "95% اعتماد کا وقفہ",
+      "highVariance": "زیادہ تغیر"
+    },
+    "regressionWarning": "{count} ٹیسٹ میں {threshold}ms حد سے زیادہ شماریاتی طور پر اہم کمی دیکھی گئی۔",
+    "viewRawData": "GitHub پر خام بینچ مارک ڈیٹا دیکھیں →"
   }
 }

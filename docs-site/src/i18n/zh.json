@@ -935,5 +935,39 @@
       "button1": "查看安全测试 →",
       "button2": "查看源代码"
     }
+  },
+  "benchmarks": {
+    "title": "详细基准测试结果",
+    "subtitle": "采用 Welch t 检验并设置 1ms 实际显著性阈值的统计比较",
+    "modeNote": "这些结果反映了 <runtime>运行时模式</runtime>，在该模式下，每次请求都会将查询转换为 SQL。在 <prerendered>预渲染模式</prerendered> 中，SQL 在构建阶段生成——运行时直接执行原始的参数化查询，无任何转换开销。",
+    "modeCallout": "已对运行时模式进行基准测试。",
+    "modeCalloutDetail": "预渲染模式在运行时完全跳过查询到 SQL 的转换——预计延迟将低于此处显示的结果，尤其是在复杂查询中，转换成本相对更高。",
+    "noData": "未找到基准测试数据。",
+    "noDataHint": "使用 <code>BENCHMARK_JSON_OUTPUT=1</code> 运行基准测试以生成数据。",
+    "avgVsPrisma": "平均 {speed}（相较于 Prisma）",
+    "avgVsDrizzle": "平均 {speed}（相较于 Drizzle）",
+    "significantWins": "{count}/{total} 项具有统计显著性的胜出",
+    "withinNoise": "{count} 项在噪声阈值范围内",
+    "col": {
+      "test": "测试",
+      "prisma": "Prisma",
+      "prismaSql": "prisma-sql",
+      "drizzle": "Drizzle",
+      "speedup": "加速比",
+      "sig": "显著性",
+      "cv": "CV%",
+      "n": "n"
+    },
+    "legend": {
+      "p001": "p < 0.001",
+      "p01": "p < 0.01",
+      "p05": "p < 0.05",
+      "ns": "无统计显著性",
+      "noiseFloor": "在 {threshold}ms 噪声阈值范围内",
+      "ci": "95% 置信区间",
+      "highVariance": "高方差"
+    },
+    "regressionWarning": "{count} 项测试出现超过 {threshold}ms 阈值的统计显著性回归。",
+    "viewRawData": "在 GitHub 上查看原始基准测试数据 →"
   }
 }

@@ -941,5 +941,39 @@
       "button1": "Voir les tests sécurité →",
       "button2": "Voir le code source"
     }
+  },
+  "benchmarks": {
+    "title": "Résultats détaillés des benchmarks",
+    "subtitle": "Comparaison statistique avec le test t de Welch et un seuil de significativité pratique de 1 ms",
+    "modeNote": "Ces résultats reflètent le mode <runtime>d’exécution</runtime>, où les requêtes sont converties en SQL à chaque demande. En mode <prerendered>pré-généré</prerendered>, le SQL est généré au moment de la compilation — l’exécution lance des requêtes paramétrées brutes sans aucun coût de conversion.",
+    "modeCallout": "Mode d’exécution évalué.",
+    "modeCalloutDetail": "Le mode pré-généré ignore totalement la conversion requête-vers-SQL à l’exécution — attendez-vous à une latence plus faible que celle affichée ici, en particulier pour les requêtes complexes où le coût de conversion est proportionnellement plus élevé.",
+    "noData": "Aucune donnée de benchmark trouvée.",
+    "noDataHint": "Exécutez les benchmarks avec <code>BENCHMARK_JSON_OUTPUT=1</code> pour générer des données.",
+    "avgVsPrisma": "Moyenne {speed} vs Prisma",
+    "avgVsDrizzle": "Moyenne {speed} vs Drizzle",
+    "significantWins": "{count}/{total} gains statistiquement significatifs",
+    "withinNoise": "{count} dans le seuil de bruit",
+    "col": {
+      "test": "Test",
+      "prisma": "Prisma",
+      "prismaSql": "prisma-sql",
+      "drizzle": "Drizzle",
+      "speedup": "Accélération",
+      "sig": "Sig.",
+      "cv": "CV%",
+      "n": "n"
+    },
+    "legend": {
+      "p001": "p < 0.001",
+      "p01": "p < 0.01",
+      "p05": "p < 0.05",
+      "ns": "non significatif",
+      "noiseFloor": "dans le seuil de bruit de {threshold} ms",
+      "ci": "IC à 95 %",
+      "highVariance": "forte variance"
+    },
+    "regressionWarning": "{count} test(s) avec des régressions statistiquement significatives au-delà du seuil de {threshold} ms.",
+    "viewRawData": "Voir les données brutes des benchmarks sur GitHub →"
   }
 }

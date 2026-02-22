@@ -941,5 +941,39 @@
       "button1": "Ver Testes de Segurança →",
       "button2": "Ver Código Fonte"
     }
+  },
+  "benchmarks": {
+    "title": "Resultados detalhados de benchmark",
+    "subtitle": "Comparação estatística com o teste t de Welch e um limite de significância prática de 1 ms",
+    "modeNote": "Estes resultados refletem o modo <runtime>de execução</runtime>, onde as consultas são convertidas para SQL a cada requisição. No modo <prerendered>pré-renderizado</prerendered>, o SQL é gerado em tempo de build — em tempo de execução são executadas consultas parametrizadas brutas sem qualquer sobrecarga de conversão.",
+    "modeCallout": "Modo de execução avaliado.",
+    "modeCalloutDetail": "O modo pré-renderizado ignora completamente a conversão de consulta para SQL em tempo de execução — espere latência menor do que a mostrada aqui, especialmente para consultas complexas onde o custo de conversão é proporcionalmente maior.",
+    "noData": "Nenhum dado de benchmark encontrado.",
+    "noDataHint": "Execute os benchmarks com <code>BENCHMARK_JSON_OUTPUT=1</code> para gerar dados.",
+    "avgVsPrisma": "Média {speed} vs Prisma",
+    "avgVsDrizzle": "Média {speed} vs Drizzle",
+    "significantWins": "{count}/{total} vitórias estatisticamente significativas",
+    "withinNoise": "{count} dentro do limite de ruído",
+    "col": {
+      "test": "Teste",
+      "prisma": "Prisma",
+      "prismaSql": "prisma-sql",
+      "drizzle": "Drizzle",
+      "speedup": "Aceleração",
+      "sig": "Sig.",
+      "cv": "CV%",
+      "n": "n"
+    },
+    "legend": {
+      "p001": "p < 0.001",
+      "p01": "p < 0.01",
+      "p05": "p < 0.05",
+      "ns": "não significativo",
+      "noiseFloor": "dentro do limite de ruído de {threshold} ms",
+      "ci": "IC de 95%",
+      "highVariance": "alta variância"
+    },
+    "regressionWarning": "{count} teste(s) com regressões estatisticamente significativas além do limite de {threshold} ms.",
+    "viewRawData": "Ver dados brutos de benchmark no GitHub →"
   }
 }
