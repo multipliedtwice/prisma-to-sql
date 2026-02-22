@@ -188,6 +188,7 @@ function createStoreInternal(
     if (frozen) {
       params = params.slice()
       mappings = mappings.slice()
+      dynamicNameToIndex = new Map(dynamicNameToIndex)
       frozen = false
     }
   }
@@ -207,6 +208,7 @@ function createStoreInternal(
     const existing = dynamicNameToIndex.get(dn)
     if (existing !== undefined) return formatPosition(existing)
 
+    ensureMutable()
     const position = index
     dynamicNameToIndex.set(dn, position)
     return registerParam(undefined, { index: position, dynamicName: dn })
@@ -245,7 +247,7 @@ function createStoreInternal(
       index,
       params,
       mappings,
-      dynamicNameIndex: new Map(dynamicNameToIndex),
+      dynamicNameIndex: dynamicNameToIndex,
     }
 
     cachedSnapshot = snap

@@ -183,6 +183,14 @@ const normalizePairs = (
 ): NormalizedOrderBy => {
   const result: NormalizedOrderBy = []
   for (const [field, rawValue] of pairs) {
+    if (typeof rawValue === 'string') {
+      const lower = rawValue.toLowerCase()
+      if (lower !== 'asc' && lower !== 'desc') {
+        throw new Error(
+          `Invalid orderBy direction '${rawValue}' for field '${field}'. Must be 'asc' or 'desc'`,
+        )
+      }
+    }
     if (!isScalarOrderByValue(rawValue)) continue
     const parsed = parseValue(rawValue, field)
     result.push({

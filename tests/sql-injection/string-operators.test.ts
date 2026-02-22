@@ -1,6 +1,6 @@
 // tests/sql-injection/string-operators.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { Prisma, PrismaClient } from '../generated/client'
+import { Prisma, PrismaClient } from '../generated/postgres/client'
 import { createToSQL } from '../../src'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
 import { DMMF } from '@prisma/generator-helper'

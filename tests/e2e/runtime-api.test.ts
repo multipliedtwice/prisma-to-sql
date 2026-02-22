@@ -11,7 +11,7 @@ import {
 import { createTestDB, type TestDB } from '../helpers/db'
 import { seedDatabase, type SeedResult } from '../helpers/seed-db'
 import { normalizeValue, sortByField } from '../helpers/compare'
-import { Prisma } from '../generated/client'
+import { Prisma } from '../generated/postgres/client'
 import { DMMF } from '@prisma/generator-helper'
 
 let pgDb: TestDB

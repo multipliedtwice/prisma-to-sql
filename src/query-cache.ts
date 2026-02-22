@@ -66,16 +66,8 @@ export function makeAlias(name: string): string {
   return SQL_RESERVED_WORDS.has(safe) ? `${safe}_t` : safe
 }
 
-function canonicalizeReplacer(key: string, value: unknown): unknown {
+function bigintReplacer(_key: string, value: unknown): unknown {
   if (typeof value === 'bigint') return `__bigint__${value.toString()}`
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const obj = value as Record<string, unknown>
-    const sorted: Record<string, unknown> = {}
-    for (const k of Object.keys(obj).sort()) {
-      sorted[k] = obj[k]
-    }
-    return sorted
-  }
   return value
 }
 
@@ -86,7 +78,7 @@ function canonicalizeQuery(
   dialect: SqlDialect,
 ): string {
   if (!args) return `${dialect}:${modelName}:${method}:{}`
-  return `${dialect}:${modelName}:${method}:${JSON.stringify(args, canonicalizeReplacer)}`
+  return `${dialect}:${modelName}:${method}:${JSON.stringify(args, bigintReplacer)}`
 }
 
 function buildSQLFull(

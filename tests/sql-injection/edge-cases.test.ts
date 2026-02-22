@@ -1,6 +1,6 @@
 // tests/sql-injection/edge-cases.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { Prisma, PrismaClient } from '../generated/client'
+import { Prisma, PrismaClient } from '../generated/postgres/client'
 import { createToSQL } from '../../src'
 import { convertDMMFToModels } from '@dee-wan/schema-parser'
 import { setGlobalDialect } from '../../src/sql-builder-dialect'
