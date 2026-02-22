@@ -7,7 +7,10 @@ import {
   normalizeKeyList,
   quoteColumn,
 } from './shared/sql-utils'
-
+import {
+  resolveRelationKeys,
+  tryResolveRelationKeys,
+} from './shared/relation-key-utils'
 import { isNotNullish } from './shared/validators/type-guards'
 
 export function isRelationField(fieldName: string, model: Model): boolean {
@@ -37,21 +40,6 @@ export function isValidRelationField(field: any): field is Field {
   return true
 }
 
-function getReferenceFieldNames(
-  field: Field,
-  foreignKeyCount: number,
-): string[] {
-  const refs = normalizeKeyList(field.references)
-
-  if (refs.length === 0) {
-    if (foreignKeyCount === 1) return [SPECIAL_FIELDS.ID]
-    return []
-  }
-
-  if (refs.length !== foreignKeyCount) return []
-  return refs
-}
-
 export function joinCondition(
   field: Field,
   parentModel: Model,
@@ -62,36 +50,17 @@ export function joinCondition(
   assertSafeAlias(parentAlias)
   assertSafeAlias(childAlias)
 
-  const fkFields = normalizeKeyList(field.foreignKey)
-
-  if (fkFields.length === 0) {
-    throw createError(
-      `Relation '${field.name}' is missing foreignKey. This indicates a schema parsing error. Relations must specify fields/references.`,
-      { field: field.name },
-    )
-  }
-
-  const refFields = getReferenceFieldNames(field, fkFields.length)
-
-  if (refFields.length !== fkFields.length) {
-    throw createError(
-      `Relation '${field.name}' is missing references (or references count does not match foreignKey count). This is required to support non-id and composite keys.`,
-      { field: field.name },
-    )
-  }
+  const { childKeys, parentKeys } = resolveRelationKeys(field, 'include')
 
   const parts: string[] = []
 
-  for (let i = 0; i < fkFields.length; i++) {
-    const fk = fkFields[i]
-    const ref = refFields[i]
-
+  for (let i = 0; i < parentKeys.length; i++) {
     const left = field.isForeignKeyLocal
-      ? `${childAlias}.${quoteColumn(childModel, ref)}`
-      : `${childAlias}.${quoteColumn(childModel, fk)}`
+      ? `${childAlias}.${quoteColumn(childModel, childKeys[i])}`
+      : `${childAlias}.${quoteColumn(childModel, childKeys[i])}`
     const right = field.isForeignKeyLocal
-      ? `${parentAlias}.${quoteColumn(parentModel, fk)}`
-      : `${parentAlias}.${quoteColumn(parentModel, ref)}`
+      ? `${parentAlias}.${quoteColumn(parentModel, parentKeys[i])}`
+      : `${parentAlias}.${quoteColumn(parentModel, parentKeys[i])}`
 
     parts.push(`${left} = ${right}`)
   }

@@ -56,6 +56,7 @@ function getRelationModel(
   parentModel: Model,
   relationName: string,
   schemas: readonly Model[],
+  modelMap?: Map<string, Model>,
 ): Model {
   const indices = getFieldIndices(parentModel)
   const field = indices.allFieldsByName.get(relationName)
@@ -63,7 +64,9 @@ function getRelationModel(
     throw new Error(`Invalid relation ${relationName} on ${parentModel.name}`)
   }
 
-  const relModel = schemas.find((m) => m.name === field.relatedModel)
+  const relModel = modelMap
+    ? modelMap.get(field.relatedModel)
+    : schemas.find((m) => m.name === field.relatedModel)
   if (!relModel) {
     throw new Error(`Related model ${field.relatedModel} not found`)
   }
@@ -124,8 +127,14 @@ export function canUseFlatJoinForAll(
   model: Model,
   schemas: readonly Model[],
   debug?: boolean,
+  modelMap?: Map<string, Model>,
 ): boolean {
-  const relations = resolveIncludeRelations(includeSpec, model, schemas)
+  const relations = resolveIncludeRelations(
+    includeSpec,
+    model,
+    schemas,
+    modelMap,
+  )
 
   if (relations.length < countActiveEntries(includeSpec)) {
     return false
@@ -160,7 +169,15 @@ export function canUseFlatJoinForAll(
     }
 
     if (Object.keys(rel.nestedSpec).length > 0) {
-      if (!canUseFlatJoinForAll(rel.nestedSpec, rel.relModel, schemas, debug)) {
+      if (
+        !canUseFlatJoinForAll(
+          rel.nestedSpec,
+          rel.relModel,
+          schemas,
+          debug,
+          modelMap,
+        )
+      ) {
         return false
       }
     }
@@ -178,6 +195,7 @@ function buildNestedJoins(
   prefix: string,
   aliasCounter: AliasCounter,
   depth: number = 0,
+  modelMap?: Map<string, Model>,
 ): { joins: string[]; selects: string[]; orderBy: string[] } {
   if (depth > LIMITS.MAX_NESTED_JOIN_DEPTH) {
     throw new Error(
@@ -196,7 +214,7 @@ function buildNestedJoins(
     const field = indices.allFieldsByName.get(relName)
     if (!isValidRelationField(field as any)) continue
 
-    const relModel = getRelationModel(parentModel, relName, schemas)
+    const relModel = getRelationModel(parentModel, relName, schemas, modelMap)
     const relTable = buildTableReference(
       SQL_TEMPLATES.PUBLIC_SCHEMA,
       relModel.tableName,
@@ -242,6 +260,7 @@ function buildNestedJoins(
         nestedPrefix,
         aliasCounter,
         depth + 1,
+        modelMap,
       )
 
       joins.push(...deeper.joins)
@@ -317,6 +336,9 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     includeSpec: {},
   }
 
+  const modelMap = new Map<string, Model>()
+  for (const m of schemas) modelMap.set(m.name, m)
+
   const includeSpec = extractRelationEntries(args, model).reduce(
     (acc, { name, value }) => {
       acc[name] = value
@@ -329,7 +351,7 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     return emptyResult
   }
 
-  if (!canUseFlatJoinForAll(includeSpec, model, schemas)) {
+  if (!canUseFlatJoinForAll(includeSpec, model, schemas, false, modelMap)) {
     return emptyResult
   }
 
@@ -378,6 +400,7 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     '',
     aliasCounter,
     0,
+    modelMap,
   )
 
   if (built.joins.length === 0) {

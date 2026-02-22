@@ -1,8 +1,12 @@
 import { Field, Model } from '../../types'
 import { SqlDialect } from '../../sql-builder-dialect'
 import { buildTableReference, col, quote } from './sql-utils'
-import { joinCondition, getModelByName } from '../joins'
-import { getRelationFieldSet, getScalarFieldSet } from './model-field-cache'
+import { joinCondition } from '../joins'
+import {
+  getRelationFieldSet,
+  getScalarFieldSet,
+  getFieldIndices,
+} from './model-field-cache'
 import { SQL_SEPARATORS } from './constants'
 import { isPlainObject, isNotNullish } from './validators/type-guards'
 import {
@@ -24,6 +28,7 @@ interface RelationOrderByContext {
   joins: string[]
   usedAliases: Set<string>
   aliasCounter: { value: number }
+  modelMap: Map<string, Model>
 }
 
 function resolveTableRef(model: Model, dialect: SqlDialect): string {
@@ -36,8 +41,10 @@ function resolveTableRef(model: Model, dialect: SqlDialect): string {
   return buildTableReference(schema, tableName, dialect)
 }
 
-function findRelationField(model: Model, fieldName: string) {
-  return model.fields.find((f) => f.name === fieldName && f.isRelation)
+function findRelationField(model: Model, fieldName: string): Field | undefined {
+  const field = getFieldIndices(model).allFieldsByName.get(fieldName)
+  if (!field || !field.isRelation) return undefined
+  return field as Field
 }
 
 function nextJoinAlias(ctx: RelationOrderByContext): string {
@@ -76,7 +83,7 @@ function resolveRelationOrderByChain(
     )
   }
 
-  const relatedModel = getModelByName(ctx.schemas, field.relatedModel!)
+  const relatedModel = ctx.modelMap.get(field.relatedModel!)
   if (!relatedModel) {
     throw new Error(
       `Related model '${field.relatedModel}' not found for relation '${relationFieldName}'`,
@@ -158,12 +165,16 @@ export function buildOrderByWithRelations(
   const scalarSet = getScalarFieldSet(model)
   const orderFragments: string[] = []
 
+  const modelMap = new Map<string, Model>()
+  for (const m of schemas) modelMap.set(m.name, m)
+
   const ctx: RelationOrderByContext = {
     schemas,
     dialect,
     joins: [],
     usedAliases: new Set<string>(),
     aliasCounter: { value: 0 },
+    modelMap,
   }
 
   for (const [fieldName, value] of expanded) {

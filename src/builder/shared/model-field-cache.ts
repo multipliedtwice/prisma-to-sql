@@ -8,6 +8,8 @@ interface FieldIndices {
   allFieldsByName: ReadonlyMap<string, Field>
   scalarNames: readonly string[]
   relationNames: readonly string[]
+  scalarFieldSet: ReadonlySet<string>
+  relationFieldSet: ReadonlySet<string>
   jsonFields: ReadonlySet<string>
   pkFields: readonly string[]
   columnMap: ReadonlyMap<string, string>
@@ -68,12 +70,17 @@ export function getFieldIndices(model: Model): FieldIndices {
     }
   }
 
+  const scalarFieldSet: ReadonlySet<string> = new Set(scalarNames)
+  const relationFieldSet: ReadonlySet<string> = new Set(relationNames)
+
   cached = Object.freeze({
     scalarFields,
     relationFields,
     allFieldsByName,
     scalarNames,
     relationNames,
+    scalarFieldSet,
+    relationFieldSet,
     jsonFields,
     pkFields,
     columnMap,
@@ -92,11 +99,11 @@ export function getFieldByNameCached(
 }
 
 export function getRelationFieldSet(model: Model): ReadonlySet<string> {
-  return new Set(getFieldIndices(model).relationNames)
+  return getFieldIndices(model).relationFieldSet
 }
 
 export function getScalarFieldSet(model: Model): ReadonlySet<string> {
-  return new Set(getFieldIndices(model).scalarNames)
+  return getFieldIndices(model).scalarFieldSet
 }
 
 export function getColumnMap(model: Model): ReadonlyMap<string, string> {

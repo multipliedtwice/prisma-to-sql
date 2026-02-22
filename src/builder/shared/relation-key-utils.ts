@@ -7,6 +7,7 @@ interface RelationKeys {
 }
 
 const RELATION_KEYS_CACHE = new WeakMap<Field, RelationKeys>()
+const RELATION_KEYS_INVALID = new WeakSet<Field>()
 
 function computeRelationKeys(field: Field, context: string): RelationKeys {
   const fkFields = normalizeKeyList(field.foreignKey)
@@ -43,4 +44,20 @@ export function resolveRelationKeys(
   cached = computeRelationKeys(field, context)
   RELATION_KEYS_CACHE.set(field, cached)
   return cached
+}
+
+export function tryResolveRelationKeys(field: Field): RelationKeys | null {
+  const cached = RELATION_KEYS_CACHE.get(field)
+  if (cached) return cached
+
+  if (RELATION_KEYS_INVALID.has(field)) return null
+
+  try {
+    const keys = computeRelationKeys(field, 'include')
+    RELATION_KEYS_CACHE.set(field, keys)
+    return keys
+  } catch {
+    RELATION_KEYS_INVALID.add(field)
+    return null
+  }
 }

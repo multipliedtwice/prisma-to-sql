@@ -34,6 +34,7 @@ import {
   COUNT_SELECT_KEY,
 } from './distinct'
 import { joinNonEmpty } from '../shared/array-utils'
+import { getOrCreateModelMap } from '../shared/include-tree-walker'
 
 const ALWAYS_TRUE_CONDITION = '1=1'
 
@@ -336,9 +337,23 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
   const takeValue = typeof pagination.take === 'number' ? pagination.take : null
 
   if (dialect === 'postgres' && hasIncludes) {
-    const canFlatJoin = canUseFlatJoinForAll(includeSpec, model, schemas)
-    const canLateral = canUseLateralJoin(includeSpec, model, schemas)
-    const hasChildPag = hasChildPaginationAnywhere(includeSpec, model, schemas)
+    const modelMap = getOrCreateModelMap(schemas)
+
+    const canFlatJoin = canUseFlatJoinForAll(
+      includeSpec,
+      model,
+      schemas,
+      false,
+      modelMap,
+    )
+    const canLateral = canUseLateralJoin(includeSpec, model, schemas, modelMap)
+    const hasChildPag = hasChildPaginationAnywhere(
+      includeSpec,
+      model,
+      schemas,
+      0,
+      modelMap,
+    )
 
     const strategy = pickIncludeStrategy({
       includeSpec,
@@ -351,6 +366,7 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
       canFlatJoin,
       canLateral,
       hasChildPagination: hasChildPag,
+      modelMap,
     })
 
     if (strategy === 'flat-join') {

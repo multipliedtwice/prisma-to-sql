@@ -5,8 +5,12 @@ import type { Model } from '../../types'
 import { getColumnMap, getQuotedColumn } from './model-field-cache'
 import { ALIAS_FORBIDDEN_KEYWORDS } from './constants'
 
+const IS_PRODUCTION =
+  typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+
 const COL_EXPR_CACHE = new WeakMap<Model, Map<string, string>>()
 const COL_WITH_ALIAS_CACHE = new WeakMap<Model, Map<string, string>>()
+const TABLE_REF_CACHE = new Map<string, string>()
 
 function containsControlChars(s: string): boolean {
   for (let i = 0; i < s.length; i++) {
@@ -308,20 +312,37 @@ export function buildTableReference(
     )
   }
 
-  if (containsControlChars(tableName)) {
-    throw new Error(
-      'buildTableReference: tableName contains invalid characters',
-    )
-  }
-
   const d = dialect ?? 'postgres'
+
   if (d === 'sqlite') {
-    return quote(tableName)
+    const cacheKey = `\0${tableName}\0sqlite`
+    let cached = TABLE_REF_CACHE.get(cacheKey)
+    if (cached) return cached
+
+    if (containsControlChars(tableName)) {
+      throw new Error(
+        'buildTableReference: tableName contains invalid characters',
+      )
+    }
+
+    cached = quote(tableName)
+    TABLE_REF_CACHE.set(cacheKey, cached)
+    return cached
   }
 
   if (isEmptyString(schemaName)) {
     throw new Error(
       'buildTableReference: schemaName is required and cannot be empty',
+    )
+  }
+
+  const cacheKey = `${schemaName}\0${tableName}\0${d}`
+  let cached = TABLE_REF_CACHE.get(cacheKey)
+  if (cached) return cached
+
+  if (containsControlChars(tableName)) {
+    throw new Error(
+      'buildTableReference: tableName contains invalid characters',
     )
   }
 
@@ -333,10 +354,14 @@ export function buildTableReference(
 
   const safeSchema = schemaName.replace(/"/g, '""')
   const safeTable = tableName.replace(/"/g, '""')
-  return `"${safeSchema}"."${safeTable}"`
+  cached = `"${safeSchema}"."${safeTable}"`
+  TABLE_REF_CACHE.set(cacheKey, cached)
+  return cached
 }
 
 export function assertSafeAlias(alias: string): void {
+  if (IS_PRODUCTION) return
+
   if (typeof alias !== 'string') {
     throw new Error(`Invalid alias: expected string, got ${typeof alias}`)
   }
@@ -393,6 +418,7 @@ export function assertSafeAlias(alias: string): void {
 }
 
 export function assertSafeTableRef(tableRef: string): void {
+  if (IS_PRODUCTION) return
   assertSafeQualifiedName(tableRef)
 }
 

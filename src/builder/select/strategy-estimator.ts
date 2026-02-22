@@ -3,6 +3,7 @@ import { isPlainObject } from '../shared/validators/type-guards'
 import { resolveIncludeRelations } from '../shared/include-tree-walker'
 import { LIMITS } from '../shared/constants'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
+import { getFieldIndices } from '../shared/model-field-cache'
 
 type RelStats = {
   avg: number
@@ -24,7 +25,7 @@ const CORRELATED_WHERE_PENALTY = 3.0
 const DEFAULT_FAN = 10
 const DEFAULT_PARENT_COUNT = 50
 const MIN_STATS_COVERAGE = 0.1
-const SINGLE_PARENT_MAX_FLAT_JOIN_DEPTH = 1
+const SINGLE_PARENT_MAX_FLAT_JOIN_DEPTH = 2
 
 export function setRoundtripRowEquivalent(value: number): void {
   globalRoundtripRowEquivalent = value
@@ -102,10 +103,16 @@ function buildCostTree(
   model: Model,
   schemas: readonly Model[],
   depth: number = 0,
+  modelMap?: Map<string, Model>,
 ): RelationCostNode[] {
   if (depth > LIMITS.MAX_INCLUDE_DEPTH) return []
 
-  const relations = resolveIncludeRelations(includeSpec, model, schemas)
+  const relations = resolveIncludeRelations(
+    includeSpec,
+    model,
+    schemas,
+    modelMap,
+  )
   const nodes: RelationCostNode[] = []
 
   for (const rel of relations) {
@@ -115,7 +122,13 @@ function buildCostTree(
 
     const children =
       Object.keys(rel.nestedSpec).length > 0
-        ? buildCostTree(rel.nestedSpec, rel.relModel, schemas, depth + 1)
+        ? buildCostTree(
+            rel.nestedSpec,
+            rel.relModel,
+            schemas,
+            depth + 1,
+            modelMap,
+          )
         : []
 
     nodes.push({
@@ -201,9 +214,10 @@ function hasOnlyToOneRelations(
   includeSpec: Record<string, any>,
   model: Model,
 ): boolean {
+  const indices = getFieldIndices(model)
   for (const [relName, value] of Object.entries(includeSpec)) {
     if (value === false) continue
-    const field = model.fields.find((f) => f.name === relName)
+    const field = indices.allFieldsByName.get(relName)
     if (!field?.isRelation) continue
     if (isListField(field)) return false
   }
@@ -215,10 +229,16 @@ export function countIncludeDepth(
   model: Model,
   schemas: readonly Model[],
   depth: number = 0,
+  modelMap?: Map<string, Model>,
 ): number {
   if (depth > LIMITS.MAX_INCLUDE_DEPTH) return 0
 
-  const relations = resolveIncludeRelations(includeSpec, model, schemas)
+  const relations = resolveIncludeRelations(
+    includeSpec,
+    model,
+    schemas,
+    modelMap,
+  )
   let maxDepth = 0
 
   for (const rel of relations) {
@@ -229,6 +249,7 @@ export function countIncludeDepth(
         rel.relModel,
         schemas,
         depth + 1,
+        modelMap,
       )
     }
     if (childDepth > maxDepth) maxDepth = childDepth
@@ -242,6 +263,7 @@ export function hasChildPaginationAnywhere(
   model: Model,
   schemas: readonly Model[],
   depth: number = 0,
+  modelMap?: Map<string, Model>,
 ): boolean {
   if (depth > LIMITS.MAX_INCLUDE_DEPTH) return false
 
@@ -250,7 +272,12 @@ export function hasChildPaginationAnywhere(
     if (hasPaginationArgs(value)) return true
   }
 
-  const relations = resolveIncludeRelations(includeSpec, model, schemas)
+  const relations = resolveIncludeRelations(
+    includeSpec,
+    model,
+    schemas,
+    modelMap,
+  )
 
   for (const rel of relations) {
     if (Object.keys(rel.nestedSpec).length > 0) {
@@ -260,6 +287,7 @@ export function hasChildPaginationAnywhere(
           rel.relModel,
           schemas,
           depth + 1,
+          modelMap,
         )
       ) {
         return true
@@ -282,6 +310,7 @@ export function pickIncludeStrategy(params: {
   canLateral: boolean
   hasChildPagination: boolean
   debug?: boolean
+  modelMap?: Map<string, Model>
 }): IncludeStrategy {
   const {
     includeSpec,
@@ -292,6 +321,7 @@ export function pickIncludeStrategy(params: {
     canFlatJoin,
     hasChildPagination,
     debug,
+    modelMap,
   } = params
 
   if (Object.keys(includeSpec).length === 0) return 'where-in'
@@ -304,7 +334,7 @@ export function pickIncludeStrategy(params: {
 
   const isSingleParent = method === 'findFirst' || method === 'findUnique'
   if (isSingleParent && canFlatJoin) {
-    const depth = countIncludeDepth(includeSpec, model, schemas)
+    const depth = countIncludeDepth(includeSpec, model, schemas, 0, modelMap)
     if (depth <= SINGLE_PARENT_MAX_FLAT_JOIN_DEPTH) {
       if (debug)
         console.log(
@@ -314,7 +344,7 @@ export function pickIncludeStrategy(params: {
     }
   }
 
-  const costTree = buildCostTree(includeSpec, model, schemas)
+  const costTree = buildCostTree(includeSpec, model, schemas, 0, modelMap)
   const treeDepth = maxDepthFromTree(costTree)
 
   if (hasChildPagination && treeDepth >= 2) {

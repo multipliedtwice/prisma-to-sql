@@ -352,6 +352,7 @@ function buildSelectWithNestedIncludes(
       relAlias,
       ctx.params,
       ctx.dialect,
+      ctx.schemaByName,
     )
     if (!countBuild.jsonPairs) return baseSelect
     countJoins.push(...countBuild.joins)

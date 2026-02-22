@@ -118,10 +118,12 @@ function getRelationModel(
   parentModel: Model,
   relationName: string,
   schemas: readonly Model[],
+  modelMap?: Map<string, Model>,
 ): Model | null {
   const indices = getFieldIndices(parentModel)
   const field = indices.allFieldsByName.get(relationName)
   if (!field?.isRelation || !field.relatedModel) return null
+  if (modelMap) return modelMap.get(field.relatedModel) ?? null
   return schemas.find((m) => m.name === field.relatedModel) ?? null
 }
 
@@ -168,6 +170,7 @@ interface LateralBuildContext {
   dialect: SqlDialect
   aliasCounter: { count: number }
   collector: ParamCollector
+  modelMap: Map<string, Model>
 }
 
 function buildLateralForRelation(
@@ -211,7 +214,12 @@ function buildLateralForRelation(
     const nestedField = nestedIndices.allFieldsByName.get(nestedName)
     if (!nestedField || !isValidRelationField(nestedField as any)) continue
 
-    const nestedModel = getRelationModel(relModel, nestedName, ctx.schemas)
+    const nestedModel = getRelationModel(
+      relModel,
+      nestedName,
+      ctx.schemas,
+      ctx.modelMap,
+    )
     if (!nestedModel) continue
 
     const nested = buildLateralForRelation(
@@ -381,8 +389,14 @@ export function canUseLateralJoin(
   includeSpec: Record<string, any>,
   parentModel: Model,
   schemas: readonly Model[],
+  modelMap?: Map<string, Model>,
 ): boolean {
-  const relations = resolveIncludeRelations(includeSpec, parentModel, schemas)
+  const relations = resolveIncludeRelations(
+    includeSpec,
+    parentModel,
+    schemas,
+    modelMap,
+  )
 
   if (relations.length < countActiveEntries(includeSpec)) {
     return false
@@ -394,7 +408,7 @@ export function canUseLateralJoin(
       return false
 
     if (Object.keys(rel.nestedSpec).length > 0) {
-      if (!canUseLateralJoin(rel.nestedSpec, rel.relModel, schemas))
+      if (!canUseLateralJoin(rel.nestedSpec, rel.relModel, schemas, modelMap))
         return false
     }
   }
@@ -425,6 +439,9 @@ export function buildLateralJoinSql(
     isLateral: false,
     lateralMeta: [],
   }
+
+  const modelMap = new Map<string, Model>()
+  for (const m of schemas) modelMap.set(m.name, m)
 
   const entries = extractRelationEntries(args, model)
   const includeSpec: Record<string, any> = {}
@@ -471,6 +488,7 @@ export function buildLateralJoinSql(
     dialect,
     aliasCounter,
     collector,
+    modelMap,
   }
 
   const lateralJoins: string[] = []
@@ -484,7 +502,7 @@ export function buildLateralJoinSql(
     const field = indices.allFieldsByName.get(relName)
     if (!field || !isValidRelationField(field as any)) continue
 
-    const relModel = getRelationModel(model, relName, schemas)
+    const relModel = getRelationModel(model, relName, schemas, modelMap)
     if (!relModel) continue
 
     const result = buildLateralForRelation(

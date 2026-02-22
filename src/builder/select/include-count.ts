@@ -6,7 +6,10 @@ import { ParamStore } from '../shared/param-store'
 import { createAliasGenerator } from '../shared/alias-generator'
 import { isValidRelationField } from '../joins'
 import { isNotNullish } from '../shared/validators/type-guards'
-import { getRelationFieldSet } from '../shared/model-field-cache'
+import {
+  getRelationFieldSet,
+  getFieldIndices,
+} from '../shared/model-field-cache'
 import { resolveRelationKeys } from '../shared/relation-key-utils'
 import { getRelationTableReference } from './include-join'
 import {
@@ -37,7 +40,7 @@ function resolveCountRelationOrThrow(
     )
   }
 
-  const field = model.fields.find((f) => f.name === relName) as
+  const field = getFieldIndices(model).allFieldsByName.get(relName) as
     | Field
     | undefined
   if (!field) {
@@ -165,13 +168,14 @@ export function buildRelationCountSql(
   parentAlias: string,
   _params: ParamStore,
   dialect: SqlDialect,
+  modelMap?: Map<string, Model>,
 ): RelationCountBuild {
   const joins: string[] = []
   const pairs: string[] = []
   const aliasGen = createAliasGenerator()
 
-  const schemaByName = new Map<string, Model>()
-  for (const m of schemas) schemaByName.set(m.name, m)
+  const schemaByName =
+    modelMap ?? new Map<string, Model>(schemas.map((m) => [m.name, m]))
 
   for (const [relName, shouldCount] of Object.entries(countSelect)) {
     if (!shouldCount) continue

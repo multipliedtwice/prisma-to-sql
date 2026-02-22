@@ -84,22 +84,29 @@ function buildChildArgs(
   uniqueIds: unknown[],
   stripPagination: boolean,
 ): any {
-  const base: any =
-    relArgs === true || typeof relArgs !== 'object' || relArgs === null
-      ? {}
-      : { ...(relArgs as any) }
+  const isObject =
+    relArgs !== true && typeof relArgs === 'object' && relArgs !== null
 
-  if (stripPagination) {
-    delete base.take
-    delete base.skip
+  const source = isObject ? (relArgs as any) : null
+
+  const base: any = {}
+
+  if (source) {
+    if (source.select !== undefined) base.select = source.select
+    if (source.include !== undefined) base.include = source.include
+    if (source.orderBy !== undefined) base.orderBy = source.orderBy
+    if (!stripPagination) {
+      if (source.take !== undefined) base.take = source.take
+      if (source.skip !== undefined) base.skip = source.skip
+    }
+    if (source.cursor !== undefined) base.cursor = source.cursor
+    if (source.distinct !== undefined) base.distinct = source.distinct
   }
 
-  const existingWhere = base.where
   const inCondition = { [fkFieldName]: { in: uniqueIds } }
 
-  base.where = existingWhere
-    ? { AND: [existingWhere, inCondition] }
-    : inCondition
+  base.where =
+    source && source.where ? { AND: [source.where, inCondition] } : inCondition
 
   return base
 }

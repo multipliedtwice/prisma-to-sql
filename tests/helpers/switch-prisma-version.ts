@@ -18,10 +18,10 @@ if (version === '6') {
   pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^6.19.2'
   pkg.devDependencies['@prisma/adapter-pg'] = '^6.19.2'
 } else {
-  pkg.dependencies['@prisma/client'] = '7.4.0'
-  pkg.dependencies['prisma'] = '7.4.0'
-  pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^7.4.0'
-  pkg.devDependencies['@prisma/adapter-pg'] = '^7.4.0'
+  pkg.dependencies['@prisma/client'] = '7.4.1'
+  pkg.dependencies['prisma'] = '7.4.1'
+  pkg.devDependencies['@prisma/adapter-better-sqlite3'] = '^7.4.1'
+  pkg.devDependencies['@prisma/adapter-pg'] = '^7.4.1'
 }
 
 delete pkg.dependencies['@prisma/client-v7']

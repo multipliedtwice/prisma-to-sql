@@ -8,6 +8,7 @@ import {
   hasChildPaginationAnywhere,
 } from './strategy-estimator'
 import { canUseLateralJoin } from './lateral-join'
+import { getOrCreateModelMap } from '../shared/include-tree-walker'
 
 export interface WhereInSegment {
   relationName: string
@@ -35,11 +36,14 @@ function resolveRelation(
   model: Model,
   relName: string,
   allModels: readonly Model[],
+  modelMap?: Map<string, Model>,
 ): { field: Field; relModel: Model } | null {
   const field = model.fields.find((f) => f.name === relName)
   if (!field || !field.isRelation || !field.relatedModel) return null
 
-  const relModel = allModels.find((m) => m.name === field.relatedModel)
+  const relModel = modelMap
+    ? modelMap.get(field.relatedModel)
+    : allModels.find((m) => m.name === field.relatedModel)
   if (!relModel) return null
 
   return { field: field as Field, relModel }
@@ -87,27 +91,13 @@ function buildWhereInSegment(
   }
 }
 
-function deepClone<T>(obj: T): T {
-  if (obj === null || typeof obj !== 'object') return obj
-  if (obj instanceof Date) return new Date(obj.getTime()) as any
-  if (obj instanceof RegExp) return new RegExp(obj.source, obj.flags) as any
-  if (Array.isArray(obj)) return obj.map((item) => deepClone(item)) as any
-
-  const cloned: any = {}
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      cloned[key] = deepClone((obj as any)[key])
-    }
-  }
-  return cloned
-}
-
 function removeRelationsFromArgs(args: any, names: Set<string>): any {
   if (!args) return args
 
-  const filtered = deepClone(args)
+  const filtered = { ...args }
 
   if (filtered.include && isPlainObject(filtered.include)) {
+    filtered.include = { ...filtered.include }
     for (const name of names) {
       delete filtered.include[name]
     }
@@ -117,6 +107,7 @@ function removeRelationsFromArgs(args: any, names: Set<string>): any {
   }
 
   if (filtered.select && isPlainObject(filtered.select)) {
+    filtered.select = { ...filtered.select }
     for (const name of names) {
       delete filtered.select[name]
     }
@@ -182,17 +173,32 @@ export function planQueryStrategy(params: {
     const includeSpec = extractIncludeSpec(args, model)
 
     if (Object.keys(includeSpec).length > 0) {
+      const modelMap = getOrCreateModelMap(allModels)
+
       const hasPagination =
         isPlainObject(args) && 'take' in args && args.take != null
       const takeValue =
         isPlainObject(args) && typeof args.take === 'number' ? args.take : null
 
-      const canFlatJoin = canUseFlatJoinForAll(includeSpec, model, allModels)
-      const canLateral = canUseLateralJoin(includeSpec, model, allModels)
+      const canFlatJoin = canUseFlatJoinForAll(
+        includeSpec,
+        model,
+        allModels,
+        false,
+        modelMap,
+      )
+      const canLateral = canUseLateralJoin(
+        includeSpec,
+        model,
+        allModels,
+        modelMap,
+      )
       const hasChildPag = hasChildPaginationAnywhere(
         includeSpec,
         model,
         allModels,
+        0,
+        modelMap,
       )
 
       const strategy = pickIncludeStrategy({
@@ -207,6 +213,7 @@ export function planQueryStrategy(params: {
         canLateral,
         hasChildPagination: hasChildPag,
         debug,
+        modelMap,
       })
 
       if (debug) {
@@ -219,11 +226,12 @@ export function planQueryStrategy(params: {
     }
   }
 
+  const modelMap = getOrCreateModelMap(allModels)
   const whereInSegments: WhereInSegment[] = []
   const toRemove = new Set<string>()
 
   for (const entry of entries) {
-    const resolved = resolveRelation(model, entry.name, allModels)
+    const resolved = resolveRelation(model, entry.name, allModels, modelMap)
     if (!resolved) continue
 
     const segment = buildWhereInSegment(
