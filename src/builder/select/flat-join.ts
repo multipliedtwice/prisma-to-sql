@@ -1,4 +1,4 @@
-import { Model } from '../../types'
+import { Model, ParamMapping } from '../../types'
 import { SQL_TEMPLATES, SQL_SEPARATORS, LIMITS } from '../shared/constants'
 import { quote, buildTableReference, quoteColumn } from '../shared/sql-utils'
 import { joinCondition, isValidRelationField } from '../joins'
@@ -19,10 +19,13 @@ import { resolveRelationKeys } from '../shared/relation-key-utils'
 import { ParamStore } from '../shared/param-store'
 import { buildScalarColumnSelect } from '../shared/relation-query-context'
 import { resolveIncludeRelations } from '../shared/include-tree-walker'
+import { scanSqlPlaceholders } from '../shared/sql-param-scanner'
+import { isDynamicParameter } from '@dee-wan/schema-parser'
 
 interface FlatJoinBuildResult {
   sql: string
   params: any[]
+  paramMappings: ParamMapping[]
   requiresReduction: boolean
   includeSpec: Record<string, any>
 }
@@ -122,6 +125,16 @@ function countActiveEntries(spec: Record<string, any>): number {
   return count
 }
 
+function hasUnsafeFlatJoinArgs(relValue: unknown): boolean {
+  if (!isPlainObject(relValue)) return false
+  const obj = relValue as Record<string, unknown>
+  if ('where' in obj && obj.where != null) return true
+  if ('orderBy' in obj && obj.orderBy != null) return true
+  if ('_count' in obj && obj._count != null) return true
+  if ('cursor' in obj && obj.cursor != null) return true
+  return false
+}
+
 export function canUseFlatJoinForAll(
   includeSpec: Record<string, any>,
   model: Model,
@@ -149,6 +162,14 @@ export function canUseFlatJoinForAll(
       if ('skip' in obj && typeof obj.skip === 'number' && obj.skip > 0) {
         return false
       }
+    }
+
+    if (hasUnsafeFlatJoinArgs(rel.value)) {
+      if (debug)
+        console.log(
+          `    [canFlatJoin] ${model.name}.${rel.relName}: has where/orderBy/_count/cursor`,
+        )
+      return false
     }
 
     const keys = resolveRelationKeys(rel.field as any, 'include')
@@ -272,47 +293,96 @@ function buildNestedJoins(
   return { joins, selects, orderBy }
 }
 
+const PARENT_ORD_COL = '"__tp_parent_ord"'
+const PARENT_ORD_INNER_ALIAS = '"__tp_inner"'
+
+function pushParam(
+  params: any[],
+  paramMappings: ParamMapping[],
+  value: unknown,
+): string {
+  params.push(value)
+  const index = params.length
+  if (isDynamicParameter(value)) {
+    paramMappings.push({ index, dynamicName: value as string })
+  } else {
+    paramMappings.push({ index, value })
+  }
+  return `$${index}`
+}
+
 function extractReferencedParams(
   whereClause: string | undefined,
   specParams: ParamStore | readonly unknown[],
-): { cleanWhere: string; params: any[] } {
+): { cleanWhere: string; params: any[]; paramMappings: ParamMapping[] } {
   if (!whereClause || whereClause === '1=1') {
-    return { cleanWhere: '', params: [] }
+    return { cleanWhere: '', params: [], paramMappings: [] }
   }
 
-  const refSet = new Set<number>()
-  const re = /\$(\d+)/g
-  let match: RegExpExecArray | null
-  while ((match = re.exec(whereClause)) !== null) {
-    refSet.add(Number(match[1]))
+  let allParams: readonly unknown[]
+  const mappingByIndex = new Map<
+    number,
+    { value?: unknown; dynamicName?: string }
+  >()
+
+  if (Array.isArray(specParams)) {
+    allParams = specParams
+  } else if (typeof (specParams as any).snapshot === 'function') {
+    const snap = (specParams as ParamStore).snapshot()
+    allParams = snap.params
+    for (const m of snap.mappings) {
+      mappingByIndex.set(m.index, {
+        value: m.value,
+        dynamicName: m.dynamicName,
+      })
+    }
+  } else {
+    allParams = []
   }
 
-  if (refSet.size === 0) {
-    return { cleanWhere: whereClause, params: [] }
-  }
-
-  const allParams: readonly unknown[] = Array.isArray(specParams)
-    ? specParams
-    : typeof (specParams as any).snapshot === 'function'
-      ? (specParams as ParamStore).snapshot().params
-      : []
-
-  const refs = Array.from(refSet).sort((a, b) => a - b)
   const params: any[] = []
+  const paramMappings: ParamMapping[] = []
   const indexMap = new Map<number, number>()
+  let hasAny = false
 
-  for (const oldIdx of refs) {
-    params.push(allParams[oldIdx - 1])
-    indexMap.set(oldIdx, params.length)
+  const cleanWhere = scanSqlPlaceholders(
+    whereClause,
+    (oldIndex) => {
+      hasAny = true
+      const existing = indexMap.get(oldIndex)
+      if (existing !== undefined) return `$${existing}`
+
+      const pos = oldIndex - 1
+      if (pos >= allParams.length) {
+        throw new Error(
+          `Param placeholder $${oldIndex} exceeds params length (${allParams.length})`,
+        )
+      }
+
+      params.push(allParams[pos])
+      const newIndex = params.length
+      indexMap.set(oldIndex, newIndex)
+
+      const origMapping = mappingByIndex.get(oldIndex)
+      if (origMapping?.dynamicName !== undefined) {
+        paramMappings.push({
+          index: newIndex,
+          dynamicName: origMapping.dynamicName,
+        })
+      } else {
+        paramMappings.push({ index: newIndex, value: allParams[pos] })
+      }
+
+      return `$${newIndex}`
+    },
+    { pgAware: true, strictPlaceholders: true },
+  )
+
+  if (!hasAny) {
+    return { cleanWhere: whereClause, params: [], paramMappings: [] }
   }
 
-  let cleanWhere = whereClause
-  const sorted = Array.from(indexMap.entries()).sort((a, b) => b[0] - a[0])
-  for (const [oldIdx, newIdx] of sorted) {
-    cleanWhere = cleanWhere.split(`$${oldIdx}`).join(`$${newIdx}`)
-  }
-
-  return { cleanWhere, params }
+  return { cleanWhere, params, paramMappings }
 }
 
 export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
@@ -332,6 +402,7 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
   const emptyResult: FlatJoinBuildResult = {
     sql: '',
     params: [],
+    paramMappings: [],
     requiresReduction: false,
     includeSpec: {},
   }
@@ -355,7 +426,7 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     return emptyResult
   }
 
-  const { cleanWhere, params } = extractReferencedParams(
+  const { cleanWhere, params, paramMappings } = extractReferencedParams(
     whereClause,
     spec.params,
   )
@@ -365,7 +436,7 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
   const baseOrderBy = orderBy ? `ORDER BY ${orderBy}` : ''
 
   const subqueryScalarCols = buildScalarColumnSelect(model, from.alias)
-  let baseSubquery = `
+  let innerSubquery = `
     SELECT ${subqueryScalarCols} FROM ${from.table} ${from.alias}
     ${baseJoins}
     ${baseWhere}
@@ -382,13 +453,15 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
       : null
 
   if (take !== null) {
-    params.push(take)
-    baseSubquery += ` LIMIT $${params.length}`
+    const ph = pushParam(params, paramMappings, take)
+    innerSubquery += ` LIMIT ${ph}`
   }
   if (skip !== null) {
-    params.push(skip)
-    baseSubquery += ` OFFSET $${params.length}`
+    const ph = pushParam(params, paramMappings, skip)
+    innerSubquery += ` OFFSET ${ph}`
   }
+
+  const baseSubquery = `SELECT *, ROW_NUMBER() OVER () AS ${PARENT_ORD_COL} FROM (${innerSubquery}) ${PARENT_ORD_INNER_ALIAS}`
 
   const aliasCounter = createAliasCounter()
   const built = buildNestedJoins(
@@ -416,10 +489,8 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     throw new Error('Flat-join SELECT requires at least one selected field')
   }
 
-  const pkField = getPrimaryKeyField(model)
-
   const orderByParts: string[] = []
-  orderByParts.push(`${from.alias}.${quoteColumn(model, pkField)} ASC`)
+  orderByParts.push(`${from.alias}.${PARENT_ORD_COL} ASC`)
   orderByParts.push(...built.orderBy)
 
   const finalOrderBy = orderByParts.join(', ')
@@ -431,5 +502,5 @@ export function buildFlatJoinSql(spec: SelectQuerySpec): FlatJoinBuildResult {
     ORDER BY ${finalOrderBy}
   `.trim()
 
-  return { sql, params, requiresReduction: true, includeSpec }
+  return { sql, params, paramMappings, requiresReduction: true, includeSpec }
 }

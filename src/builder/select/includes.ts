@@ -318,14 +318,60 @@ function extractCountSelectFromRelArgs(
 ): Record<string, boolean> | null {
   if (!isPlainObject(relArgs)) return null
   const obj = relArgs as Record<string, unknown>
-  if (!isPlainObject(obj.select)) return null
-  const sel = obj.select as Record<string, unknown>
-  const countRaw = sel['_count']
-  if (!countRaw) return null
-  if (isPlainObject(countRaw) && 'select' in countRaw) {
-    return (countRaw as { select: Record<string, boolean> }).select
+
+  if (isPlainObject(obj.select)) {
+    const sel = obj.select as Record<string, unknown>
+    const countRaw = sel['_count']
+    if (countRaw) {
+      if (isPlainObject(countRaw) && 'select' in countRaw) {
+        return (countRaw as { select: Record<string, boolean> }).select
+      }
+      return null
+    }
   }
+
+  if (isPlainObject(obj.include)) {
+    const inc = obj.include as Record<string, unknown>
+    const countRaw = inc['_count']
+    if (countRaw) {
+      if (isPlainObject(countRaw) && 'select' in countRaw) {
+        return (countRaw as { select: Record<string, boolean> }).select
+      }
+      return null
+    }
+  }
+
   return null
+}
+
+function excludeRelationsFromArgs(
+  relArgs: PrismaQueryArgs,
+  excludeNames: Set<string>,
+): PrismaQueryArgs {
+  const filtered = { ...relArgs }
+
+  if (filtered.include && isPlainObject(filtered.include)) {
+    const newInclude: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(
+      filtered.include as Record<string, unknown>,
+    )) {
+      if (!excludeNames.has(k)) newInclude[k] = v
+    }
+    filtered.include =
+      Object.keys(newInclude).length > 0 ? newInclude : undefined
+  }
+
+  if (filtered.select && isPlainObject(filtered.select)) {
+    const newSelect: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(
+      filtered.select as Record<string, unknown>,
+    )) {
+      if (!excludeNames.has(k)) newSelect[k] = v
+    }
+    filtered.select = newSelect
+  }
+
+  return filtered
 }
 
 function buildSelectWithNestedIncludes(
@@ -429,6 +475,43 @@ function buildSelectWithNestedIncludes(
   }
   for (const ns of nestedSelects) {
     allParts.push(ns)
+  }
+
+  if (isPlainObject(relArgs)) {
+    const toOneNames = new Set(nestedToOnes.map((r) => r.name))
+    const toManyArgs = excludeRelationsFromArgs(
+      relArgs as PrismaQueryArgs,
+      toOneNames,
+    )
+
+    const prevModel = ctx.model
+    const prevParentAlias = ctx.parentAlias
+    const prevDepth = ctx.depth
+
+    ctx.model = relModel
+    ctx.parentAlias = relAlias
+    ctx.depth = prevDepth + 1
+
+    let nestedToManyIncludes: IncludeSpec[] = []
+    try {
+      nestedToManyIncludes = buildIncludeSqlInternal(toManyArgs, ctx)
+    } finally {
+      ctx.model = prevModel
+      ctx.parentAlias = prevParentAlias
+      ctx.depth = prevDepth
+    }
+
+    if (isNonEmptyArray(nestedToManyIncludes)) {
+      const emptyJson = emptyJsonArray(ctx.dialect)
+      const toManySelects = nestedToManyIncludes
+        .map((inc) =>
+          inc.isOneToOne
+            ? `${sqlStringLiteral(inc.name)}, (${inc.sql})`
+            : `${sqlStringLiteral(inc.name)}, COALESCE((${inc.sql}), ${emptyJson})`,
+        )
+        .join(SQL_SEPARATORS.FIELD_LIST)
+      allParts.push(toManySelects)
+    }
   }
 
   let finalSelect = allParts.join(SQL_SEPARATORS.FIELD_LIST)

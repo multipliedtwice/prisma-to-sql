@@ -16,10 +16,7 @@ import {
 import { normalizeIntLike } from './shared/int-like'
 import { addAutoScoped } from './shared/dynamic-params'
 import { isDynamicParameter } from '@dee-wan/schema-parser'
-import {
-  normalizeAndValidateOrderBy,
-  normalizeOrderByInput,
-} from './shared/order-by-utils'
+import { normalizeAndValidateOrderBy } from './shared/order-by-utils'
 import { ensureDeterministicOrderByInput } from './shared/order-by-determinism'
 import { assertScalarField } from './shared/validators/field-assertions'
 
@@ -36,11 +33,21 @@ type OrderByEntry = {
 
 type IntOrDynamic = number | string
 type MaybeIntOrDynamic = IntOrDynamic | undefined
-type OrderByInput = unknown
-type IncludeSelectArgs = Pick<PrismaQueryArgs, 'include' | 'select'>
 
 const MAX_LIMIT_OFFSET = 2147483647
 const ORDER_BY_ALLOWED_KEYS = new Set(['sort', 'nulls'])
+
+const DEBUG_CURSOR =
+  typeof process !== 'undefined' && process.env?.DEBUG_CURSOR === '1'
+
+function debugCursor(label: string, payload?: Record<string, unknown>): void {
+  if (!DEBUG_CURSOR) return
+  if (payload) {
+    console.error(`[cursor] ${label}`, payload)
+    return
+  }
+  console.error(`[cursor] ${label}`)
+}
 
 function parseDirectionRaw(raw: unknown, errorLabel: string): OrderByDirection {
   const s = String(raw).toLowerCase()
@@ -110,12 +117,14 @@ function normalizeNonNegativeInt(name: 'skip', v: unknown): IntOrDynamic {
     max: MAX_LIMIT_OFFSET,
     allowZero: true,
   })
-  if (result === undefined)
+  if (result === undefined) {
     throw new Error(`${name} normalization returned undefined`)
+  }
   return result
 }
 
 const MIN_NEGATIVE_TAKE = -10000
+
 function normalizeIntAllowNegative(name: 'take', v: unknown): IntOrDynamic {
   if (isDynamicParameter(v)) return v as string
   const result = normalizeIntLike(name, v, {
@@ -123,8 +132,9 @@ function normalizeIntAllowNegative(name: 'take', v: unknown): IntOrDynamic {
     max: MAX_LIMIT_OFFSET,
     allowZero: true,
   })
-  if (result === undefined)
+  if (result === undefined) {
     throw new Error(`${name} normalization returned undefined`)
+  }
   return result
 }
 
@@ -230,6 +240,30 @@ function ensureCursorFieldsInOrder(
   return out ?? orderEntries
 }
 
+function validateCompositeCursorOrder(
+  cursorEntries: Array<[string, unknown]>,
+  orderEntries: OrderByEntry[],
+): void {
+  if (cursorEntries.length <= 1) return
+  if (orderEntries.length < cursorEntries.length) {
+    throw new Error(
+      `Composite cursor requires orderBy to start with cursor fields in the same order. Cursor fields: ${cursorEntries
+        .map(([f]) => f)
+        .join(', ')}`,
+    )
+  }
+
+  for (let i = 0; i < cursorEntries.length; i++) {
+    const cursorField = cursorEntries[i][0]
+    const orderField = orderEntries[i]?.field
+    if (orderField !== cursorField) {
+      throw new Error(
+        `Composite cursor/orderBy mismatch at position ${i + 1}. Expected orderBy field '${cursorField}', got '${orderField ?? 'undefined'}'.`,
+      )
+    }
+  }
+}
+
 function buildCursorFilterParts(
   cursor: Record<string, unknown>,
   cursorAlias: string,
@@ -242,14 +276,14 @@ function buildCursorFilterParts(
     if (!Object.prototype.hasOwnProperty.call(cursor, field)) continue
 
     const value = cursor[field]
-
     if (value === undefined) continue
 
     const c = cursorAlias + '.' + quoteColumn(model, field)
 
     if (value === null) {
-      parts.push(c + ' IS NULL')
-      continue
+      throw new Error(
+        `Cursor field '${field}' cannot be null. Keyset pagination requires non-null cursor values.`,
+      )
     }
 
     const ph = addAutoScoped(params, value, `cursor.filter.${field}`)
@@ -269,7 +303,7 @@ function buildCursorEqualityExpr(
   columnExpr: string,
   cursorField: string,
 ): string {
-  return `((${cursorField} IS NULL AND ${columnExpr} IS NULL) OR (${cursorField} IS NOT NULL AND ${columnExpr} = ${cursorField}))`
+  return `${columnExpr} = ${cursorField}`
 }
 
 function buildCursorInequalityExpr(
@@ -309,7 +343,9 @@ function buildCursorCteSelectList(
     }
   }
 
-  if (ordered.length === 0) throw new Error('cursor cte select list is empty')
+  if (ordered.length === 0) {
+    throw new Error('cursor cte select list is empty')
+  }
 
   return ordered
     .map((f) => quoteColumn(model, f))
@@ -355,62 +391,269 @@ function assertCursorAndOrderFieldsScalar(
   }
 }
 
+function isPositiveSkip(skip: unknown): boolean {
+  return typeof skip === 'number' && skip > 0
+}
+
+function buildExclusiveOperator(direction: OrderByDirection): '>' | '<' {
+  return direction === 'asc' ? '>' : '<'
+}
+
+function buildInclusiveOperator(direction: OrderByDirection): '>=' | '<=' {
+  return direction === 'asc' ? '>=' : '<='
+}
+
+function normalizeOrderEntriesWithoutModel(orderBy: unknown): OrderByEntry[] {
+  if (!isNotNullish(orderBy)) return []
+
+  const list = Array.isArray(orderBy) ? orderBy : [orderBy]
+  const entries: OrderByEntry[] = []
+
+  for (const item of list) {
+    if (!isPlainObject(item)) {
+      throw new Error('orderBy entries must be objects')
+    }
+
+    for (const [field, rawValue] of Object.entries(item)) {
+      if (
+        isPlainObject(rawValue) &&
+        !('sort' in rawValue) &&
+        !('nulls' in rawValue)
+      ) {
+        throw new Error(
+          `Relation orderBy requires model metadata and cannot be resolved for field '${field}'`,
+        )
+      }
+
+      const parsed = parseOrderByValue(rawValue, field)
+      entries.push({
+        field,
+        direction: parsed.direction,
+        nulls: parsed.nulls,
+      })
+    }
+  }
+
+  return entries
+}
+
+function normalizeCursorOrderEntries(
+  orderBy: unknown,
+  model?: Model,
+): OrderByEntry[] {
+  if (model) {
+    return normalizeAndValidateOrderBy(orderBy, model, parseOrderByValue)
+  }
+  return normalizeOrderEntriesWithoutModel(orderBy)
+}
+
+function reorderCursorEntriesLikeOrderBy(
+  cursorEntries: Array<[string, unknown]>,
+  orderEntries: OrderByEntry[],
+): Array<[string, unknown]> {
+  if (cursorEntries.length <= 1) return cursorEntries
+  if (orderEntries.length < cursorEntries.length) return cursorEntries
+
+  const byField = new Map<string, unknown>()
+  for (const [field, value] of cursorEntries) {
+    byField.set(field, value)
+  }
+
+  if (byField.size !== cursorEntries.length) {
+    return cursorEntries
+  }
+
+  for (let i = 0; i < cursorEntries.length; i++) {
+    if (!byField.has(orderEntries[i].field)) {
+      return cursorEntries
+    }
+  }
+
+  return orderEntries
+    .slice(0, cursorEntries.length)
+    .map(
+      (entry) => [entry.field, byField.get(entry.field)] as [string, unknown],
+    )
+}
+
+function isRequiredNonRelationField(
+  model: Model | undefined,
+  fieldName: string,
+): boolean {
+  if (!model) return false
+  const field = model.fields.find((f) => f.name === fieldName)
+  if (!field || field.isRelation) return false
+  return Boolean(field.isRequired || (field as any).isId)
+}
+
+function canUseTupleComparison(
+  cursorEntries: Array<[string, unknown]>,
+  orderEntries: OrderByEntry[],
+  dialect: SqlDialect,
+  model?: Model,
+): boolean {
+  if (dialect !== 'postgres') return false
+  if (cursorEntries.length < 2) return false
+  if (orderEntries.length < cursorEntries.length) return false
+
+  const firstDirection = orderEntries[0]?.direction
+  if (!firstDirection) return false
+
+  for (let i = 0; i < cursorEntries.length; i++) {
+    const orderEntry = orderEntries[i]
+    const cursorField = cursorEntries[i]?.[0]
+
+    if (orderEntry.field !== cursorField) return false
+    if (orderEntry.direction !== firstDirection) return false
+    if (orderEntry.nulls !== undefined) return false
+
+    if (model && !isRequiredNonRelationField(model, orderEntry.field)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function buildTupleComparisonCondition(
+  cursorEntries: Array<[string, unknown]>,
+  orderEntries: OrderByEntry[],
+  alias: string,
+  params: ParamStore,
+  skip: unknown,
+  model?: Model,
+): string {
+  const direction = orderEntries[0].direction
+  const operator = isPositiveSkip(skip)
+    ? buildExclusiveOperator(direction)
+    : buildInclusiveOperator(direction)
+
+  const tupleLength = cursorEntries.length
+
+  const leftTuple =
+    '(' +
+    orderEntries
+      .slice(0, tupleLength)
+      .map((entry) => col(alias, entry.field, model))
+      .join(SQL_SEPARATORS.FIELD_LIST) +
+    ')'
+
+  const rightTuple =
+    '(' +
+    cursorEntries
+      .map(([field, value]) => addAutoScoped(params, value, `cursor.${field}`))
+      .join(SQL_SEPARATORS.FIELD_LIST) +
+    ')'
+
+  return `${leftTuple} ${operator} ${rightTuple}`
+}
+
 export function buildCursorCondition(
   cursor: Record<string, unknown>,
   orderBy: unknown,
   tableName: string,
   alias: string,
   params: ParamStore,
+  skip: unknown,
   dialect?: SqlDialect,
   model?: Model,
-): { cte: string; condition: string } {
+): { cte: string; condition: string; consumesSkip: boolean } {
   assertSafeTableRef(tableName)
   assertSafeAlias(alias)
 
   const d = dialect ?? getGlobalDialect()
+  const consumesSkip = isPositiveSkip(skip)
 
-  const cursorEntries: Array<[string, unknown]> = []
+  let cursorEntries: Array<[string, unknown]> = []
   for (const k in cursor) {
     if (Object.prototype.hasOwnProperty.call(cursor, k)) {
       const value = cursor[k]
       if (value !== undefined) {
+        if (value === null) {
+          throw new Error(
+            `Cursor field '${k}' cannot be null. Keyset pagination requires non-null cursor values.`,
+          )
+        }
         cursorEntries.push([k, value])
       }
     }
   }
 
-  if (cursorEntries.length === 0)
+  if (cursorEntries.length === 0) {
     throw new Error('cursor must have at least one field with defined value')
+  }
 
-  const orderEntries = normalizeAndValidateOrderBy(
-    orderBy,
-    model!,
-    parseOrderByValue,
+  const rawOrderEntries = normalizeCursorOrderEntries(orderBy, model)
+  cursorEntries = reorderCursorEntriesLikeOrderBy(
+    cursorEntries,
+    rawOrderEntries,
   )
 
-  if (cursorEntries.length === 1 && orderEntries.length === 0) {
+  debugCursor('buildCursorCondition:start', {
+    dialect: d,
+    tableName,
+    alias,
+    skip,
+    model: model?.name,
+    cursorEntries,
+    rawOrderEntries,
+  })
+
+  if (cursorEntries.length === 1 && rawOrderEntries.length === 0) {
     const [field, value] = cursorEntries[0]
     const ph = addAutoScoped(params, value, `cursor.${field}`)
     const c = col(alias, field, model)
+    const op = consumesSkip ? '>' : '>='
+    const condition = `${c} ${op} ${ph}`
+
+    debugCursor('fast-path:no-orderBy', {
+      field,
+      skip,
+      op,
+      condition,
+    })
 
     return {
       cte: '',
-      condition: `${c} >= ${ph}`,
+      condition,
+      consumesSkip,
     }
   }
 
-  if (cursorEntries.length === 1 && orderEntries.length === 1) {
+  if (cursorEntries.length === 1 && rawOrderEntries.length === 1) {
     const [cursorField, cursorValue] = cursorEntries[0]
-    const orderEntry = orderEntries[0]
+    const orderEntry = rawOrderEntries[0]
+
+    debugCursor('fast-path:single-orderBy:check', {
+      cursorField,
+      orderField: orderEntry.field,
+      direction: orderEntry.direction,
+      skip,
+      dialect: d,
+      matches: orderEntry.field === cursorField,
+    })
 
     if (orderEntry.field === cursorField) {
       const ph = addAutoScoped(params, cursorValue, `cursor.${cursorField}`)
       const c = col(alias, cursorField, model)
-      const op = orderEntry.direction === 'asc' ? '>=' : '<='
+      const op = consumesSkip
+        ? buildExclusiveOperator(orderEntry.direction)
+        : buildInclusiveOperator(orderEntry.direction)
+      const condition = `${c} ${op} ${ph}`
+
+      debugCursor('fast-path:single-orderBy:hit', {
+        cursorField,
+        direction: orderEntry.direction,
+        skip,
+        dialect: d,
+        op,
+        condition,
+      })
 
       return {
         cte: '',
-        condition: `${c} ${op} ${ph}`,
+        condition,
+        consumesSkip,
       }
     }
   }
@@ -419,23 +662,31 @@ export function buildCursorCondition(
   assertSafeAlias(cteName)
   assertSafeAlias(srcAlias)
 
-  const deterministicOrderBy = ensureDeterministicOrderByInput({
-    orderBy,
-    model,
-    parseValue: parseOrderByValue,
-  })
+  let finalOrderEntries: OrderByEntry[]
 
-  let finalOrderEntries = normalizeAndValidateOrderBy(
-    orderBy,
-    model!,
-    parseOrderByValue,
-  )
+  if (model) {
+    const deterministicOrderBy = ensureDeterministicOrderByInput({
+      orderBy,
+      model,
+      parseValue: parseOrderByValue,
+    })
+
+    finalOrderEntries = normalizeAndValidateOrderBy(
+      deterministicOrderBy,
+      model,
+      parseOrderByValue,
+    )
+  } else {
+    finalOrderEntries = rawOrderEntries
+  }
+
   if (finalOrderEntries.length === 0) {
     finalOrderEntries = cursorEntries.map(([field]) => ({
       field,
       direction: 'asc' as const,
     }))
   } else {
+    validateCompositeCursorOrder(cursorEntries, finalOrderEntries)
     finalOrderEntries = ensureCursorFieldsInOrder(
       finalOrderEntries,
       cursorEntries,
@@ -443,6 +694,30 @@ export function buildCursorCondition(
   }
 
   assertCursorAndOrderFieldsScalar(model, cursor, finalOrderEntries)
+
+  if (canUseTupleComparison(cursorEntries, finalOrderEntries, d, model)) {
+    const condition = buildTupleComparisonCondition(
+      cursorEntries,
+      finalOrderEntries,
+      alias,
+      params,
+      skip,
+      model,
+    )
+
+    debugCursor('fast-path:tuple-comparison', {
+      dialect: d,
+      skip,
+      finalOrderEntries,
+      condition,
+    })
+
+    return {
+      cte: '',
+      condition,
+      consumesSkip,
+    }
+  }
 
   const { whereSql: cursorWhereSql } = buildCursorFilterParts(
     cursor,
@@ -507,34 +782,31 @@ export function buildCursorCondition(
 
   const exclusive = orClauses.join(SQL_SEPARATORS.CONDITION_OR)
 
-  const outerMatchParts: string[] = []
-  for (const [field, value] of cursorEntries) {
-    const c = col(alias, field, model)
-    if (value === null) {
-      outerMatchParts.push(c + ' IS NULL')
-      continue
-    }
-    const ph = addAutoScoped(params, value, `cursor.outerMatch.${field}`)
-    outerMatchParts.push(c + ' = ' + ph)
-  }
-  const outerCursorMatch =
-    outerMatchParts.length === 1
-      ? outerMatchParts[0]
-      : '(' + outerMatchParts.join(SQL_SEPARATORS.CONDITION_AND) + ')'
+  const equalityAll = finalOrderEntries
+    .map(
+      (e) =>
+        `${col(alias, e.field, model)} = ${cteName}.${quoteColumn(model, e.field)}`,
+    )
+    .join(SQL_SEPARATORS.CONDITION_AND)
+
+  const inclusive = equalityAll
+    ? `(${equalityAll}${SQL_SEPARATORS.CONDITION_OR}${exclusive})`
+    : `(${exclusive})`
+
+  const comparator = consumesSkip ? `(${exclusive})` : inclusive
 
   const condition =
-    '(' +
-    existsExpr +
-    SQL_SEPARATORS.CONDITION_AND +
-    '((' +
-    exclusive +
-    ')' +
-    SQL_SEPARATORS.CONDITION_OR +
-    '(' +
-    outerCursorMatch +
-    ')))'
+    '(' + existsExpr + SQL_SEPARATORS.CONDITION_AND + comparator + ')'
 
-  return { cte, condition }
+  debugCursor('fallback:composite-path', {
+    dialect: d,
+    skip,
+    finalOrderEntries,
+    cteName,
+    condition,
+  })
+
+  return { cte, condition, consumesSkip }
 }
 
 export function buildOrderBy(
@@ -617,8 +889,4 @@ export function getPaginationParams(
   }
 
   return {}
-}
-
-function buildOrderEntries(orderBy: unknown, model: Model): OrderByEntry[] {
-  return normalizeAndValidateOrderBy(orderBy, model, parseOrderByValue)
 }

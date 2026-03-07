@@ -43,7 +43,7 @@ export function getRelationStats(): RelationStatsMap | undefined {
   return globalRelationStats
 }
 
-type IncludeStrategy = 'flat-join' | 'lateral' | 'where-in' | 'fallback'
+type IncludeStrategy = 'flat-join' | 'where-in' | 'fallback'
 
 interface RelationCostNode {
   name: string
@@ -96,6 +96,25 @@ function hasPaginationArgs(value: unknown): boolean {
       ((typeof obj.skip === 'number' && obj.skip > 0) ||
         isDynamicParameter(obj.skip)))
   )
+}
+
+function hasFlatJoinBlockingRootArgs(args: unknown): boolean {
+  if (!isPlainObject(args)) return false
+  const obj = args as Record<string, unknown>
+  if ('cursor' in obj && obj.cursor != null) return true
+  if (Array.isArray(obj.distinct) && (obj.distinct as unknown[]).length > 0)
+    return true
+  if (
+    isPlainObject(obj.include) &&
+    (obj.include as Record<string, unknown>)['_count']
+  )
+    return true
+  if (
+    isPlainObject(obj.select) &&
+    (obj.select as Record<string, unknown>)['_count']
+  )
+    return true
+  return false
 }
 
 function buildCostTree(
@@ -307,7 +326,6 @@ export function pickIncludeStrategy(params: {
   takeValue: number | null
   hasPagination: boolean
   canFlatJoin: boolean
-  canLateral: boolean
   hasChildPagination: boolean
   debug?: boolean
   modelMap?: Map<string, Model>
@@ -317,6 +335,7 @@ export function pickIncludeStrategy(params: {
     model,
     schemas,
     method,
+    args,
     takeValue,
     canFlatJoin,
     hasChildPagination,
@@ -326,14 +345,16 @@ export function pickIncludeStrategy(params: {
 
   if (Object.keys(includeSpec).length === 0) return 'where-in'
 
-  if (canFlatJoin && hasOnlyToOneRelations(includeSpec, model)) {
+  const blocked = hasFlatJoinBlockingRootArgs(args)
+
+  if (canFlatJoin && !blocked && hasOnlyToOneRelations(includeSpec, model)) {
     if (debug)
       console.log(`  [strategy] ${model.name}: all one-to-one → flat-join`)
     return 'flat-join'
   }
 
   const isSingleParent = method === 'findFirst' || method === 'findUnique'
-  if (isSingleParent && canFlatJoin) {
+  if (isSingleParent && canFlatJoin && !blocked) {
     const depth = countIncludeDepth(includeSpec, model, schemas, 0, modelMap)
     if (depth <= SINGLE_PARENT_MAX_FLAT_JOIN_DEPTH) {
       if (debug)
@@ -365,8 +386,8 @@ export function pickIncludeStrategy(params: {
     }
 
     const hasSelectNarrowing =
-      isPlainObject(params.args) &&
-      isPlainObject((params.args as Record<string, unknown>).select)
+      isPlainObject(args) &&
+      isPlainObject((args as Record<string, unknown>).select)
 
     if (hasSelectNarrowing) {
       if (debug)

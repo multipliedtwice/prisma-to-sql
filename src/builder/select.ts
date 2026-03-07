@@ -286,10 +286,12 @@ function buildCursorClauseIfAny(input: {
   tableName: string
   alias: string
   params: ReturnType<typeof createParamStoreFrom>
+  skip: unknown
   dialect: SqlDialect
   model: Model
-}): { cte?: string; condition?: string } {
-  const { cursor, orderBy, tableName, alias, params, dialect, model } = input
+}): { cte?: string; condition?: string; consumesSkip?: boolean } {
+  const { cursor, orderBy, tableName, alias, params, skip, dialect, model } =
+    input
   if (!isNotNullish(cursor)) return {}
   return buildCursorCondition(
     cursor,
@@ -297,6 +299,7 @@ function buildCursorClauseIfAny(input: {
     tableName,
     alias,
     params,
+    skip,
     dialect,
     model,
   )
@@ -364,6 +367,7 @@ function buildSelectSpec(input: {
     tableName,
     alias,
     params,
+    skip,
     dialect,
     model,
   })
@@ -379,6 +383,8 @@ function buildSelectSpec(input: {
     )
   }
 
+  const finalSkip = cursorResult.consumesSkip ? undefined : skip
+
   const orderByJoins = orderByResult.joins
   const combinedWhereJoins: readonly string[] = whereResult.joins
     ? [...whereResult.joins, ...orderByJoins]
@@ -393,7 +399,7 @@ function buildSelectSpec(input: {
     whereClause: whereResult.clause,
     whereJoins: combinedWhereJoins,
     orderBy: orderByResult.sql,
-    pagination: { take, skip },
+    pagination: { take, skip: finalSkip },
     distinct: normalizedArgs.distinct,
     method,
     cursorCte: cursorResult.cte,
@@ -428,6 +434,7 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
   const normalizedArgs = normalizeArgsForDialect(dialectToUse, argsForSql)
 
   validateDistinct(model, normalizedArgs.distinct)
+  validateOrderBy(model, normalizedArgs.orderBy, schemas)
   validateCursor(model, normalizedArgs.cursor, normalizedArgs.distinct)
 
   const spec = buildSelectSpec({

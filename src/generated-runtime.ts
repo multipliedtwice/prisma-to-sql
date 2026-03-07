@@ -1,5 +1,4 @@
 import {
-  transformAggregateRow,
   buildReducerConfig,
   reduceFlatRows,
   normalizeValue,
@@ -11,6 +10,7 @@ import {
   reduceLateralRows,
 } from './builder/select/lateral-reducer'
 import type { LateralRelationMeta } from './builder/select/lateral-join'
+import type { Model } from './types'
 
 export const SQLITE_STMT_CACHE = new WeakMap<any, Map<string, any>>()
 
@@ -61,8 +61,8 @@ export interface PostgresQueryOptions {
   method: string
   requiresReduction: boolean
   includeSpec?: Record<string, any>
-  model: any
-  allModels: readonly any[]
+  model: Model
+  allModels: readonly Model[]
   isLateral?: boolean
   lateralMeta?: LateralRelationMeta[]
 }
@@ -107,29 +107,19 @@ export async function executePostgresQuery(
     return reducer.getResults()
   }
 
-  const needsTransform =
-    method === 'groupBy' || method === 'aggregate' || method === 'count'
-
-  if (!needsTransform) {
-    const results: any[] = []
-    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
-      results.push(row)
-    })
-    return results
-  }
-
-  const rowTransformer = getRowTransformer(method)
+  const rowTransformer = getRowTransformer(method, model)
   const results: any[] = []
 
   if (rowTransformer) {
     await client.unsafe(sql, normalizedParams).forEach((row: any) => {
       results.push(rowTransformer(row))
     })
-  } else {
-    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
-      results.push(row)
-    })
+    return results
   }
+
+  await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+    results.push(row)
+  })
 
   return results
 }
@@ -139,11 +129,9 @@ export function executeSqliteQuery(
   sql: string,
   params: unknown[],
   method: string,
+  model?: Model,
 ): unknown[] {
   const normalizedParams = normalizeParams(params)
-  const shouldTransform =
-    method === 'groupBy' || method === 'aggregate' || method === 'count'
-
   const stmt = getOrPrepareStatement(client, sql)
   const useGet = shouldSqliteUseGet(method)
   const rawResults = useGet
@@ -151,7 +139,8 @@ export function executeSqliteQuery(
     : stmt.all(...normalizedParams)
   const results = Array.isArray(rawResults) ? rawResults : [rawResults]
 
-  return shouldTransform ? results.map(transformAggregateRow) : results
+  const rowTransformer = getRowTransformer(method, model)
+  return rowTransformer ? results.map(rowTransformer) : results
 }
 
 export async function executeRaw(

@@ -33,6 +33,8 @@ import {
   type BenchmarkResult,
 } from '../helpers/benchmark-utils'
 import { normalizeValue } from '../helpers/compare'
+import { withExtensionCapture } from '../helpers/query-capture'
+import { getDatamodel } from '../helpers/datamodel'
 import postgres from 'postgres'
 
 const SHOULD_OUTPUT_JSON = process.env.BENCHMARK_JSON_OUTPUT === '1'
@@ -43,6 +45,94 @@ let seed: SeedResult
 let drizzle: PostgresDrizzleDB
 let pgClient: ReturnType<typeof postgres>
 const benchmarkResults: BenchmarkResult[] = []
+
+function lowerFirst(value: string): string {
+  if (!value) return value
+  return value[0].toLowerCase() + value.slice(1)
+}
+
+function isDecimalLike(value: unknown): boolean {
+  return !!(
+    value &&
+    typeof value === 'object' &&
+    typeof (value as any).toNumber === 'function' &&
+    typeof (value as any).toFixed === 'function'
+  )
+}
+
+type DecimalFixture = {
+  modelName: string
+  accessor: string
+  decimalField: string
+  primaryKey: string
+  primaryKeyValue: unknown
+}
+
+async function findDecimalFixture(): Promise<DecimalFixture | null> {
+  const datamodel = await getDatamodel('postgres')
+
+  for (const model of datamodel.models) {
+    const decimalField = model.fields.find(
+      (field) => !field.relationName && field.type === 'Decimal',
+    )
+    if (!decimalField) continue
+
+    const primaryKeyField =
+      model.fields.find((field) => !field.relationName && field.isId) ??
+      model.fields.find((field) => !field.relationName && field.isUnique)
+
+    if (!primaryKeyField) continue
+
+    const accessor = lowerFirst(model.name)
+    const delegate = (db.prisma as any)[accessor]
+    if (!delegate || typeof delegate.findFirst !== 'function') continue
+
+    try {
+      const row = await delegate.findFirst({
+        where: {
+          [decimalField.name]: {
+            not: null,
+          },
+        },
+        select: {
+          [primaryKeyField.name]: true,
+        },
+      })
+
+      if (row && row[primaryKeyField.name] != null) {
+        return {
+          modelName: model.name,
+          accessor,
+          decimalField: decimalField.name,
+          primaryKey: primaryKeyField.name,
+          primaryKeyValue: row[primaryKeyField.name],
+        }
+      }
+    } catch {}
+  }
+
+  return null
+}
+
+function expectDecimalAggregateBuckets(value: any, decimalField: string): void {
+  expect(value).toBeTruthy()
+
+  if (value._sum?.[decimalField] != null) {
+    expect(isDecimalLike(value._sum[decimalField])).toBe(true)
+  }
+
+  if (value._avg?.[decimalField] != null) {
+    expect(isDecimalLike(value._avg[decimalField])).toBe(true)
+  }
+
+  if (value._min?.[decimalField] != null) {
+    expect(isDecimalLike(value._min[decimalField])).toBe(true)
+  }
+
+  if (value._max?.[decimalField] != null) {
+    expect(isDecimalLike(value._max[decimalField])).toBe(true)
+  }
+}
 
 describe('Prisma Parity E2E - PostgreSQL', () => {
   beforeAll(async () => {
@@ -676,6 +766,123 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
   })
 
   describe('aggregate', () => {
+    it('sum/avg over Decimal field returns Decimal-like, not number', async () => {
+      const project = await db.prisma.project.findFirst({
+        where: { budget: { not: null } },
+        select: { id: true },
+      })
+      if (!project) return
+
+      const prismaResult = await db.prisma.project.aggregate({
+        where: { id: project.id },
+        _sum: { budget: true },
+        _avg: { budget: true },
+      })
+
+      const extendedResult = await db.extended.project.aggregate({
+        where: { id: project.id },
+        _sum: { budget: true },
+        _avg: { budget: true },
+      })
+
+      for (const bucket of ['_sum', '_avg'] as const) {
+        const prismaVal = (prismaResult as any)[bucket]?.budget
+        const extendedVal = (extendedResult as any)[bucket]?.budget
+
+        if (prismaVal != null) {
+          expect(typeof prismaVal).not.toBe('number')
+          expect(isDecimalLike(prismaVal)).toBe(true)
+        }
+
+        if (extendedVal != null) {
+          expect(typeof extendedVal).not.toBe('number')
+          expect(isDecimalLike(extendedVal)).toBe(true)
+        }
+
+        if (prismaVal != null && extendedVal != null) {
+          expect(extendedVal.toFixed(2)).toBe(prismaVal.toFixed(2))
+        }
+      }
+    })
+
+    it('min/max over Decimal field returns Decimal-like, not number', async () => {
+      const projects = await db.prisma.project.findMany({
+        where: { budget: { not: null } },
+        select: { id: true },
+        take: 5,
+      })
+      if (projects.length === 0) return
+
+      const ids = projects.map((p: any) => p.id)
+
+      const prismaResult = await db.prisma.project.aggregate({
+        where: { id: { in: ids } },
+        _min: { budget: true },
+        _max: { budget: true },
+      })
+
+      const extendedResult = await db.extended.project.aggregate({
+        where: { id: { in: ids } },
+        _min: { budget: true },
+        _max: { budget: true },
+      })
+
+      for (const bucket of ['_min', '_max'] as const) {
+        const prismaVal = (prismaResult as any)[bucket]?.budget
+        const extendedVal = (extendedResult as any)[bucket]?.budget
+
+        if (prismaVal != null) {
+          expect(isDecimalLike(prismaVal)).toBe(true)
+        }
+
+        if (extendedVal != null) {
+          expect(isDecimalLike(extendedVal)).toBe(true)
+        }
+
+        if (prismaVal != null && extendedVal != null) {
+          expect(extendedVal.toNumber()).toBe(prismaVal.toNumber())
+        }
+      }
+    })
+
+    it('all aggregate buckets over Decimal field match Prisma types exactly', async () => {
+      const prismaResult = await db.prisma.project.aggregate({
+        where: { budget: { not: null } },
+        _count: { _all: true },
+        _sum: { budget: true },
+        _avg: { budget: true },
+        _min: { budget: true },
+        _max: { budget: true },
+      })
+
+      const extendedResult = await db.extended.project.aggregate({
+        where: { budget: { not: null } },
+        _count: { _all: true },
+        _sum: { budget: true },
+        _avg: { budget: true },
+        _min: { budget: true },
+        _max: { budget: true },
+      })
+
+      expect((extendedResult as any)._count._all).toBe(
+        (prismaResult as any)._count._all,
+      )
+
+      for (const bucket of ['_sum', '_avg', '_min', '_max'] as const) {
+        const prismaVal = (prismaResult as any)[bucket]?.budget
+        const extendedVal = (extendedResult as any)[bucket]?.budget
+
+        if (prismaVal == null) {
+          expect(extendedVal).toBeNull()
+          continue
+        }
+
+        expect(isDecimalLike(extendedVal)).toBe(true)
+        expect(typeof extendedVal).toBe(typeof prismaVal)
+        expect(extendedVal.toNumber()).toBe(prismaVal.toNumber())
+      }
+    })
+
     it('count all', () =>
       runParityTest(
         db,
@@ -763,6 +970,136 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
             _max: { position: true },
           }),
       ))
+
+    it('aggregate decimal buckets keep Decimal-like values for Project.budget', async () => {
+      const project = await db.prisma.project.findFirst({
+        where: { budget: { not: null } },
+        select: { id: true },
+      })
+      if (!project) return
+
+      const args = {
+        where: { id: project.id },
+        _sum: { budget: true },
+        _avg: { budget: true },
+        _min: { budget: true },
+        _max: { budget: true },
+      }
+
+      await runParityTest(
+        db,
+        benchmarkResults,
+        'aggregate decimal typing project budget',
+        'Project',
+        { method: 'aggregate', ...args },
+        () => db.prisma.project.aggregate(args),
+        {
+          benchmark: false,
+          verifyRaw: ({ prismaRaw, extendedRaw }) => {
+            for (const result of [prismaRaw as any, extendedRaw as any]) {
+              if (result._sum?.budget != null)
+                expect(isDecimalLike(result._sum.budget)).toBe(true)
+              if (result._avg?.budget != null)
+                expect(isDecimalLike(result._avg.budget)).toBe(true)
+              if (result._min?.budget != null)
+                expect(isDecimalLike(result._min.budget)).toBe(true)
+              if (result._max?.budget != null)
+                expect(isDecimalLike(result._max.budget)).toBe(true)
+            }
+          },
+        },
+      )
+    })
+
+    it('groupBy decimal buckets keep Decimal-like values for Project.budget', async () => {
+      const project = await db.prisma.project.findFirst({
+        where: { budget: { not: null } },
+        select: { id: true, status: true },
+      })
+      if (!project) return
+
+      const args = {
+        by: ['status'] as const,
+        where: { id: project.id },
+        _sum: { budget: true },
+        _avg: { budget: true },
+        _min: { budget: true },
+        _max: { budget: true },
+        orderBy: { status: 'asc' as const },
+      }
+
+      await runParityTest(
+        db,
+        benchmarkResults,
+        'groupBy decimal typing project budget',
+        'Project',
+        { method: 'groupBy', ...args },
+        () => db.prisma.project.groupBy(args),
+        {
+          benchmark: false,
+          sortField: 'status',
+          verifyRaw: ({ prismaRaw, extendedRaw }) => {
+            const prismaRows = Array.isArray(prismaRaw)
+              ? prismaRaw
+              : [prismaRaw]
+            const extendedRows = Array.isArray(extendedRaw)
+              ? extendedRaw
+              : [extendedRaw]
+
+            for (const row of [...prismaRows, ...extendedRows] as any[]) {
+              if (row?._sum?.budget != null)
+                expect(isDecimalLike(row._sum.budget)).toBe(true)
+              if (row?._avg?.budget != null)
+                expect(isDecimalLike(row._avg.budget)).toBe(true)
+              if (row?._min?.budget != null)
+                expect(isDecimalLike(row._min.budget)).toBe(true)
+              if (row?._max?.budget != null)
+                expect(isDecimalLike(row._max.budget)).toBe(true)
+            }
+          },
+        },
+      )
+    })
+
+    it('decimal aggregate buckets keep Decimal-like values', async () => {
+      const fixture = await findDecimalFixture()
+      if (!fixture) return
+
+      const delegate = (db.prisma as any)[fixture.accessor]
+      const args: any = {
+        where: {
+          [fixture.primaryKey]: fixture.primaryKeyValue,
+        },
+        _sum: {
+          [fixture.decimalField]: true,
+        },
+        _avg: {
+          [fixture.decimalField]: true,
+        },
+        _min: {
+          [fixture.decimalField]: true,
+        },
+        _max: {
+          [fixture.decimalField]: true,
+        },
+      }
+
+      await runParityTest(
+        db,
+        benchmarkResults,
+        'aggregate decimal typing',
+        fixture.modelName,
+        { method: 'aggregate', ...args },
+        () => delegate.aggregate(args),
+        {
+          benchmark: false,
+          verifyRaw: ({ prismaRaw, extendedRaw }) => {
+            expectDecimalAggregateBuckets(prismaRaw, fixture.decimalField)
+            expectDecimalAggregateBuckets(extendedRaw, fixture.decimalField)
+          },
+        },
+      )
+    })
   })
 
   describe('groupBy', () => {
@@ -985,6 +1322,65 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           sortField: 'status',
         },
       ))
+
+    it('decimal groupBy aggregate buckets keep Decimal-like values', async () => {
+      const fixture = await findDecimalFixture()
+      if (!fixture) return
+
+      const delegate = (db.prisma as any)[fixture.accessor]
+      const args: any = {
+        by: [fixture.primaryKey],
+        where: {
+          [fixture.primaryKey]: fixture.primaryKeyValue,
+        },
+        _sum: {
+          [fixture.decimalField]: true,
+        },
+        _avg: {
+          [fixture.decimalField]: true,
+        },
+        _min: {
+          [fixture.decimalField]: true,
+        },
+        _max: {
+          [fixture.decimalField]: true,
+        },
+        orderBy: {
+          [fixture.primaryKey]: 'asc',
+        },
+      }
+
+      await runParityTest(
+        db,
+        benchmarkResults,
+        'groupBy decimal typing',
+        fixture.modelName,
+        { method: 'groupBy', ...args },
+        () => delegate.groupBy(args),
+        {
+          benchmark: false,
+          sortField: fixture.primaryKey,
+          verifyRaw: ({ prismaRaw, extendedRaw }) => {
+            const prismaRow = Array.isArray(prismaRaw)
+              ? prismaRaw[0]
+              : prismaRaw
+            const extendedRow = Array.isArray(extendedRaw)
+              ? extendedRaw[0]
+              : extendedRaw
+
+            expect(prismaRow?.[fixture.primaryKey]).toBe(
+              fixture.primaryKeyValue,
+            )
+            expect(extendedRow?.[fixture.primaryKey]).toBe(
+              fixture.primaryKeyValue,
+            )
+
+            expectDecimalAggregateBuckets(prismaRow, fixture.decimalField)
+            expectDecimalAggregateBuckets(extendedRow, fixture.decimalField)
+          },
+        },
+      )
+    })
   })
 
   describe('include (nested)', () => {
@@ -1786,34 +2182,197 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
   })
 
   describe('cursor pagination', () => {
-    it('basic cursor', async () => {
+    it('single-field cursor SQL is inclusive without skip', async () => {
       const firstTask = await db.prisma.task.findFirst({
         orderBy: { id: 'asc' },
+        select: { id: true },
       })
       if (!firstTask) return
+
+      const prismaResult = await db.prisma.task.findMany({
+        cursor: { id: firstTask.id },
+        take: 5,
+        orderBy: { id: 'asc' },
+      })
+
+      const captured = await withExtensionCapture(() =>
+        db.extended.task.findMany({
+          cursor: { id: firstTask.id },
+          take: 5,
+          orderBy: { id: 'asc' },
+        }),
+      )
+
+      const sqlText = captured.queries.map((q) => q.sql).join('\n')
+
+      expect(normalizeValue(captured.result)).toEqual(
+        normalizeValue(prismaResult),
+      )
+      expect(sqlText.includes('>=') || sqlText.includes('<=')).toBe(true)
+    })
+
+    it('single-field cursor SQL uses strict comparator with skip', async () => {
+      const firstTask = await db.prisma.task.findFirst({
+        orderBy: { id: 'asc' },
+        select: { id: true },
+      })
+      if (!firstTask) return
+
+      const prismaResult = await db.prisma.task.findMany({
+        cursor: { id: firstTask.id },
+        skip: 1,
+        take: 5,
+        orderBy: { id: 'asc' },
+      })
+
+      const captured = await withExtensionCapture(() =>
+        db.extended.task.findMany({
+          cursor: { id: firstTask.id },
+          skip: 1,
+          take: 5,
+          orderBy: { id: 'asc' },
+        }),
+      )
+
+      const sqlText = captured.queries.map((q) => q.sql).join('\n')
+
+      expect(normalizeValue(captured.result)).toEqual(
+        normalizeValue(prismaResult),
+      )
+      expect(sqlText.includes('>=')).toBe(false)
+      expect(sqlText.includes('<=')).toBe(false)
+      expect(sqlText.includes('>') || sqlText.includes('<')).toBe(true)
+      expect(/\bOFFSET\b/i.test(sqlText)).toBe(false)
+    })
+
+    it('composite cursor with tuple comparison (id + projectId)', async () => {
+      const tasks = await db.prisma.task.findMany({
+        orderBy: [{ projectId: 'asc' }, { id: 'asc' }],
+        take: 5,
+        select: { id: true, projectId: true },
+      })
+      if (tasks.length < 3) return
+
+      const cursorRow = tasks[2]
 
       await runParityTest(
         db,
         benchmarkResults,
-        'cursor pagination',
+        'cursor composite tuple',
         'Task',
         {
           method: 'findMany',
-          cursor: { id: firstTask.id },
+          cursor: { id: cursorRow.id },
+          orderBy: [{ projectId: 'asc' }, { id: 'asc' }],
           take: 5,
-          skip: 1,
-          orderBy: { id: 'asc' },
         },
         () =>
           db.prisma.task.findMany({
-            cursor: { id: firstTask.id },
+            cursor: { id: cursorRow.id },
+            orderBy: [{ projectId: 'asc' }, { id: 'asc' }],
             take: 5,
-            skip: 1,
-            orderBy: { id: 'asc' },
           }),
+        { sortField: undefined },
+      )
+    })
+
+    it('composite cursor with skip consumes skip into strict comparison', async () => {
+      const tasks = await db.prisma.task.findMany({
+        orderBy: [{ projectId: 'asc' }, { id: 'asc' }],
+        take: 5,
+        select: { id: true, projectId: true },
+      })
+      if (tasks.length < 3) return
+
+      const cursorRow = tasks[1]
+
+      const prismaResult = await db.prisma.task.findMany({
+        cursor: { id: cursorRow.id },
+        skip: 1,
+        orderBy: [{ projectId: 'asc' }, { id: 'asc' }],
+        take: 5,
+      })
+
+      const captured = await withExtensionCapture(() =>
+        db.extended.task.findMany({
+          cursor: { id: cursorRow.id },
+          skip: 1,
+          orderBy: [{ projectId: 'asc' }, { id: 'asc' }],
+          take: 5,
+        }),
+      )
+
+      expect(normalizeValue(captured.result)).toEqual(
+        normalizeValue(prismaResult),
+      )
+
+      const sqlText = captured.queries.map((q) => q.sql).join('\n')
+      expect(/\bOFFSET\b/i.test(sqlText)).toBe(false)
+    })
+
+    it('composite cursor desc direction', async () => {
+      const tasks = await db.prisma.task.findMany({
+        orderBy: [{ projectId: 'desc' }, { id: 'desc' }],
+        take: 5,
+        select: { id: true, projectId: true },
+      })
+      if (tasks.length < 3) return
+
+      const cursorRow = tasks[2]
+
+      await runParityTest(
+        db,
+        benchmarkResults,
+        'cursor composite desc',
+        'Task',
         {
-          sortField: undefined,
+          method: 'findMany',
+          cursor: { id: cursorRow.id },
+          orderBy: [{ projectId: 'desc' }, { id: 'desc' }],
+          take: 5,
         },
+        () =>
+          db.prisma.task.findMany({
+            cursor: { id: cursorRow.id },
+            orderBy: [{ projectId: 'desc' }, { id: 'desc' }],
+            take: 5,
+          }),
+        { sortField: undefined },
+      )
+    })
+
+    it('cursor fields are prefix of longer orderBy', async () => {
+      const tasks = await db.prisma.task.findMany({
+        orderBy: [{ projectId: 'asc' }, { id: 'asc' }, { createdAt: 'desc' }],
+        take: 5,
+        select: { id: true, projectId: true },
+      })
+      if (tasks.length < 3) return
+
+      const cursorRow = tasks[2]
+
+      await runParityTest(
+        db,
+        benchmarkResults,
+        'cursor prefix of orderBy',
+        'Task',
+        {
+          method: 'findMany',
+          cursor: { id: cursorRow.id },
+          orderBy: [{ projectId: 'asc' }, { id: 'asc' }, { createdAt: 'desc' }],
+          take: 5,
+        },
+        () =>
+          db.prisma.task.findMany({
+            cursor: { id: cursorRow.id },
+            orderBy: [
+              { projectId: 'asc' },
+              { id: 'asc' },
+              { createdAt: 'desc' },
+            ],
+            take: 5,
+          }),
+        { sortField: undefined },
       )
     })
   })
@@ -2256,6 +2815,7 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
       )
     })
   })
+
   describe('budget calibration probes', () => {
     it('depth-1 low-fan', () =>
       runParityTest(

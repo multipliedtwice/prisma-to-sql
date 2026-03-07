@@ -28,6 +28,7 @@ import { isListRelation } from '../shared/field-type-utils'
 import { readSkipTake } from '../pagination'
 import { maybeReverseNegativeTake } from '../shared/negative-take-utils'
 import { resolveIncludeRelations } from '../shared/include-tree-walker'
+import { scanSqlPlaceholders } from '../shared/sql-param-scanner'
 
 interface LateralJoinBuildResult {
   sql: string
@@ -82,34 +83,34 @@ function reindexWhereParams(
 ): string {
   if (!whereClause || whereClause === '1=1') return ''
 
-  const refSet = new Set<number>()
-  const re = /\$(\d+)/g
-  let match: RegExpExecArray | null
-  while ((match = re.exec(whereClause)) !== null) {
-    refSet.add(Number(match[1]))
-  }
-
-  if (refSet.size === 0) return whereClause
-
   const allParams: readonly unknown[] = Array.isArray(specParams)
     ? specParams
     : typeof (specParams as any).snapshot === 'function'
       ? (specParams as ParamStore).snapshot().params
       : []
 
-  const refs = Array.from(refSet).sort((a, b) => a - b)
   const indexMap = new Map<number, number>()
 
-  for (const oldIdx of refs) {
-    collector.values.push(allParams[oldIdx - 1])
-    indexMap.set(oldIdx, collector.values.length)
-  }
+  const clean = scanSqlPlaceholders(
+    whereClause,
+    (oldIndex) => {
+      const existing = indexMap.get(oldIndex)
+      if (existing !== undefined) return `$${existing}`
 
-  let clean = whereClause
-  const sorted = Array.from(indexMap.entries()).sort((a, b) => b[0] - a[0])
-  for (const [oldIdx, newIdx] of sorted) {
-    clean = clean.split(`$${oldIdx}`).join(`$${newIdx}`)
-  }
+      const pos = oldIndex - 1
+      if (pos >= allParams.length) {
+        throw new Error(
+          `Param placeholder $${oldIndex} exceeds params length (${allParams.length})`,
+        )
+      }
+
+      collector.values.push(allParams[pos])
+      const newIndex = collector.values.length
+      indexMap.set(oldIndex, newIndex)
+      return `$${newIndex}`
+    },
+    { pgAware: true, strictPlaceholders: true },
+  )
 
   return clean
 }

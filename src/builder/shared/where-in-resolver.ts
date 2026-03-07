@@ -13,8 +13,84 @@ import {
   ensureOrderByPk,
   initRelationPlaceholders,
 } from './where-in-utils'
+import { withValidationSuppressed } from './validators/sql-validators'
+import { resolvePrerenderedParams } from './prerendered-where-in'
 
 export type ExecuteFn = (sql: string, params: unknown[]) => Promise<any[]>
+
+async function resolveWithPrerendered(
+  segment: WhereInSegment,
+  parentRows: any[],
+  allModels: readonly Model[],
+  modelMap: Map<string, Model>,
+  dialect: 'postgres' | 'sqlite',
+  execute: ExecuteFn,
+  depth: number,
+): Promise<boolean> {
+  const pre = segment.prerendered
+  if (!pre) return false
+
+  const parentIds = parentRows
+    .map((r) => r[segment.parentKeyFieldName])
+    .filter((v) => v != null)
+
+  if (parentIds.length === 0) return true
+
+  const uniqueIds = [...new Set(parentIds)]
+
+  const resolvedParams = resolvePrerenderedParams(
+    pre.paramMappings,
+    pre.dynamicInName,
+    uniqueIds,
+    dialect,
+  )
+
+  if (!resolvedParams) return false
+
+  let children = await execute(pre.sql, resolvedParams)
+
+  if (pre.requiresReduction && pre.reducerConfig) {
+    children = reduceFlatRows(children, pre.reducerConfig)
+  }
+
+  if (pre.nestedSegments.length > 0 && children.length > 0) {
+    for (const child of children) {
+      initRelationPlaceholders(child, pre.nestedSegments)
+    }
+
+    await resolveSegments(
+      pre.nestedSegments,
+      children,
+      allModels,
+      modelMap,
+      dialect,
+      execute,
+      depth + 1,
+    )
+
+    if (pre.injectedParentKeys.length > 0) {
+      for (const child of children) {
+        for (const key of pre.injectedParentKeys) {
+          delete child[key]
+        }
+      }
+    }
+  }
+
+  const parentKeyIndex = buildParentKeyIndex(
+    parentRows,
+    segment.parentKeyFieldName,
+  )
+  stitchChildrenToParents(children, segment, parentKeyIndex)
+
+  if (pre.needsStripFk) {
+    for (const child of children) {
+      delete child[segment.fkFieldName]
+    }
+  }
+
+  return true
+}
 
 export async function resolveSingleSegment(
   segment: WhereInSegment,
@@ -26,6 +102,19 @@ export async function resolveSingleSegment(
   depth: number,
 ): Promise<void> {
   if (depth > MAX_RECURSIVE_DEPTH) return
+
+  if (segment.prerendered) {
+    const handled = await resolveWithPrerendered(
+      segment,
+      parentRows,
+      allModels,
+      modelMap,
+      dialect,
+      execute,
+      depth,
+    )
+    if (handled) return
+  }
 
   const childModel = modelMap.get(segment.childModelName)
   if (!childModel) return
@@ -57,12 +146,14 @@ export async function resolveSingleSegment(
     dialect,
   })
 
-  const result = buildSQL(
-    childModel,
-    allModels as Model[],
-    'findMany',
-    childPlan.filteredArgs,
-    dialect,
+  const result = withValidationSuppressed(() =>
+    buildSQL(
+      childModel,
+      allModels as Model[],
+      'findMany',
+      childPlan.filteredArgs,
+      dialect,
+    ),
   )
 
   let children = await execute(result.sql, result.params as unknown[])

@@ -352,9 +352,18 @@ export async function runParityTest<T>(
     sortField?: string
     drizzleQuery?: () => Promise<unknown[]>
     transactionOps?: Array<{ model: string; method: string; args: any }>
+    verifyRaw?: (payload: {
+      prismaRaw: T
+      extendedRaw: T
+    }) => Promise<void> | void
   } = {},
 ): Promise<void> {
-  const { benchmark = true, sortField = 'id', transactionOps } = options
+  const {
+    benchmark = true,
+    sortField = 'id',
+    transactionOps,
+    verifyRaw,
+  } = options
 
   const extendedQuery = async () => {
     if (transactionOps) {
@@ -372,6 +381,13 @@ export async function runParityTest<T>(
       extendedQuery(),
       prismaQuery(),
     ])
+
+    if (verifyRaw) {
+      await verifyRaw({
+        prismaRaw: prismaRaw as T,
+        extendedRaw: extendedRaw as T,
+      })
+    }
 
     const sortedPrisma =
       !transactionOps && sortField

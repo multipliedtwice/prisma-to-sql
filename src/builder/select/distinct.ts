@@ -237,7 +237,10 @@ export function buildSqliteDistinctQuery(
 
   const scalarNames = parseSimpleScalarSelect(spec.select, from.alias)
   const includeNames = includes.map((i) => i.name)
-  const hasCount = Boolean(spec.args?.select?.[COUNT_SELECT_KEY])
+  const hasCount = Boolean(
+    spec.args?.select?.[COUNT_SELECT_KEY] ??
+      spec.args?.include?.[COUNT_SELECT_KEY],
+  )
 
   const outerSelectCols = buildOutputColumns(
     scalarNames,

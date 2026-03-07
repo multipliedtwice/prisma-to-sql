@@ -146,7 +146,13 @@ function tryCountAll(
   dialect: SqlDialect,
 ): SqlResult | null {
   const where = args.where
-  if ((where && Object.keys(where).length > 0) || args.select || args.skip) {
+  if (
+    (where && Object.keys(where).length > 0) ||
+    args.select ||
+    args.skip ||
+    args.take != null ||
+    args.distinct
+  ) {
     return null
   }
 

@@ -24,7 +24,6 @@ import {
   pickIncludeStrategy,
 } from './strategy-estimator'
 import { buildFlatJoinSql, canUseFlatJoinForAll } from './flat-join'
-import { buildLateralJoinSql, canUseLateralJoin } from './lateral-join'
 import {
   getOrderByEntries,
   renderOrderBySql,
@@ -37,6 +36,18 @@ import { joinNonEmpty } from '../shared/array-utils'
 import { getOrCreateModelMap } from '../shared/include-tree-walker'
 
 const ALWAYS_TRUE_CONDITION = '1=1'
+
+const DEBUG_CURSOR =
+  typeof process !== 'undefined' && process.env?.DEBUG_CURSOR === '1'
+
+function debugCursor(label: string, payload?: Record<string, unknown>): void {
+  if (!DEBUG_CURSOR) return
+  if (payload) {
+    console.error(`[cursor-assembly] ${label}`, payload)
+    return
+  }
+  console.error(`[cursor-assembly] ${label}`)
+}
 
 function buildSelectList(baseSelect: string, extraCols: string): string {
   const base = baseSelect.trim()
@@ -324,6 +335,18 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
     args,
   } = spec
 
+  debugCursor('constructFinalSql:start', {
+    method,
+    dialect,
+    model: model.name,
+    from: from.table,
+    alias: from.alias,
+    hasCursorCte: Boolean(cursorCte),
+    cursorClause,
+    orderBy,
+    pagination,
+  })
+
   const useWindowDistinct = hasWindowDistinct(spec)
   assertDistinctAllowed(method, useWindowDistinct)
 
@@ -346,7 +369,6 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
       false,
       modelMap,
     )
-    const canLateral = canUseLateralJoin(includeSpec, model, schemas, modelMap)
     const hasChildPag = hasChildPaginationAnywhere(
       includeSpec,
       model,
@@ -364,7 +386,6 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
       takeValue,
       hasPagination,
       canFlatJoin,
-      canLateral,
       hasChildPagination: hasChildPag,
       modelMap,
     })
@@ -382,26 +403,9 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
         return {
           sql: flatResult.sql,
           params: flatResult.params,
-          paramMappings: flatResult.params.map((v: any, i: number) => ({
-            index: i + 1,
-            value: v,
-          })),
+          paramMappings: flatResult.paramMappings,
           requiresReduction: true,
           includeSpec: flatResult.includeSpec,
-        }
-      }
-    }
-
-    if (strategy === 'lateral') {
-      const lateralResult = buildLateralJoinSql(spec)
-      if (lateralResult.sql) {
-        return {
-          sql: lateralResult.sql,
-          params: lateralResult.params,
-          requiresReduction: true,
-          includeSpec: lateralResult.includeSpec,
-          isLateral: true,
-          lateralMeta: lateralResult.lateralMeta,
         }
       }
     }
@@ -415,6 +419,9 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
     const spec2 = withCountJoins(spec, allExtraJoins, whereJoins)
     let sql = buildSqliteDistinctQuery(spec2, selectWithIncludes).trim()
     sql = appendPagination(sql, spec)
+    debugCursor('constructFinalSql:sqlite-distinct', {
+      sqlPreview: sql.slice(0, 500),
+    })
     return finalizeSql(sql, params, dialect)
   }
 
@@ -468,5 +475,10 @@ export function constructFinalSql(spec: SelectQuerySpec): SqlResult {
 
   let sql = parts.join(' ').trim()
   sql = appendPagination(sql, spec)
+
+  debugCursor('constructFinalSql:final', {
+    sqlPreview: sql.slice(0, 1000),
+  })
+
   return finalizeSql(sql, params, dialect)
 }

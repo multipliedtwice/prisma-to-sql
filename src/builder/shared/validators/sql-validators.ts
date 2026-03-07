@@ -11,6 +11,22 @@ import {
 } from './type-guards'
 import { SqlDialect } from '../../../sql-builder-dialect'
 
+let validationSuppressed = false
+
+export function withValidationSuppressed<T>(fn: () => T): T {
+  const prev = validationSuppressed
+  validationSuppressed = true
+  try {
+    return fn()
+  } finally {
+    validationSuppressed = prev
+  }
+}
+
+function shouldSkipValidation(): boolean {
+  return IS_PRODUCTION || validationSuppressed
+}
+
 export function isValidWhereClause(clause: string): boolean {
   return (
     isNotNullish(clause) &&
@@ -26,7 +42,7 @@ function sqlPreview(sql: string): string {
 }
 
 export function validateSelectQuery(sql: string): void {
-  if (IS_PRODUCTION) return
+  if (shouldSkipValidation()) return
 
   if (!hasValidContent(sql)) {
     throw new Error('CRITICAL: Generated empty SQL query')
@@ -125,7 +141,7 @@ export function validateParamConsistency(
   sql: string,
   params: readonly unknown[],
 ): void {
-  if (IS_PRODUCTION) return
+  if (shouldSkipValidation()) return
 
   const paramLen = params.length
   const scan = scanDollarPlaceholders(sql, paramLen)
@@ -173,7 +189,7 @@ function validateQuestionMarkConsistency(
   sql: string,
   params: readonly unknown[],
 ): void {
-  if (IS_PRODUCTION) return
+  if (shouldSkipValidation()) return
 
   const expected = params.length
   const found = countQuestionMarkPlaceholders(sql)
@@ -190,7 +206,7 @@ export function validateParamConsistencyByDialect(
   params: readonly unknown[],
   dialect: SqlDialect,
 ): void {
-  if (IS_PRODUCTION) return
+  if (shouldSkipValidation()) return
 
   if (dialect === 'postgres') {
     validateParamConsistency(sql, params)

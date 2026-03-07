@@ -37,7 +37,6 @@ export function buildWhereClause(
     dialect,
     params,
     depth: 0,
-    seenObjects: new WeakSet<object>(),
   }
 
   const result = whereBuilderInstance.build(where, ctx)

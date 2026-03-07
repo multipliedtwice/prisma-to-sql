@@ -1,4 +1,4 @@
-import { describe, it, beforeAll, afterAll } from 'vitest'
+import { describe, it, beforeAll, afterAll, expect } from 'vitest'
 import {
   createTestDB,
   type TestDB,
@@ -33,6 +33,7 @@ import {
   type BenchmarkResult,
 } from '../helpers/benchmark-utils'
 import Database from 'better-sqlite3'
+import { withExtensionCapture } from '../helpers/query-capture'
 
 const SHOULD_OUTPUT_JSON = process.env.BENCHMARK_JSON_OUTPUT === '1'
 const PRISMA_VERSION = parseInt(process.env.PRISMA_VERSION || '6', 10)
@@ -1684,35 +1685,46 @@ describe('Prisma Parity E2E - SQLite', () => {
   })
 
   describe('cursor pagination', () => {
-    it('basic cursor', async () => {
+    it('cursor without skip includes cursor row (inclusive)', async () => {
       const firstTask = await db.prisma.task.findFirst({
         orderBy: { id: 'asc' },
+        select: { id: true },
       })
       if (!firstTask) return
 
-      await runParityTest(
-        db,
-        benchmarkResults,
-        'cursor pagination',
-        'Task',
-        {
-          method: 'findMany',
+      const captured = await withExtensionCapture(() =>
+        db.extended.task.findMany({
           cursor: { id: firstTask.id },
           take: 5,
-          skip: 1,
           orderBy: { id: 'asc' },
-        },
-        () =>
-          db.prisma.task.findMany({
-            cursor: { id: firstTask.id },
-            take: 5,
-            skip: 1,
-            orderBy: { id: 'asc' },
-          }),
-        {
-          sortField: undefined,
-        },
+        }),
       )
+
+      const sqlText = captured.queries.map((q) => q.sql).join('\n')
+
+      expect(sqlText.includes('>=')).toBe(true)
+    })
+
+    it('cursor with skip uses strict comparator', async () => {
+      const firstTask = await db.prisma.task.findFirst({
+        orderBy: { id: 'asc' },
+        select: { id: true },
+      })
+      if (!firstTask) return
+
+      const captured = await withExtensionCapture(() =>
+        db.extended.task.findMany({
+          cursor: { id: firstTask.id },
+          skip: 1,
+          take: 5,
+          orderBy: { id: 'asc' },
+        }),
+      )
+
+      const sqlText = captured.queries.map((q) => q.sql).join('\n')
+
+      expect(sqlText.includes('>=')).toBe(false)
+      expect(sqlText.includes('>')).toBe(true)
     })
   })
 

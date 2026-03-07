@@ -7,8 +7,23 @@ import {
   pickIncludeStrategy,
   hasChildPaginationAnywhere,
 } from './strategy-estimator'
-import { canUseLateralJoin } from './lateral-join'
 import { getOrCreateModelMap } from '../shared/include-tree-walker'
+
+export interface PrerenderedWhereIn {
+  sql: string
+  paramMappings: readonly {
+    index: number
+    value?: unknown
+    dynamicName?: string
+  }[]
+  dynamicInName: string
+  needsStripFk: boolean
+  requiresReduction: boolean
+  includeSpec: Record<string, any> | null
+  reducerConfig: any | null
+  nestedSegments: WhereInSegment[]
+  injectedParentKeys: string[]
+}
 
 export interface WhereInSegment {
   relationName: string
@@ -19,6 +34,7 @@ export interface WhereInSegment {
   isList: boolean
   perParentTake?: number
   perParentSkip?: number
+  prerendered?: PrerenderedWhereIn
 }
 
 interface QueryPlan {
@@ -187,12 +203,6 @@ export function planQueryStrategy(params: {
         false,
         modelMap,
       )
-      const canLateral = canUseLateralJoin(
-        includeSpec,
-        model,
-        allModels,
-        modelMap,
-      )
       const hasChildPag = hasChildPaginationAnywhere(
         includeSpec,
         model,
@@ -210,7 +220,6 @@ export function planQueryStrategy(params: {
         takeValue,
         hasPagination,
         canFlatJoin,
-        canLateral,
         hasChildPagination: hasChildPag,
         debug,
         modelMap,

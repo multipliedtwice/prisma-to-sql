@@ -3,7 +3,7 @@ import type { BatchQuery } from './batch-builder'
 
 import { transformQueryResults } from '../result-transformers'
 
-const COUNT_RESULT_KEY_PREFIX = '_count_'
+const COUNT_RESULT_KEY_PREFIX = 'count_'
 const DATETIME_FIELD_TYPE = 'DateTime'
 const COUNT_PROPERTY = 'count'
 const UNDERSCORE_COUNT_PROPERTY = '_count'

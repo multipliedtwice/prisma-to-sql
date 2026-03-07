@@ -79,6 +79,8 @@ const HAVING_FIELD_FIRST_AGG_KEYS: readonly AggregateKey[] = Object.freeze([
   '_max',
 ] as const)
 
+const TEXT_CAST_TYPES = new Set(['Decimal', 'BigInt', 'Decimal?', 'BigInt?'])
+
 function hasAnyOwnKey(obj: Record<string, unknown>): boolean {
   for (const k in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, k)) return true
@@ -112,6 +114,18 @@ function assertHavingOp(op: string): void {
       `Unsupported HAVING operator '${op}'. Allowed: ${[...HAVING_ALLOWED_OPS].join(', ')}`,
     )
   }
+}
+
+function needsTextCast(
+  model: Model,
+  fieldName: string,
+  dialect: SqlDialect,
+): boolean {
+  if (dialect !== 'postgres') return false
+  if (fieldName === '_all') return false
+  const field = model.fields.find((f) => f.name === fieldName && !f.isRelation)
+  if (!field) return false
+  return TEXT_CAST_TYPES.has(String(field.type || ''))
 }
 
 function aggExprForField(
@@ -591,18 +605,17 @@ function pushAggregateFieldSql(
   alias: string,
   agg: AggregateKey,
   fieldName: string,
-  model?: Model,
+  model: Model,
+  dialect: SqlDialect,
 ): void {
   const outAlias = agg + '.' + fieldName
-  fields.push(
-    aggFn +
-      '(' +
-      col(alias, fieldName, model) +
-      ') ' +
-      SQL_TEMPLATES.AS +
-      ' ' +
-      quote(outAlias),
-  )
+  const rawExpr = aggFn + '(' + col(alias, fieldName, model) + ')'
+
+  const castExpr = needsTextCast(model, fieldName, dialect)
+    ? rawExpr + '::text'
+    : rawExpr
+
+  fields.push(castExpr + ' ' + SQL_TEMPLATES.AS + ' ' + quote(outAlias))
 }
 
 function addAggregateFields(
@@ -610,6 +623,7 @@ function addAggregateFields(
   args: PrismaQueryArgs,
   alias: string,
   model: Model,
+  dialect: SqlDialect,
 ): void {
   for (const [agg, aggFn] of AGGREGATES) {
     const obj = getAggregateSelectionObject(args, agg)
@@ -624,7 +638,15 @@ function addAggregateFields(
       if (!isTruthySelection(selection)) continue
 
       assertAggregatableScalarField(model, agg, fieldName)
-      pushAggregateFieldSql(fields, aggFn, alias, agg, fieldName, model)
+      pushAggregateFieldSql(
+        fields,
+        aggFn,
+        alias,
+        agg,
+        fieldName,
+        model,
+        dialect,
+      )
     }
   }
 }
@@ -633,12 +655,13 @@ function buildAggregateFields(
   args: PrismaQueryArgs,
   alias: string,
   model: Model,
+  dialect: SqlDialect,
 ): string[] {
   const fields: string[] = []
 
   const countArg = normalizeCountArg(args._count)
   addCountFields(fields, countArg, alias, model)
-  addAggregateFields(fields, args, alias, model)
+  addAggregateFields(fields, args, alias, model, dialect)
 
   return fields
 }
@@ -656,7 +679,7 @@ export function buildAggregateSql(
 
   const d = dialect ?? getGlobalDialect()
 
-  const aggFields = buildAggregateFields(args, alias, model)
+  const aggFields = buildAggregateFields(args, alias, model, d)
   if (!isNonEmptyArray(aggFields)) {
     throw new Error('buildAggregateSql requires at least one aggregate field')
   }
@@ -717,12 +740,13 @@ function buildGroupBySelectParts(
   alias: string,
   model: Model,
   byFields: string[],
+  dialect: SqlDialect,
 ): { groupCols: string[]; groupFields: string; selectFields: string } {
   const groupCols = byFields.map((f) => col(alias, f, model))
   const selectCols = byFields.map((f) => colWithAlias(alias, f, model))
   const groupFields = groupCols.join(SQL_SEPARATORS.FIELD_LIST)
 
-  const aggFields = buildAggregateFields(args, alias, model)
+  const aggFields = buildAggregateFields(args, alias, model, dialect)
   const selectFields = isNonEmptyArray(aggFields)
     ? selectCols.concat(aggFields).join(SQL_SEPARATORS.FIELD_LIST)
     : selectCols.join(SQL_SEPARATORS.FIELD_LIST)
@@ -766,6 +790,7 @@ export function buildGroupBySql(
     alias,
     model,
     byFields,
+    d,
   )
   const havingClause = buildGroupByHaving(args, alias, params, model, d)
 

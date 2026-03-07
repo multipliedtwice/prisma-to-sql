@@ -17,14 +17,15 @@ export function createProgressiveReducer(
   })
 
   const completedKeys = new Set<string>()
+  let lastKey: unknown = null
 
   return {
     processRow(row: any): void {
-      coreReducer.processRow(row)
+      lastKey = coreReducer.processRow(row)
     },
 
-    getCurrentParentKey(row: any): string | null {
-      return coreReducer.processRow(row) as string | null
+    getCurrentParentKey(_row: any): string | null {
+      return lastKey as string | null
     },
 
     getCompletedParent(parentKey: string): any | null {

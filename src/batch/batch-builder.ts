@@ -14,6 +14,9 @@ const BATCH_CTE_PREFIX = 'batch_'
 const COUNT_CTE_PREFIX = 'count_'
 const MODEL_SUBQUERY_PREFIX = 'm_'
 const CTE_ROW_ALIAS = 't'
+const BATCH_ORD_ALIAS = '__tp_s'
+const BATCH_ORD_COL = 'n'
+const BATCH_ROW_COL = 'r'
 
 export interface BatchQuery {
   model: string
@@ -73,6 +76,15 @@ function appendParams(target: unknown[], source: unknown[]): void {
   }
 }
 
+function wrapOrderedAgg(cteName: string, resultAlias: string): string {
+  const outKey = quoteBatchIdent(resultAlias)
+  return (
+    `(SELECT COALESCE(json_agg(${BATCH_ORD_ALIAS}.${BATCH_ROW_COL} ORDER BY ${BATCH_ORD_ALIAS}.${BATCH_ORD_COL}), '[]'::json) ` +
+    `FROM (SELECT row_to_json(${CTE_ROW_ALIAS}) AS ${BATCH_ROW_COL}, ROW_NUMBER() OVER () AS ${BATCH_ORD_COL} ` +
+    `FROM ${cteName} ${CTE_ROW_ALIAS}) ${BATCH_ORD_ALIAS}) AS ${outKey}`
+  )
+}
+
 function wrapQueryForMethod(
   method: PrismaMethod,
   cteName: string,
@@ -83,7 +95,7 @@ function wrapQueryForMethod(
   switch (method) {
     case 'findMany':
     case 'groupBy':
-      return `(SELECT COALESCE(json_agg(row_to_json(${CTE_ROW_ALIAS})), '[]'::json) FROM ${cteName} ${CTE_ROW_ALIAS}) AS ${outKey}`
+      return wrapOrderedAgg(cteName, resultAlias)
     case 'findFirst':
     case 'findUnique':
       return `(SELECT row_to_json(${CTE_ROW_ALIAS}) FROM ${cteName} ${CTE_ROW_ALIAS} LIMIT 1) AS ${outKey}`

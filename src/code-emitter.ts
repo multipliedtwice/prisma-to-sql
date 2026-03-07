@@ -683,9 +683,9 @@ function generateExtension(runtimeImportPath: string): string {
         lateralMeta,
       })
     }
-  
+
     try {
-      const result = executeSqliteQuery(client, sql, params, method)
+      const result = executeSqliteQuery(client, sql, params, method, model)
       return result
     } catch (err) {
       console.log('[sqlite-debug] FAILED:', err instanceof Error ? err.message : err)
@@ -695,7 +695,7 @@ function generateExtension(runtimeImportPath: string): string {
 
   async function executeWhereInQuery(sql: string, params: unknown[]): Promise<unknown[]> {
     const normalizedParams = normalizeParams(params)
-    
+
     if (DIALECT === 'postgres') {
       const results: any[] = []
       await client.unsafe(sql, normalizedParams).forEach((row: any) => {
@@ -703,7 +703,7 @@ function generateExtension(runtimeImportPath: string): string {
       })
       return results
     }
-    
+
     const stmt = getOrPrepareStatement(client, sql)
     return stmt.all(...normalizedParams)
   }
@@ -731,11 +731,11 @@ function generateExtension(runtimeImportPath: string): string {
       args: unknown
     ): Promise<unknown> {
       const modelName = this?.name || this?.$name
-      
+
       if (!modelName || typeof modelName !== 'string') {
         throw new Error('Cannot determine model name from context')
       }
-      
+
       const startTime = Date.now()
 
       try {
@@ -801,11 +801,11 @@ function generateExtension(runtimeImportPath: string): string {
           const strategy = DIALECT === 'postgres'
             ? (isLateral ? 'LATERAL JOIN' : requiresReduction ? 'STREAMING REDUCTION' : 'STREAMING')
             : (requiresReduction ? 'BUFFERED REDUCTION' : 'DIRECT')
-          
+
           const whereInMode = plan.whereInSegments.length > 0 && !skipWhereIn
             ? (DIALECT === 'postgres' ? 'STREAMING PARALLEL' : 'SEQUENTIAL')
             : 'NONE'
-          
+
           console.log(\`[\${DIALECT}] \${modelName}.\${method} - \${strategy} + WHERE IN: \${whereInMode}\`)
           console.log(\`  Invoked: \${modelName}.\${method}(\`, args, \`)\`)
           console.log(\`  Prebaked: \${prebaked}, skipWhereIn: \${skipWhereIn}\`)
@@ -816,7 +816,7 @@ function generateExtension(runtimeImportPath: string): string {
         if (plan.whereInSegments.length > 0 && !skipWhereIn) {
           if (DIALECT === 'postgres') {
             const { executeWhereInSegmentsStreaming } = await import(${JSON.stringify(runtimeImportPath)})
-            
+
             const results = await executeWhereInSegmentsStreaming({
               segments: plan.whereInSegments,
               parentSql: sql,
@@ -851,7 +851,7 @@ function generateExtension(runtimeImportPath: string): string {
             const duration = Date.now() - startTime
             onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
 
-            return transformQueryResults(method, results)
+            return transformQueryResults(method, results, model)
           } else {
             const parentRows = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isLateral, lateralMeta) as any[]
 
@@ -878,27 +878,28 @@ function generateExtension(runtimeImportPath: string): string {
             const duration = Date.now() - startTime
             onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
 
-            return transformQueryResults(method, parentRows)
+            return transformQueryResults(method, parentRows, model)
           }
         }
 
         const results = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isLateral, lateralMeta)
-        
+
         const duration = Date.now() - startTime
         onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
 
-        return transformQueryResults(method, results)
+        return transformQueryResults(method, results, model)
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
-        console.warn(\`[prisma-sql] \${modelName}.\${method} acceleration failed: \${msg}\`)
+        console.warn(\`[prisma-sql] \${modelName}.\${method} acceleration failed: \${msg}\${typeof sql === 'string' ? '\\n  SQL: ' + sql.slice(0, 500) : ''}\`)
+
         if (debug && error instanceof Error && error.stack) {
           console.warn(error.stack)
         }
-        
+
         if (!this.$parent?.[modelName]?.[method]) {
           throw error
         }
-        
+
         return this.$parent[modelName][method](args)
       }
     }
@@ -908,21 +909,21 @@ function generateExtension(runtimeImportPath: string): string {
       args?: unknown
     ): AsyncIterableIterator<any> {
       const modelName = this?.name || this?.$name
-      
+
       if (!modelName || typeof modelName !== 'string') {
         throw new Error('Cannot determine model name from context')
       }
-      
+
       if (DIALECT !== 'postgres') {
         throw new Error('Streaming requires postgres.js client')
       }
-      
+
       const transformedArgs = transformEnumValuesByModel(modelName, args || {})
       const model = MODEL_MAP.get(modelName)
       if (!model) {
         throw new Error(\`Model '\${modelName}' not found\`)
       }
-      
+
       const plan = planQueryStrategy({
         model,
         method: 'findMany',
@@ -930,17 +931,17 @@ function generateExtension(runtimeImportPath: string): string {
         allModels: MODELS,
         dialect: DIALECT,
       })
-      
+
       const queryKey = normalizeQuery(plan.filteredArgs)
       const prebakedQuery = QUERIES[modelName]?.['findMany']?.[queryKey]
-      
+
       let sql: string
       let params: unknown[]
       let requiresReduction = false
       let includeSpec: Record<string, any> | undefined
       let isLateral = false
       let lateralMeta: any[] | undefined
-      
+
       if (prebakedQuery) {
         sql = prebakedQuery.sql
         params = resolveParamsFromMappings(plan.filteredArgs, prebakedQuery.paramMappings)
@@ -957,7 +958,7 @@ function generateExtension(runtimeImportPath: string): string {
         isLateral = result.isLateral || false
         lateralMeta = result.lateralMeta
       }
-      
+
       const normalizedParams = normalizeParams(params)
 
       if (isLateral && lateralMeta) {
@@ -977,29 +978,29 @@ function generateExtension(runtimeImportPath: string): string {
         const { createProgressiveReducer } = await import(${JSON.stringify(runtimeImportPath)})
         const config = buildReducerConfig(model, includeSpec, MODELS)
         const reducer = createProgressiveReducer(config)
-        
+
         const completed: any[] = []
         let lastParentKey: string | null = null
-        
+
         await client.unsafe(sql, normalizedParams).forEach((row: any) => {
           reducer.processRow(row)
           const currentKey = reducer.getCurrentParentKey(row)
-          
+
           if (currentKey !== lastParentKey && lastParentKey !== null) {
             const parent = reducer.getCompletedParent(lastParentKey)
             if (parent) {
               completed.push(parent)
             }
           }
-          
+
           lastParentKey = currentKey
         })
-        
+
         const remaining = reducer.getRemainingParents()
         for (const parent of remaining) {
           completed.push(parent)
         }
-        
+
         for (const item of completed) {
           yield item
         }
@@ -1008,7 +1009,7 @@ function generateExtension(runtimeImportPath: string): string {
         await client.unsafe(sql, normalizedParams).forEach((row: any) => {
           rows.push(row)
         })
-        
+
         for (const row of rows) {
           yield row
         }
@@ -1049,7 +1050,7 @@ function generateExtension(runtimeImportPath: string): string {
       }
 
       const normalizedParams = normalizeParams(params)
-      
+
       let row: Record<string, unknown>
       if (DIALECT === 'postgres') {
         const rows: any[] = []
@@ -1061,7 +1062,7 @@ function generateExtension(runtimeImportPath: string): string {
         const stmt = getOrPrepareStatement(client, sql)
         row = stmt.get(...normalizedParams) as Record<string, unknown>
       }
-      
+
       const results = parseBatchResults(row, keys, batchQueries, aliases, MODEL_MAP)
 
       const duration = Date.now() - startTime
@@ -1094,7 +1095,7 @@ function generateExtension(runtimeImportPath: string): string {
       }
 
       const normalizedParams = normalizeParams(params)
-      
+
       let row: Record<string, unknown>
       if (DIALECT === 'postgres') {
         const rows: any[] = []
@@ -1106,7 +1107,7 @@ function generateExtension(runtimeImportPath: string): string {
         const stmt = getOrPrepareStatement(client, sql)
         row = stmt.get(...normalizedParams) as Record<string, unknown>
       }
-      
+
       const results = parseBatchCountResults(row, queries.length)
 
       const duration = Date.now() - startTime
@@ -1136,11 +1137,11 @@ function generateExtension(runtimeImportPath: string): string {
         return []
       }
 
-      const isTransactionQuery = queries.every(q => 
-        q && 
-        typeof q === 'object' && 
+      const isTransactionQuery = queries.every(q =>
+        q &&
+        typeof q === 'object' &&
         !q.then &&
-        'model' in q && 
+        'model' in q &&
         'method' in q &&
         typeof q.model === 'string' &&
         typeof q.method === 'string'

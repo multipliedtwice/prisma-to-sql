@@ -19,7 +19,6 @@ export interface BuildContext {
   readonly dialect: SqlDialect
   readonly params: ParamStore
   readonly depth: number
-  readonly seenObjects: WeakSet<object>
 }
 
 export interface AliasGenerator {
