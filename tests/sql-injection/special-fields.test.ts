@@ -219,7 +219,7 @@ describe('SQL Injection - Special Fields', () => {
     it('should handle cursor with multiple fields', () => {
       const { sql, params } = toSQL('User', 'findMany', {
         cursor: { id: 1, email: 'test@example.com' },
-        orderBy: { id: 'asc' },
+        orderBy: [{ id: 'asc' }, { email: 'asc' }],
         take: 10,
       })
 
