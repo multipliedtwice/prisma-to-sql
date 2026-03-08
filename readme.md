@@ -534,82 +534,6 @@ const users = await prisma.user.findMany({
 
 That helps both the planner and the reducer keep result shapes predictable.
 
-#### 4) Avoid unbounded deep fan-out in a single query
-
-This is the biggest real-world improvement lever.
-
-Less ideal:
-
-```ts
-await prisma.organization.findMany({
-  include: {
-    users: {
-      include: {
-        posts: {
-          include: {
-            comments: true,
-          },
-        },
-      },
-    },
-  },
-})
-```
-
-Usually better:
-
-- page parents
-- cap nested collections with `take`
-- add nested `where`
-- split unrelated heavy branches into `$batch`
-
-Example:
-
-```ts
-const result = await prisma.$batch((batch) => ({
-  orgs: batch.organization.findMany({
-    take: 20,
-    orderBy: { id: 'asc' },
-  }),
-  recentUsers: batch.user.findMany({
-    take: 50,
-    orderBy: { createdAt: 'desc' },
-  }),
-}))
-```
-
-#### 5) Use one-to-one uniqueness where it is actually one-to-one
-
-If the database guarantees one child row, encode that in Prisma.
-
-This can let the planner avoid unnecessarily defensive high-fanout strategies.
-
-#### 6) Keep nested filters sargable
-
-Prefer predicates that use indexed equality/range conditions.
-
-Better:
-
-```ts
-{
-  include: {
-    comments: {
-      where: {
-        postId: 42,
-        createdAt: { gte: someDate },
-      },
-      orderBy: { createdAt: 'desc' },
-    },
-  },
-}
-```
-
-Less planner-friendly:
-
-- broad `contains` / `%term%` everywhere
-- unindexed OR-heavy nested filters
-- deep includes without limits
-
 ### What to configure
 
 Use the cardinality planner wherever your generator/runtime exposes it.
@@ -656,6 +580,65 @@ What good results look like:
 - bounded child includes remain predictable
 - high-fanout includes stop exploding row counts
 - moving a heavy include into `$batch` or splitting it improves latency materially
+
+## Deployment without database access at build time
+
+The cardinality planner collects relation statistics and roundtrip cost measurements directly from the database during `prisma generate`. In CI/CD pipelines or containerized builds, the database is often unreachable.
+
+### Skip planner during generation
+
+Set `PRISMA_SQL_SKIP_PLANNER=true` to skip stats collection at generate time. The generator will emit default planner values instead.
+
+```bash
+PRISMA_SQL_SKIP_PLANNER=true npx prisma generate
+```
+
+### Collect stats before server start
+
+Run `prisma-sql-collect-stats` as a pre-start step, after deployment, when the database is reachable.
+
+```bash
+prisma-sql-collect-stats \
+  --output dist/prisma/generated/sql/planner.generated.js \
+  --prisma-client dist/prisma/generated/client/index.js
+```
+
+| Flag              | Default                                            | Description                                                    |
+| ----------------- | -------------------------------------------------- | -------------------------------------------------------------- |
+| `--output`        | `./dist/prisma/generated/sql/planner.generated.js` | Path to the generated planner module                           |
+| `--prisma-client` | `@prisma/client`                                   | Path to the compiled Prisma client (must expose `Prisma.dmmf`) |
+
+The script reads `DATABASE_URL` from the environment (supports `.env` via `dotenv`). If the connection fails or times out, it exits silently without blocking startup.
+
+### Example scripts
+
+```json
+{
+  "prisma:generate": "PRISMA_SQL_SKIP_PLANNER=true prisma generate",
+  "collect-planner-stats": "prisma-sql-collect-stats --output dist/prisma/generated/sql/planner.generated.js --prisma-client dist/prisma/generated/client/index.js",
+  "start:production": "yarn collect-planner-stats; node dist/src/index.js"
+}
+```
+
+The semicolon (`;`) after `collect-planner-stats` ensures the server starts even if stats collection fails. Use `&&` instead if you want startup to abort on failure.
+
+### What happens with default planner values
+
+When stats are not collected, the planner uses conservative defaults:
+
+- `roundtripRowEquivalent`: 73
+- `jsonRowFactor`: 1.5
+- `relationStats`: empty (all relations treated as unknown cardinality)
+
+This means the planner cannot make informed decisions about join strategies. Queries still work correctly — the planner falls back to safe general-purpose strategies — but relation-heavy reads may not use the optimal execution plan.
+
+### Timeout control
+
+Stats collection has a default timeout of 15 seconds. Override with:
+
+```bash
+PRISMA_SQL_PLANNER_TIMEOUT_MS=5000 yarn collect-planner-stats
+```
 
 ### Practical recommendations
 
