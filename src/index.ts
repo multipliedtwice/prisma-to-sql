@@ -13,7 +13,7 @@ import {
   type TransactionOptions,
 } from './transaction'
 import { transformQueryResults } from './result-transformers'
-import { buildReducerConfig, reduceFlatRows } from './builder/select/reducer'
+
 import {
   Model,
   PrismaMethod,

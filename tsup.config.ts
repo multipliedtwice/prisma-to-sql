@@ -13,6 +13,7 @@ export default defineConfig({
   splitting: false,
   treeshake: true,
   minify: false,
+  external: ['@prisma/client', '.prisma/client/default'],
   outExtension({ format }) {
     return {
       js: format === 'cjs' ? '.cjs' : '.js',
