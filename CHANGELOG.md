@@ -1,3 +1,11 @@
+## [1.76.2](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.76.1...v1.76.2) (2026-03-08)
+
+
+### Bug Fixes
+
+* **index.ts:** remove unused import of buildReducerConfig and reduceFlatRows to clean up code ([a21cb98](https://github.com/multipliedtwice/prisma-to-sql/commit/a21cb989c1a89a3d90c6b7b22b2ba8f200cf6cf7))
+* **tests:** update orderBy to support multiple fields in cursor test case for SQL injection handling ([d123f31](https://github.com/multipliedtwice/prisma-to-sql/commit/d123f31fdd438e9692eda94957beb9748874bd9a))
+
 ## [1.76.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.76.0...v1.76.1) (2026-02-22)
 
 # [1.76.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.75.12...v1.76.0) (2026-02-21)
