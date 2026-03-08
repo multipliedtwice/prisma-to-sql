@@ -1,3 +1,10 @@
+# [1.77.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.76.2...v1.77.0) (2026-03-08)
+
+
+### Features
+
+* **reducer.ts:** add safety checks for property names to prevent prototype pollution ([436e2d6](https://github.com/multipliedtwice/prisma-to-sql/commit/436e2d65287b3d922870112a18f401cbc5a5c5f2))
+
 ## [1.76.2](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.76.1...v1.76.2) (2026-03-08)
 
 
