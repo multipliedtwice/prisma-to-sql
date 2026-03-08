@@ -17,6 +17,16 @@ import {
 } from '../shared/relation-utils'
 import { LIMITS } from '../shared/constants'
 
+const UNSAFE_PROPERTY_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
+
+function assertSafePropertyName(name: string): void {
+  if (UNSAFE_PROPERTY_NAMES.has(name)) {
+    throw new Error(
+      `Unsafe property name '${name}' rejected to prevent prototype pollution`,
+    )
+  }
+}
+
 export interface ReducerConfig {
   parentModel: Model
   includedRelations: RelationMetadata[]
@@ -95,6 +105,8 @@ export function buildReducerConfig(
 
   for (const [incName, incValue] of Object.entries(includeSpec)) {
     if (incValue === false) continue
+
+    assertSafePropertyName(incName)
 
     const field = parentModel.fields.find((f) => f.name === incName)
     if (!field || !field.isRelation) {
@@ -202,7 +214,7 @@ function materializeRelationObject(
   const relKey = buildKey(row, rel.keyCols)
   if (relKey == null) return null
 
-  const obj: any = {}
+  const obj: any = Object.create(null)
   for (const c of rel.scalarCols) {
     obj[c.fieldName] = parseJsonIfNeeded(c.isJson, row[c.colName])
   }
@@ -304,7 +316,7 @@ export function reduceFlatRows(rows: any[], config: ReducerConfig): any[] {
 
     let record = resultMap.get(parentKey)
     if (!record) {
-      record = {}
+      record = Object.create(null)
       for (const fieldName of parentScalarFields) {
         record[fieldName] = maybeParseJson(
           row[fieldName],
