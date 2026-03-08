@@ -1,4 +1,3 @@
-import { Prisma } from '@prisma/client'
 import type { Model } from '../../types'
 import { AGGREGATE_PREFIXES } from '../shared/constants'
 
@@ -40,13 +39,26 @@ class FallbackDecimal implements DecimalLike {
   }
 }
 
-function getPrismaDecimalCtor():
+let cachedDecimalCtor:
+  | (new (value: string | number) => DecimalLike)
+  | null
+  | undefined = undefined
+
+function getPrismaDecimalCtorSync():
   | (new (value: string | number) => DecimalLike)
   | null {
-  const candidate = (Prisma as unknown as { Decimal?: unknown }).Decimal
-  return typeof candidate === 'function'
-    ? (candidate as new (value: string | number) => DecimalLike)
-    : null
+  if (cachedDecimalCtor !== undefined) return cachedDecimalCtor
+  try {
+    const { Prisma } = require('@prisma/client')
+    const candidate = (Prisma as unknown as { Decimal?: unknown }).Decimal
+    cachedDecimalCtor =
+      typeof candidate === 'function'
+        ? (candidate as new (value: string | number) => DecimalLike)
+        : null
+  } catch {
+    cachedDecimalCtor = null
+  }
+  return cachedDecimalCtor
 }
 
 function isIntegerString(value: string): boolean {
@@ -75,9 +87,9 @@ function isDecimalLike(value: unknown): value is DecimalLike {
   )
 }
 
-function toDecimalLike(value: string | number | bigint): DecimalLike {
+function toDecimalLikeSync(value: string | number | bigint): DecimalLike {
   const normalized = typeof value === 'bigint' ? value.toString() : value
-  const DecimalCtor = getPrismaDecimalCtor()
+  const DecimalCtor = getPrismaDecimalCtorSync()
   if (DecimalCtor) {
     try {
       return new DecimalCtor(normalized)
@@ -128,7 +140,7 @@ function convertScalarAggregateValue(
 
   if (fieldType === 'Decimal') {
     if (isDecimalLike(value)) return value
-    if (isDecimalInput(value)) return toDecimalLike(value)
+    if (isDecimalInput(value)) return toDecimalLikeSync(value)
     return value
   }
 
