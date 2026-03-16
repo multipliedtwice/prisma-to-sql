@@ -1,3 +1,10 @@
+# [1.78.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.77.0...v1.78.0) (2026-03-16)
+
+
+### Features
+
+* **select.ts, code-emitter.ts:** add normalization for compound cursors to improve cursor handling in queries ([31ba2e2](https://github.com/multipliedtwice/prisma-to-sql/commit/31ba2e230df2162ba4a1c2375d8da4b48640fd72))
+
 # [1.77.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.76.2...v1.77.0) (2026-03-08)
 
 
