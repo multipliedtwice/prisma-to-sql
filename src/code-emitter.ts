@@ -412,6 +412,23 @@ function resolveParamsFromMappings(args: any, paramMappings: any[]): unknown[] {
     params.push(normalizeValue(value))
   }
   return params
+}
+
+function normalizeCompoundCursor(cursor: any, model: any): any {
+  if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor) || cursor instanceof Date) return cursor
+  const keys = Object.keys(cursor)
+  if (keys.length !== 1) return cursor
+  const key = keys[0]
+  const value = cursor[key]
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value instanceof Date) return cursor
+  const scalarSet = new Set(model.fields.filter((f: any) => !f.isRelation).map((f: any) => f.name))
+  if (scalarSet.has(key)) return cursor
+  const nestedKeys = Object.keys(value)
+  if (nestedKeys.length === 0) return cursor
+  for (const nk of nestedKeys) {
+    if (!scalarSet.has(nk)) return cursor
+  }
+  return value
 }`
 }
 
@@ -745,7 +762,7 @@ function generateExtension(runtimeImportPath: string): string {
           )
         }
 
-        const transformedArgs = transformEnumValuesByModel(modelName, args || {})
+        let transformedArgs = transformEnumValuesByModel(modelName, args || {})
 
         const model = MODEL_MAP.get(modelName)
         if (!model) {
@@ -753,6 +770,13 @@ function generateExtension(runtimeImportPath: string): string {
             throw new Error(\`Model '\${modelName}' not found and no Prisma fallback available\`)
           }
           return this.$parent[modelName][method](args)
+        }
+
+        if (transformedArgs.cursor) {
+          const flatCursor = normalizeCompoundCursor(transformedArgs.cursor, model)
+          if (flatCursor !== transformedArgs.cursor) {
+            transformedArgs = { ...transformedArgs, cursor: flatCursor }
+          }
         }
 
         const plan = planQueryStrategy({
@@ -918,10 +942,17 @@ function generateExtension(runtimeImportPath: string): string {
         throw new Error('Streaming requires postgres.js client')
       }
 
-      const transformedArgs = transformEnumValuesByModel(modelName, args || {})
+      let transformedArgs = transformEnumValuesByModel(modelName, args || {})
       const model = MODEL_MAP.get(modelName)
       if (!model) {
         throw new Error(\`Model '\${modelName}' not found\`)
+      }
+
+      if (transformedArgs.cursor) {
+        const flatCursor = normalizeCompoundCursor(transformedArgs.cursor, model)
+        if (flatCursor !== transformedArgs.cursor) {
+          transformedArgs = { ...transformedArgs, cursor: flatCursor }
+        }
       }
 
       const plan = planQueryStrategy({

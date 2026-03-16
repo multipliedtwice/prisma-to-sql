@@ -280,6 +280,45 @@ function normalizeArgsForDialect(
   return applyPostgresDistinctOrderBy(args)
 }
 
+function normalizeCompoundCursor(
+  cursor: Record<string, unknown>,
+  model: Model,
+): Record<string, unknown> {
+  const keys = Object.keys(cursor)
+  if (keys.length !== 1) return cursor
+
+  const key = keys[0]
+  const value = cursor[key]
+
+  const scalarSet = getScalarFieldSet(model)
+  if (scalarSet.has(key)) return cursor
+
+  if (!isPlainObject(value)) return cursor
+
+  const nested = value as Record<string, unknown>
+  const nestedKeys = Object.keys(nested)
+  if (nestedKeys.length === 0) return cursor
+
+  for (const nk of nestedKeys) {
+    if (!scalarSet.has(nk)) return cursor
+  }
+
+  return nested
+}
+
+function normalizeArgsCompoundCursor(
+  args: PrismaQueryArgs,
+  model: Model,
+): PrismaQueryArgs {
+  if (!isNotNullish(args.cursor) || !isPlainObject(args.cursor)) return args
+  const flat = normalizeCompoundCursor(
+    args.cursor as Record<string, unknown>,
+    model,
+  )
+  if (flat === args.cursor) return args
+  return { ...args, cursor: flat }
+}
+
 function buildCursorClauseIfAny(input: {
   cursor: unknown
   orderBy: PrismaQueryArgs['orderBy']
@@ -431,7 +470,8 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
   const dialectToUse = resolveDialect(dialect)
 
   const argsForSql = normalizeArgsForNegativeTake(method, args)
-  const normalizedArgs = normalizeArgsForDialect(dialectToUse, argsForSql)
+  const argsWithDialect = normalizeArgsForDialect(dialectToUse, argsForSql)
+  const normalizedArgs = normalizeArgsCompoundCursor(argsWithDialect, model)
 
   validateDistinct(model, normalizedArgs.distinct)
   validateOrderBy(model, normalizedArgs.orderBy, schemas)
