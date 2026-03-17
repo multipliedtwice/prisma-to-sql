@@ -742,7 +742,7 @@ function generateExtension(runtimeImportPath: string): string {
       $parent?: any
     }
 
-    async function handleMethod(
+  async function handleMethod(
       this: ModelContext,
       method: PrismaMethod,
       args: unknown
@@ -754,6 +754,7 @@ function generateExtension(runtimeImportPath: string): string {
       }
 
       const startTime = Date.now()
+      let sql: string | undefined
 
       try {
         if (args !== undefined && args !== null && typeof args !== 'object') {
@@ -789,7 +790,6 @@ function generateExtension(runtimeImportPath: string): string {
 
         const queryKey = normalizeQuery(plan.filteredArgs)
         const prebakedQuery = QUERIES[modelName]?.[method]?.[queryKey]
-        let sql: string
         let params: unknown[]
         let prebaked = false
         let requiresReduction = false
