@@ -62,7 +62,7 @@ export async function createDatabaseExecutor(options: {
 
   if (dialect === 'postgres') {
     const postgres = await import('postgres')
-    const sql = postgres.default(databaseUrl, {
+    const sql = postgres.default(cleanDatabaseUrl(databaseUrl), {
       connect_timeout: Math.ceil(connectTimeoutMs / 1000),
       max: 1,
     })
