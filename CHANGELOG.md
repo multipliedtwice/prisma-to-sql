@@ -1,3 +1,10 @@
+## [1.79.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.79.0...v1.79.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* **cardinality-planner.ts:** use cleanDatabaseUrl function to sanitize database URL for PostgreSQL connection to ensure proper formatting and prevent potential connection issues ([3908054](https://github.com/multipliedtwice/prisma-to-sql/commit/3908054e64fe3e33740e052a82c380c7046991ea))
+
 # [1.79.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.78.0...v1.79.0) (2026-03-17)
 
 # [1.78.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.77.0...v1.78.0) (2026-03-16)
