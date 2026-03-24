@@ -4,7 +4,7 @@ import {
   clampStatsMonotonic,
   normalizeStats,
   stableJson,
-  cleanDatabaseUrl,
+  stripPrismaParams,
 } from './utils/pure-utils'
 import { SqlDialect } from './sql-builder-dialect'
 
@@ -62,7 +62,7 @@ export async function createDatabaseExecutor(options: {
 
   if (dialect === 'postgres') {
     const postgres = await import('postgres')
-    const sql = postgres.default(cleanDatabaseUrl(databaseUrl), {
+    const sql = postgres.default(stripPrismaParams(databaseUrl), {
       connect_timeout: Math.ceil(connectTimeoutMs / 1000),
       max: 1,
     })

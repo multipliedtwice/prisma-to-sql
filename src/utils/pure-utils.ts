@@ -55,6 +55,16 @@ export function stableJson(value: unknown): string {
   )
 }
 
+export function stripPrismaParams(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.search = ''
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
 export function cleanDatabaseUrl(url: string): string {
   try {
     const parsed = new URL(url)
