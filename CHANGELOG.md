@@ -1,3 +1,10 @@
+# [1.80.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.79.1...v1.80.0) (2026-03-24)
+
+
+### Features
+
+* **cardinality-planner.ts:** replace cleanDatabaseUrl with stripPrismaParams to remove query parameters from database URL ([6cba3ba](https://github.com/multipliedtwice/prisma-to-sql/commit/6cba3ba57ab7f29d5b1edba76616a9be066f48e2))
+
 ## [1.79.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.79.0...v1.79.1) (2026-03-23)
 
 
