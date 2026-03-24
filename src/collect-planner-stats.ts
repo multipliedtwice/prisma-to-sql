@@ -47,6 +47,8 @@ function emitCJS(artifacts: GeneratePlannerArtifacts): string {
   return ts
     .replace(/^export const (\w+)/gm, 'exports.$1')
     .replace(/^import .*$/gm, '')
+    .replace(/\bas const\b/g, '')
+    .replace(/^export type .*$/gm, '')
     .trimStart()
 }
 
