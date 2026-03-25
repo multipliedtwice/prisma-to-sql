@@ -55,10 +55,25 @@ export function stableJson(value: unknown): string {
   )
 }
 
+const PRISMA_ONLY_PARAMS = new Set([
+  'connection_limit',
+  'pool_timeout',
+  'pgbouncer',
+  'schema',
+  'socket',
+  'socket_timeout',
+  'connect_timeout',
+  'statement_cache_size',
+])
+
 export function stripPrismaParams(url: string): string {
   try {
     const parsed = new URL(url)
-    parsed.search = ''
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (PRISMA_ONLY_PARAMS.has(key)) {
+        parsed.searchParams.delete(key)
+      }
+    }
     return parsed.toString()
   } catch {
     return url
