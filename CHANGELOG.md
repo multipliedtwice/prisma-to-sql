@@ -1,3 +1,10 @@
+## [1.80.2](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.1...v1.80.2) (2026-03-25)
+
+
+### Bug Fixes
+
+* **pure-utils.ts:** add PRISMA_ONLY_PARAMS set to filter specific query parameters from the URL for better URL management and security ([2a91229](https://github.com/multipliedtwice/prisma-to-sql/commit/2a912293dc2914bd0da37f0d235808503ebe386b))
+
 ## [1.80.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.0...v1.80.1) (2026-03-24)
 
 
