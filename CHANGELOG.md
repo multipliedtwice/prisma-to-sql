@@ -1,3 +1,10 @@
+## [1.80.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.0...v1.80.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* **collect-planner-stats.ts:** remove unnecessary export type and as const statements to clean up emitted CJS output ([0ad0df6](https://github.com/multipliedtwice/prisma-to-sql/commit/0ad0df6754f1b67ace5fa2ff3f00532a94d8cf41))
+
 # [1.80.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.79.1...v1.80.0) (2026-03-24)
 
 
