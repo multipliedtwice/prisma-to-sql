@@ -1,3 +1,10 @@
+## [1.80.3](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.2...v1.80.3) (2026-03-29)
+
+
+### Bug Fixes
+
+* **includes.ts:** add check for nested relations in arguments to prevent unnecessary processing of nested models ([c8f7cdf](https://github.com/multipliedtwice/prisma-to-sql/commit/c8f7cdf89a9580700ebcddee21027911caaa7a73))
+
 ## [1.80.2](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.1...v1.80.2) (2026-03-25)
 
 
