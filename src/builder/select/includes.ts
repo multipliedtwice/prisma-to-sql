@@ -249,6 +249,8 @@ function extractNestedToOneRelations(
     const nestedModel = schemaByName.get(field.relatedModel!)
     if (!nestedModel) continue
 
+    if (hasNestedRelationInArgs(entry.value, nestedModel)) continue
+
     toOneRelations.push({
       name: entry.name,
       field: field as Field,
