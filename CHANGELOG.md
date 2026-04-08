@@ -1,3 +1,10 @@
+## [1.80.4](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.3...v1.80.4) (2026-04-08)
+
+
+### Bug Fixes
+
+* release ([26b8a53](https://github.com/multipliedtwice/prisma-to-sql/commit/26b8a5348db3d95ccf5f9a43259441eb5d3d5620))
+
 ## [1.80.3](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.2...v1.80.3) (2026-03-29)
 
 
