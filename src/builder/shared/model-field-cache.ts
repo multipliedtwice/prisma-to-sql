@@ -70,6 +70,17 @@ export function getFieldIndices(model: Model): FieldIndices {
     }
   }
 
+  if (pkFields.length === 0) {
+    const compositePk = (model as any).primaryKey?.fields
+    if (Array.isArray(compositePk)) {
+      for (const f of compositePk) {
+        if (typeof f === 'string' && scalarFields.has(f)) {
+          pkFields.push(f)
+        }
+      }
+    }
+  }
+
   const scalarFieldSet: ReadonlySet<string> = new Set(scalarNames)
   const relationFieldSet: ReadonlySet<string> = new Set(relationNames)
 

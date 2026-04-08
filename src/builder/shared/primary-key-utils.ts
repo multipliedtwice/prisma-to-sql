@@ -17,18 +17,18 @@ export function getPrimaryKeyFields(model: Model): string[] {
   )
   if (idField) return ['id']
 
+  const compositePk = (model as any).primaryKey?.fields
+  if (Array.isArray(compositePk) && compositePk.length > 0) {
+    return compositePk.filter((f: any) => typeof f === 'string')
+  }
+
   throw new Error(
-    `Model ${model.name} has no primary key field. Models must have either fields with isId=true or a field named 'id'.`,
+    `Model ${model.name} has no primary key field. Models must have either fields with isId=true, a field named 'id', or a composite @@id.`,
   )
 }
 
 export function getPrimaryKeyField(model: Model): string {
   const fields = getPrimaryKeyFields(model)
-  if (fields.length !== 1) {
-    throw new Error(
-      `getPrimaryKeyField requires single-field PK, but ${model.name} has ${fields.length} fields`,
-    )
-  }
   return fields[0]
 }
 
