@@ -228,6 +228,27 @@ function finalizeOrderByForInclude(args: {
   })
 }
 
+function hasRelationLikeValuesInArgs(relArgs: unknown): boolean {
+  if (!isPlainObject(relArgs)) return false
+  const obj = relArgs as Record<string, unknown>
+  if (isPlainObject(obj.select)) {
+    for (const key in obj.select as Record<string, unknown>) {
+      if (!Object.prototype.hasOwnProperty.call(obj.select, key)) continue
+      if (key === '_count') continue
+      const v = (obj.select as Record<string, unknown>)[key]
+      if (isPlainObject(v)) return true
+    }
+  }
+  if (isPlainObject(obj.include)) {
+    for (const key in obj.include as Record<string, unknown>) {
+      if (!Object.prototype.hasOwnProperty.call(obj.include, key)) continue
+      const v = (obj.include as Record<string, unknown>)[key]
+      if (v !== false) return true
+    }
+  }
+  return false
+}
+
 function extractNestedToOneRelations(
   relArgs: unknown,
   relModel: Model,
@@ -249,7 +270,10 @@ function extractNestedToOneRelations(
     const nestedModel = schemaByName.get(field.relatedModel!)
     if (!nestedModel) continue
 
-    if (hasNestedRelationInArgs(entry.value, nestedModel)) continue
+    const hasNestedBySchema = hasNestedRelationInArgs(entry.value, nestedModel)
+    const hasNestedByShape = hasRelationLikeValuesInArgs(entry.value)
+
+    if (hasNestedBySchema || hasNestedByShape) continue
 
     toOneRelations.push({
       name: entry.name,
