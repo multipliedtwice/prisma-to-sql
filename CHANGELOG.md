@@ -1,3 +1,10 @@
+# [1.81.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.4...v1.81.0) (2026-04-18)
+
+
+### Features
+
+* **includes.ts:** add hasRelationLikeValuesInArgs function to check for relation-like values in arguments ([e13f15e](https://github.com/multipliedtwice/prisma-to-sql/commit/e13f15e103dcb589507c2e0c98e251aba1fe979b))
+
 ## [1.80.4](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.3...v1.80.4) (2026-04-08)
 
 
