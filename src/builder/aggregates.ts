@@ -42,8 +42,6 @@ import { buildInCondition } from './shared/in-operator-builder'
 type AggregateKey = '_count' | '_sum' | '_avg' | '_min' | '_max'
 type LogicalKey = 'AND' | 'OR' | 'NOT'
 
-const MAX_NOT_DEPTH = 50
-
 const AGGREGATES: ReadonlyArray<[Exclude<AggregateKey, '_count'>, string]> = [
   ['_sum', 'SUM'],
   ['_avg', 'AVG'],
@@ -205,9 +203,9 @@ function buildSimpleComparison(
 ): string {
   assertHavingOp(op)
 
-  if (depth > MAX_NOT_DEPTH) {
+  if (depth > LIMITS.MAX_NOT_DEPTH) {
     throw new Error(
-      `NOT operator nesting too deep in HAVING (max ${MAX_NOT_DEPTH} levels).`,
+      `NOT operator nesting too deep in HAVING (max ${LIMITS.MAX_NOT_DEPTH} levels).`,
     )
   }
 

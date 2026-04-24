@@ -1,6 +1,6 @@
 import { Model, Field } from '../../types'
 import { SqlDialect, jsonBuildObject } from '../../sql-builder-dialect'
-import { SQL_TEMPLATES, SQL_SEPARATORS } from '../shared/constants'
+import { SQL_TEMPLATES, SQL_SEPARATORS, LIMITS } from '../shared/constants'
 import { buildTableReference, quote, quoteColumn } from '../shared/sql-utils'
 import { ParamStore } from '../shared/param-store'
 import { IncludeSpec } from '../shared/types'
@@ -26,7 +26,6 @@ const INCLUDE_SCOPE_SEGMENT = '.include'
 const PG_EMPTY_JSON_ARRAY = "'[]'::json"
 const SQLITE_EMPTY_JSON_ARRAY = "json('[]')"
 export const DEFAULT_PRIMARY_KEY = 'id'
-const JOIN_INCLUDE_MAX_DEPTH = 0
 
 type OptionalIntOrDynamic = number | string | undefined
 
@@ -90,7 +89,7 @@ export function canUseJoinInclude(
 ): boolean {
   if (dialect !== 'postgres') return false
   if (!isList) return false
-  if (depth > JOIN_INCLUDE_MAX_DEPTH) return false
+  if (depth > LIMITS.JOIN_INCLUDE_MAX_DEPTH) return false
   if (outerHasLimit) return false
   if (hasNestedIncludes) return false
   if (isDynamicParameter(takeVal) || isDynamicParameter(skipVal)) return false

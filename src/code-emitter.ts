@@ -277,6 +277,11 @@ function generateImports(runtimeImportPath: string): string {
   setRelationStats,
   setRoundtripRowEquivalent,
   setJsonRowFactor,
+  setLimits,
+  setStrategyConfig,
+  rebuildQueryCache,
+  type LimitsConfig,
+  type StrategyConfig,
   type LateralRelationMeta, 
   type PrismaMethod, 
   type Model, 
@@ -653,6 +658,10 @@ function generateExtension(runtimeImportPath: string): string {
   postgres?: any
   sqlite?: any
   debug?: boolean
+  /** Override query builder limits (MAX_INCLUDE_DEPTH, MAX_INCLUDES_PER_LEVEL, etc.) */
+  limits?: Partial<LimitsConfig>
+  /** Override strategy cost-model parameters (roundtripRowEquivalent, defaultFanOut, etc.) */
+  strategy?: Partial<StrategyConfig>
   onQuery?: (info: {
     model: string
     method: string
@@ -670,6 +679,15 @@ function generateExtension(runtimeImportPath: string): string {
   const actualDialect = postgres ? 'postgres' : 'sqlite'
   if (actualDialect !== DIALECT) {
     throw new Error(\`Generated code is for \${DIALECT}, but you provided \${actualDialect}\`)
+  }
+
+  if (config.limits) {
+    setLimits(config.limits)
+    rebuildQueryCache()
+  }
+
+  if (config.strategy) {
+    setStrategyConfig(config.strategy)
   }
 
   if ((DIALECT as string) === 'sqlite') {

@@ -10,7 +10,11 @@ import {
   buildGroupBySql,
 } from './builder/aggregates'
 import { buildTableReference } from './builder/shared/sql-utils'
-import { SQL_TEMPLATES, SQL_RESERVED_WORDS } from './builder/shared/constants'
+import {
+  SQL_TEMPLATES,
+  SQL_RESERVED_WORDS,
+  LIMITS,
+} from './builder/shared/constants'
 import { createBoundedCache } from './utils/s3-fifo'
 import { tryFastPath } from './fast-path'
 import { pgToSqlitePlaceholders } from './builder/shared/sql-param-scanner'
@@ -54,8 +58,17 @@ class QueryCacheStats {
   }
 }
 
-const queryCache = createBoundedCache<string, SqlResult>(1000)
+let queryCache = createBoundedCache<string, SqlResult>(LIMITS.QUERY_CACHE_SIZE)
 const queryCacheStats = new QueryCacheStats()
+
+/**
+ * Recreate the query cache with the current LIMITS.QUERY_CACHE_SIZE.
+ * Call after setLimits({ QUERY_CACHE_SIZE: N }) to apply the new size.
+ */
+export function rebuildQueryCache(): void {
+  queryCache = createBoundedCache<string, SqlResult>(LIMITS.QUERY_CACHE_SIZE)
+  queryCacheStats.reset()
+}
 
 export function makeAlias(name: string): string {
   const base = name

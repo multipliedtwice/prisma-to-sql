@@ -11,10 +11,9 @@ import {
 } from './builder/select/lateral-reducer'
 import type { LateralRelationMeta } from './builder/select/lateral-join'
 import type { Model } from './types'
+import { LIMITS } from './builder/shared/constants'
 
 export const SQLITE_STMT_CACHE = new WeakMap<any, Map<string, any>>()
-
-const STMT_CACHE_LIMIT = 1000
 
 export function getOrPrepareStatement(client: any, sql: string): any {
   let cache = SQLITE_STMT_CACHE.get(client)
@@ -33,7 +32,7 @@ export function getOrPrepareStatement(client: any, sql: string): any {
   stmt = client.prepare(sql)
   cache.set(sql, stmt)
 
-  if (cache.size > STMT_CACHE_LIMIT) {
+  if (cache.size > LIMITS.STMT_CACHE_SIZE) {
     const firstKey = cache.keys().next().value
     cache.delete(firstKey!)
   }

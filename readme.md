@@ -350,6 +350,164 @@ That includes preserving types like:
 }
 ```
 
+## Configuration
+
+`prisma-sql` exposes every internal limit and strategy constant so you can tune the query builder for your schema without forking the library.
+
+### Extension Config
+
+Pass `limits` and/or `strategy` directly to `speedExtension`:
+
+```typescript
+import { speedExtension } from './generated/sql'
+
+const db = prisma.$extends(
+  speedExtension({
+    postgres: sql,
+    limits: {
+      MAX_INCLUDES_PER_LEVEL: 20,
+      MAX_INCLUDE_DEPTH: 8,
+    },
+    strategy: {
+      defaultFanOut: 5,
+      roundtripRowEquivalent: 40,
+    },
+  }),
+)
+```
+
+Both fields accept partial objects — only the keys you provide are overwritten; everything else stays at its default.
+
+### Programmatic API
+
+If you use `prisma-sql` as a library (without the generated extension), the same knobs are available as standalone functions:
+
+```typescript
+import {
+  setLimits,
+  getLimits,
+  resetLimits,
+  setStrategyConfig,
+  getStrategyConfig,
+  rebuildQueryCache,
+} from 'prisma-sql'
+
+setLimits({ MAX_INCLUDES_PER_LEVEL: 25 })
+rebuildQueryCache() // required after changing QUERY_CACHE_SIZE
+
+setStrategyConfig({ correlatedBoundedFactor: 0.3 })
+
+console.log(getLimits())
+console.log(getStrategyConfig())
+
+resetLimits() // restore all defaults
+```
+
+> **Note:** `rebuildQueryCache()` must be called after changing `QUERY_CACHE_SIZE`. All other limit changes take effect immediately on the next query.
+
+---
+
+### Query Builder Limits
+
+These control safety boundaries and complexity caps for generated SQL.
+
+| Key                            | Default      | Description                                                                                                                               |
+| ------------------------------ | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_INCLUDE_DEPTH`            | `5`          | Max depth of nested `include`/`select` relations. Increase for deeply nested schemas.                                                     |
+| `MAX_INCLUDES_PER_LEVEL`       | `10`         | Max number of relations included at a single nesting level. Increase for wide schemas with many relations.                                |
+| `MAX_TOTAL_SUBQUERIES`         | `100`        | Total correlated subqueries allowed across the entire query tree. Guards against exponential blowup from deep × wide includes.            |
+| `MAX_SELF_REFERENTIAL_DEPTH`   | `2`          | Max times a model can appear in its own include chain. Controls tree/graph self-referencing models like `Category → children → children`. |
+| `MAX_QUERY_DEPTH`              | `50`         | Max nesting depth for `WHERE` clauses (`AND`/`OR`/`NOT`).                                                                                 |
+| `MAX_NOT_DEPTH`                | `50`         | Max nesting depth for `NOT` operator composition in both `WHERE` and `HAVING`.                                                            |
+| `MAX_HAVING_DEPTH`             | `50`         | Max nesting depth for `HAVING` clause.                                                                                                    |
+| `MAX_NESTED_JOIN_DEPTH`        | `10`         | Max depth for flat-join and lateral-join relation traversal.                                                                              |
+| `MAX_RELATION_ORDER_BY_DEPTH`  | `10`         | Max depth for relation-based `orderBy` resolution (e.g. `orderBy: { author: { name: 'asc' } }`).                                          |
+| `JOIN_INCLUDE_MAX_DEPTH`       | `0`          | Max depth at which join-based include strategy is allowed. `0` means top-level only.                                                      |
+| `MAX_WHERE_IN_RECURSIVE_DEPTH` | `10`         | Max recursion depth for where-in segment resolution.                                                                                      |
+| `MAX_ARRAY_SIZE`               | `10000`      | Max elements in array params (`in`, `hasSome`, etc).                                                                                      |
+| `MAX_STRING_LENGTH`            | `10000`      | Max string length for `LIKE` and JSON string operators.                                                                                   |
+| `MAX_LIMIT_OFFSET`             | `2147483647` | PostgreSQL engine limit for `LIMIT`/`OFFSET`.                                                                                             |
+| `MIN_NEGATIVE_TAKE`            | `-10000`     | Minimum allowed negative `take` value.                                                                                                    |
+| `MAX_ALIAS_COUNTER_THRESHOLD`  | `1000`       | Safety threshold before alias counter overflow.                                                                                           |
+| `QUERY_CACHE_SIZE`             | `1000`       | Max entries in the SQL query cache. Call `rebuildQueryCache()` after changing.                                                            |
+| `STMT_CACHE_SIZE`              | `1000`       | Max entries in the SQLite prepared statement cache per client.                                                                            |
+
+**Example — wide schema with 15+ relations per model:**
+
+```typescript
+speedExtension({
+  postgres: sql,
+  limits: {
+    MAX_INCLUDES_PER_LEVEL: 20,
+    MAX_TOTAL_SUBQUERIES: 200,
+  },
+})
+```
+
+**Example — deeply nested tree structure (5+ levels):**
+
+```typescript
+speedExtension({
+  postgres: sql,
+  limits: {
+    MAX_INCLUDE_DEPTH: 8,
+    MAX_SELF_REFERENTIAL_DEPTH: 5,
+  },
+})
+```
+
+---
+
+### Strategy Cost-Model Parameters
+
+These control how `prisma-sql` chooses between query strategies (flat-join, where-in, correlated subqueries). Tuning these is optional — the defaults are calibrated from benchmarks — but can help if your database has unusual latency characteristics or data distributions.
+
+| Key                            | Default | Description                                                                                                                                                               |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roundtripRowEquivalent`       | `73`    | Cost (in row-equivalents) of one additional database roundtrip. Lower values favor multi-roundtrip strategies like where-in. Higher values favor single-query strategies. |
+| `jsonRowFactor`                | `1.5`   | Multiplier for JSON aggregation overhead per row. Affects flat-join cost estimation.                                                                                      |
+| `correlatedBoundedFactor`      | `0.5`   | Cost factor for correlated subqueries when the child has a `LIMIT`. Lower = cheaper = more likely to pick correlated.                                                     |
+| `correlatedUnboundedFactor`    | `3.0`   | Cost factor for correlated subqueries when the child is unbounded. Higher = more expensive = favors where-in.                                                             |
+| `correlatedWherePenalty`       | `3.0`   | Extra cost multiplier applied when a child relation has a `WHERE` clause inside correlated subqueries.                                                                    |
+| `defaultFanOut`                | `10`    | Assumed average children per parent when no relation statistics are available.                                                                                            |
+| `defaultParentCount`           | `50`    | Assumed parent row count when `take` is not specified on the root query.                                                                                                  |
+| `singleParentMaxFlatJoinDepth` | `2`     | Max include depth that allows the flat-join strategy for `findFirst`/`findUnique`.                                                                                        |
+| `minStatsCoverage`             | `0.1`   | Minimum stats coverage (0–1) to trust collected relation cardinality data. Below this, `defaultFanOut` is used.                                                           |
+| `dynamicTakeEstimate`          | `10`    | Assumed `take` value when the actual value is a runtime dynamic parameter.                                                                                                |
+
+**Example — low-latency local database (roundtrips are cheap):**
+
+```typescript
+speedExtension({
+  postgres: sql,
+  strategy: {
+    roundtripRowEquivalent: 20,
+  },
+})
+```
+
+**Example — remote database with high latency (minimize roundtrips):**
+
+```typescript
+speedExtension({
+  postgres: sql,
+  strategy: {
+    roundtripRowEquivalent: 200,
+  },
+})
+```
+
+**Example — schema with sparse relations (most parents have 0–2 children):**
+
+```typescript
+speedExtension({
+  postgres: sql,
+  strategy: {
+    defaultFanOut: 2,
+  },
+})
+```
+
 ### Pagination and ordering
 
 ```ts

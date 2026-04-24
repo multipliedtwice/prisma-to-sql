@@ -13,6 +13,7 @@ import {
   SQL_SEPARATORS,
   SQL_TEMPLATES,
   Ops,
+  LIMITS,
 } from '../shared/constants'
 import { createError } from '../shared/errors'
 import { col } from '../shared/sql-utils'
@@ -30,7 +31,6 @@ import { buildNullComparison } from '../shared/null-comparison'
 
 type LogicalOperator = 'AND' | 'OR' | 'NOT'
 
-const MAX_QUERY_DEPTH = 50
 const EMPTY_JOINS: readonly string[] = []
 const JSON_OPS = new Set([
   Ops.PATH,
@@ -148,9 +148,9 @@ function buildWhereInternal(
   ctx: BuildContext,
   builder: IWhereBuilder,
 ): QueryResult {
-  if (ctx.depth > MAX_QUERY_DEPTH) {
+  if (ctx.depth > LIMITS.MAX_QUERY_DEPTH) {
     throw createError(
-      `Query nesting too deep (max ${MAX_QUERY_DEPTH} levels). This usually indicates a circular reference.`,
+      `Query nesting too deep (max ${LIMITS.MAX_QUERY_DEPTH} levels). This usually indicates a circular reference.`,
       { path: ctx.path, modelName: ctx.model.name },
     )
   }

@@ -16,23 +16,69 @@ type RelStats = {
 type RelationStatsMap = Record<string, Record<string, RelStats>>
 
 let globalRelationStats: RelationStatsMap | undefined
-let globalRoundtripRowEquivalent = 73
-let globalJsonRowFactor = 1.5
 
-const CORRELATED_S_BOUNDED = 0.5
-const CORRELATED_S_UNBOUNDED = 3.0
-const CORRELATED_WHERE_PENALTY = 3.0
-const DEFAULT_FAN = 10
-const DEFAULT_PARENT_COUNT = 50
-const MIN_STATS_COVERAGE = 0.1
-const SINGLE_PARENT_MAX_FLAT_JOIN_DEPTH = 2
+export interface StrategyConfig {
+  /** Cost (in row-equivalents) of one additional database roundtrip. Default: 73 */
+  roundtripRowEquivalent: number
+  /** Multiplier for JSON aggregation overhead per row. Default: 1.5 */
+  jsonRowFactor: number
+  /** Correlated subquery cost factor when child has LIMIT. Default: 0.5 */
+  correlatedBoundedFactor: number
+  /** Correlated subquery cost factor when child is unbounded. Default: 3.0 */
+  correlatedUnboundedFactor: number
+  /** Extra cost multiplier when child relation has a WHERE clause. Default: 3.0 */
+  correlatedWherePenalty: number
+  /** Assumed fan-out when no relation stats are available. Default: 10 */
+  defaultFanOut: number
+  /** Assumed parent row count when take is not specified. Default: 50 */
+  defaultParentCount: number
+  /** Max include depth that allows flat-join for single-parent queries. Default: 2 */
+  singleParentMaxFlatJoinDepth: number
+  /** Minimum stats coverage to trust relation cardinality data. Default: 0.1 */
+  minStatsCoverage: number
+  /** Assumed take value for dynamic (runtime) parameters. Default: 10 */
+  dynamicTakeEstimate: number
+}
+
+const strategyStore: StrategyConfig = {
+  roundtripRowEquivalent: 73,
+  jsonRowFactor: 1.5,
+  correlatedBoundedFactor: 0.5,
+  correlatedUnboundedFactor: 3.0,
+  correlatedWherePenalty: 3.0,
+  defaultFanOut: 10,
+  defaultParentCount: 50,
+  singleParentMaxFlatJoinDepth: 2,
+  minStatsCoverage: 0.1,
+  dynamicTakeEstimate: 10,
+}
+
+/**
+ * Override one or more strategy cost-model parameters.
+ * Only provided keys are updated; others keep their current values.
+ */
+export function setStrategyConfig(overrides: Partial<StrategyConfig>): void {
+  for (const key of Object.keys(overrides) as Array<keyof StrategyConfig>) {
+    const val = overrides[key]
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      strategyStore[key] = val
+    }
+  }
+}
+
+/**
+ * Returns a frozen snapshot of the current strategy config.
+ */
+export function getStrategyConfig(): Readonly<StrategyConfig> {
+  return Object.freeze({ ...strategyStore })
+}
 
 export function setRoundtripRowEquivalent(value: number): void {
-  globalRoundtripRowEquivalent = value
+  strategyStore.roundtripRowEquivalent = value
 }
 
 export function setJsonRowFactor(value: number): void {
-  globalJsonRowFactor = value
+  strategyStore.jsonRowFactor = value
 }
 
 export function setRelationStats(stats: RelationStatsMap): void {
@@ -56,15 +102,14 @@ interface RelationCostNode {
 }
 
 function getFanOut(modelName: string, relName: string): number {
-  if (!globalRelationStats) return DEFAULT_FAN
+  if (!globalRelationStats) return strategyStore.defaultFanOut
   const modelStats = globalRelationStats[modelName]
-  if (!modelStats) return DEFAULT_FAN
+  if (!modelStats) return strategyStore.defaultFanOut
   const relStat = modelStats[relName]
-  if (!relStat || relStat.coverage < MIN_STATS_COVERAGE) return DEFAULT_FAN
+  if (!relStat || relStat.coverage < strategyStore.minStatsCoverage)
+    return strategyStore.defaultFanOut
   return relStat.avg
 }
-
-const DYNAMIC_TAKE_ESTIMATE = 10
 
 function readTake(relArgs: unknown): number {
   if (!isPlainObject(relArgs)) return Infinity
@@ -72,7 +117,7 @@ function readTake(relArgs: unknown): number {
   if ('take' in obj && typeof obj.take === 'number' && obj.take > 0)
     return obj.take
   if ('take' in obj && obj.take != null && isDynamicParameter(obj.take))
-    return DYNAMIC_TAKE_ESTIMATE
+    return strategyStore.dynamicTakeEstimate
   return Infinity
 }
 
@@ -185,7 +230,7 @@ function computeWhereInCost(
   nodes: RelationCostNode[],
   parentCount: number,
 ): number {
-  const R = globalRoundtripRowEquivalent
+  const R = strategyStore.roundtripRowEquivalent
   let totalRows = 0
   let roundtrips = 0
 
@@ -209,14 +254,18 @@ function computeCorrelatedCost(
   nodes: RelationCostNode[],
   parentCount: number,
 ): number {
-  const R = globalRoundtripRowEquivalent
+  const R = strategyStore.roundtripRowEquivalent
 
   function subqueryCost(ns: RelationCostNode[]): number {
     let total = 0
     for (const n of ns) {
       const sBase =
-        n.take !== Infinity ? CORRELATED_S_BOUNDED : CORRELATED_S_UNBOUNDED
-      const s = n.hasChildWhere ? sBase * CORRELATED_WHERE_PENALTY : sBase
+        n.take !== Infinity
+          ? strategyStore.correlatedBoundedFactor
+          : strategyStore.correlatedUnboundedFactor
+      const s = n.hasChildWhere
+        ? sBase * strategyStore.correlatedWherePenalty
+        : sBase
       let nodeCost = n.eff * s
       if (n.children.length > 0) {
         nodeCost += n.eff * subqueryCost(n.children)
@@ -356,10 +405,10 @@ export function pickIncludeStrategy(params: {
   const isSingleParent = method === 'findFirst' || method === 'findUnique'
   if (isSingleParent && canFlatJoin && !blocked) {
     const depth = countIncludeDepth(includeSpec, model, schemas, 0, modelMap)
-    if (depth <= SINGLE_PARENT_MAX_FLAT_JOIN_DEPTH) {
+    if (depth <= strategyStore.singleParentMaxFlatJoinDepth) {
       if (debug)
         console.log(
-          `  [strategy] ${model.name}: single parent depth≤${SINGLE_PARENT_MAX_FLAT_JOIN_DEPTH} → flat-join`,
+          `  [strategy] ${model.name}: single parent depth≤${strategyStore.singleParentMaxFlatJoinDepth} → flat-join`,
         )
       return 'flat-join'
     }
@@ -410,7 +459,7 @@ export function pickIncludeStrategy(params: {
     return 'where-in'
   }
 
-  const P = isSingleParent ? 1 : takeValue ?? DEFAULT_PARENT_COUNT
+  const P = isSingleParent ? 1 : takeValue ?? strategyStore.defaultParentCount
 
   const costW = computeWhereInCost(costTree, P)
   const costC = computeCorrelatedCost(costTree, P)

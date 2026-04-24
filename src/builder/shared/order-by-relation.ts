@@ -7,15 +7,13 @@ import {
   getScalarFieldSet,
   getFieldIndices,
 } from './model-field-cache'
-import { SQL_SEPARATORS } from './constants'
+import { SQL_SEPARATORS, LIMITS } from './constants'
 import { isPlainObject, isNotNullish } from './validators/type-guards'
 import {
   expandOrderByInput,
   normalizeAndValidateOrderBy,
 } from './order-by-utils'
 import { parseOrderByValue, buildOrderByFragment } from '../pagination'
-
-const MAX_RELATION_ORDER_BY_DEPTH = 10
 
 interface OrderByWithRelationsResult {
   sql: string
@@ -64,9 +62,9 @@ function resolveRelationOrderByChain(
   ctx: RelationOrderByContext,
   depth: number,
 ): string[] {
-  if (depth > MAX_RELATION_ORDER_BY_DEPTH) {
+  if (depth > LIMITS.MAX_RELATION_ORDER_BY_DEPTH) {
     throw new Error(
-      `Relation orderBy nesting too deep (max ${MAX_RELATION_ORDER_BY_DEPTH} levels)`,
+      `Relation orderBy nesting too deep (max ${LIMITS.MAX_RELATION_ORDER_BY_DEPTH} levels)`,
     )
   }
 

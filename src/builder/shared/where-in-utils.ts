@@ -1,8 +1,7 @@
 import type { Model } from '../../types'
 import type { WhereInSegment } from '../select/segment-planner'
 import { getPrimaryKeyField } from './primary-key-utils'
-
-const MAX_RECURSIVE_DEPTH = 10
+import { LIMITS } from './constants'
 
 function buildParentKeyIndex(
   parentRows: any[],
@@ -131,7 +130,6 @@ function initRelationPlaceholders(row: any, segments: WhereInSegment[]): void {
 }
 
 export {
-  MAX_RECURSIVE_DEPTH,
   buildParentKeyIndex,
   needsPerParentPagination,
   stitchChildrenToParents,

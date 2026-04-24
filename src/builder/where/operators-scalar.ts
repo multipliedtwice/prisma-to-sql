@@ -4,14 +4,18 @@ import {
   caseInsensitiveEquals,
   SqlDialect,
 } from '../../sql-builder-dialect'
-import { Ops, Modes, SQL_TEMPLATES, Wildcards } from '../shared/constants'
+import {
+  Ops,
+  Modes,
+  SQL_TEMPLATES,
+  Wildcards,
+  LIMITS,
+} from '../shared/constants'
 import { createError } from '../shared/errors'
 import { ParamStore } from '../shared/param-store'
 import { isNotNullish, isPlainObject } from '../shared/validators/type-guards'
 import { tryBuildNullComparison } from '../shared/null-comparison'
 import { buildInCondition } from '../shared/in-operator-builder'
-
-const MAX_NOT_DEPTH = 50
 
 interface ScalarOperatorOptions {
   mode?: ModeType
@@ -134,9 +138,9 @@ export function buildScalarOperator(
 
   if (val === undefined) return ''
 
-  if (depth > MAX_NOT_DEPTH) {
+  if (depth > LIMITS.MAX_NOT_DEPTH) {
     throw new Error(
-      `NOT operator nesting too deep (max ${MAX_NOT_DEPTH} levels). This usually indicates a circular reference or adversarial input.`,
+      `NOT operator nesting too deep (max ${LIMITS.MAX_NOT_DEPTH} levels). This usually indicates a circular reference or adversarial input.`,
     )
   }
 

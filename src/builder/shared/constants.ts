@@ -156,7 +156,46 @@ export const REGEX_CACHE = {
   VALID_IDENTIFIER: /^[a-z_][a-z0-9_]*$/,
 } as const
 
-export const LIMITS = Object.freeze({
+export interface LimitsConfig {
+  /** Max nesting depth for WHERE clauses (AND/OR/NOT). Default: 50 */
+  MAX_QUERY_DEPTH: number
+  /** Max elements in array params (in, hasSome, etc). Default: 10000 */
+  MAX_ARRAY_SIZE: number
+  /** Max string length for LIKE/JSON string operators. Default: 10000 */
+  MAX_STRING_LENGTH: number
+  /** Max nesting depth for HAVING clause. Default: 50 */
+  MAX_HAVING_DEPTH: number
+  /** Max depth of nested include/select relations. Default: 5 */
+  MAX_INCLUDE_DEPTH: number
+  /** Max number of relations included at a single level. Default: 10 */
+  MAX_INCLUDES_PER_LEVEL: number
+  /** Max total correlated subqueries across the entire query. Default: 100 */
+  MAX_TOTAL_SUBQUERIES: number
+  /** Max times a model can appear in its own include chain. Default: 2 */
+  MAX_SELF_REFERENTIAL_DEPTH: number
+  /** Max nesting depth for NOT operator composition. Default: 50 */
+  MAX_NOT_DEPTH: number
+  /** Postgres max integer for LIMIT/OFFSET. Default: 2147483647 */
+  MAX_LIMIT_OFFSET: number
+  /** Minimum allowed negative take value. Default: -10000 */
+  MIN_NEGATIVE_TAKE: number
+  /** Max depth for flat-join and lateral-join traversal. Default: 10 */
+  MAX_NESTED_JOIN_DEPTH: number
+  /** Safety threshold before alias counter overflow. Default: 1000 */
+  MAX_ALIAS_COUNTER_THRESHOLD: number
+  /** Max depth for relation-based orderBy resolution. Default: 10 */
+  MAX_RELATION_ORDER_BY_DEPTH: number
+  /** Max depth for join-based include strategy (0 = top-level only). Default: 0 */
+  JOIN_INCLUDE_MAX_DEPTH: number
+  /** Max recursion depth for where-in segment resolution. Default: 10 */
+  MAX_WHERE_IN_RECURSIVE_DEPTH: number
+  /** Max entries in the SQL query cache. Default: 1000 */
+  QUERY_CACHE_SIZE: number
+  /** Max entries in the SQLite prepared statement cache. Default: 1000 */
+  STMT_CACHE_SIZE: number
+}
+
+const LIMITS_DEFAULTS: LimitsConfig = {
   MAX_QUERY_DEPTH: 50,
   MAX_ARRAY_SIZE: 10000,
   MAX_STRING_LENGTH: 10000,
@@ -170,7 +209,46 @@ export const LIMITS = Object.freeze({
   MIN_NEGATIVE_TAKE: -10000,
   MAX_NESTED_JOIN_DEPTH: 10,
   MAX_ALIAS_COUNTER_THRESHOLD: 1000,
-} as const)
+  MAX_RELATION_ORDER_BY_DEPTH: 10,
+  JOIN_INCLUDE_MAX_DEPTH: 0,
+  MAX_WHERE_IN_RECURSIVE_DEPTH: 10,
+  QUERY_CACHE_SIZE: 1000,
+  STMT_CACHE_SIZE: 1000,
+}
+
+const limitsStore: LimitsConfig = { ...LIMITS_DEFAULTS }
+
+/**
+ * @returns Current limits configuration (mutable reference).
+ */
+export const LIMITS: LimitsConfig = limitsStore
+
+/**
+ * Override one or more query builder limits.
+ * Only provided keys are updated; others keep their current values.
+ */
+export function setLimits(overrides: Partial<LimitsConfig>): void {
+  for (const key of Object.keys(overrides) as Array<keyof LimitsConfig>) {
+    const val = overrides[key]
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      limitsStore[key] = val
+    }
+  }
+}
+
+/**
+ * Returns a frozen snapshot of the current limits.
+ */
+export function getLimits(): Readonly<LimitsConfig> {
+  return Object.freeze({ ...limitsStore })
+}
+
+/**
+ * Reset all limits to their built-in defaults.
+ */
+export function resetLimits(): void {
+  Object.assign(limitsStore, LIMITS_DEFAULTS)
+}
 
 export const AGGREGATE_PREFIXES = new Set([
   '_count',

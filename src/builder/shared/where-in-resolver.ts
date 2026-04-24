@@ -4,7 +4,6 @@ import { planQueryStrategy } from '../select/segment-planner'
 import { buildSQL } from '../..'
 import { buildReducerConfig, reduceFlatRows } from '../select/reducer'
 import {
-  MAX_RECURSIVE_DEPTH,
   buildParentKeyIndex,
   needsPerParentPagination,
   stitchChildrenToParents,
@@ -13,6 +12,7 @@ import {
   ensureOrderByPk,
   initRelationPlaceholders,
 } from './where-in-utils'
+import { LIMITS } from './constants'
 import { withValidationSuppressed } from './validators/sql-validators'
 import { resolvePrerenderedParams } from './prerendered-where-in'
 
@@ -101,7 +101,7 @@ export async function resolveSingleSegment(
   execute: ExecuteFn,
   depth: number,
 ): Promise<void> {
-  if (depth > MAX_RECURSIVE_DEPTH) return
+  if (depth > LIMITS.MAX_WHERE_IN_RECURSIVE_DEPTH) return
 
   if (segment.prerendered) {
     const handled = await resolveWithPrerendered(
@@ -209,7 +209,7 @@ export async function resolveSegments(
   execute: ExecuteFn,
   depth: number,
 ): Promise<void> {
-  if (depth > MAX_RECURSIVE_DEPTH) return
+  if (depth > LIMITS.MAX_WHERE_IN_RECURSIVE_DEPTH) return
   if (segments.length === 0 || parentRows.length === 0) return
 
   if (segments.length === 1) {

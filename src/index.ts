@@ -5,7 +5,7 @@ import {
   generateSQL as generateSQLInternal,
   SQLDirective,
 } from './sql-generator'
-import { buildSQLWithCache } from './query-cache'
+import { buildSQLWithCache, rebuildQueryCache } from './query-cache'
 
 import {
   createTransactionExecutor,
@@ -127,6 +127,7 @@ export {
   getPrimaryKeyField,
   buildLateralReducerConfig,
   reduceLateralRows,
+  rebuildQueryCache,
 }
 export { buildReducerConfig, reduceFlatRows } from './builder/select/reducer'
 export type { ReducerConfig } from './builder/select/reducer'
@@ -157,4 +158,13 @@ export {
   setRoundtripRowEquivalent,
   setJsonRowFactor,
   countIncludeDepth,
+  setStrategyConfig,
+  getStrategyConfig,
+  type StrategyConfig,
 } from './builder/select/strategy-estimator'
+export {
+  setLimits,
+  getLimits,
+  resetLimits,
+  type LimitsConfig,
+} from './builder/shared/constants'
