@@ -1,3 +1,10 @@
+# [1.82.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.81.0...v1.82.0) (2026-04-24)
+
+
+### Features
+
+* introduce configurable limits and strategy parameters for query builder ([fadedfb](https://github.com/multipliedtwice/prisma-to-sql/commit/fadedfbffb5bfeae3e302bfbed46abafa3e2b2a6))
+
 # [1.81.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.80.4...v1.81.0) (2026-04-18)
 
 
