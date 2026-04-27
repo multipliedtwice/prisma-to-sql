@@ -405,19 +405,13 @@ async function measureJsonOverhead(params: {
 
   const rawSql = `SELECT * FROM ${tableName} LIMIT ${limit}`
 
-  const colsResult = await executor.query(
-    `SELECT column_name FROM information_schema.columns WHERE table_name = ${tableName.replace(/"/g, "'")} LIMIT 10`,
-  )
-
-  let aggSql: string
-  if (colsResult.length >= 3) {
-    const cols = colsResult.slice(0, 6).map((r) => `"${r.column_name}"`)
-    const aggExprs = cols.map((c) => `array_agg(${c})`).join(', ')
-    const groupCol = cols[0]
-    aggSql = `SELECT ${groupCol}, ${aggExprs} FROM ${tableName} GROUP BY ${groupCol} LIMIT ${limit}`
-  } else {
-    aggSql = `SELECT json_agg(t) FROM (SELECT * FROM ${tableName} LIMIT ${limit}) t`
-  }
+  const aggSql = `
+    WITH sample AS (
+      SELECT * FROM ${tableName} LIMIT ${limit}
+    )
+    SELECT COALESCE(json_agg(sample), '[]'::json) AS rows
+    FROM sample
+  `.trim()
 
   for (let i = 0; i < WARMUP; i++) {
     await executor.query(rawSql)
@@ -445,7 +439,7 @@ async function measureJsonOverhead(params: {
   const factor = medianRaw > 0.01 ? medianAgg / medianRaw : 3.0
 
   console.log(`  [json] Raw ${limit} rows: ${medianRaw.toFixed(3)}ms`)
-  console.log(`  [json] array_agg grouped: ${medianAgg.toFixed(3)}ms`)
+  console.log(`  [json] json_agg ${limit} rows: ${medianAgg.toFixed(3)}ms`)
   console.log(`  [json] Overhead factor: ${factor.toFixed(2)}x`)
 
   return Math.max(1.5, Math.min(8.0, factor))
