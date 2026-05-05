@@ -7,6 +7,11 @@ import {
   stripPrismaParams,
 } from './utils/pure-utils'
 import { SqlDialect } from './sql-builder-dialect'
+import {
+  setRelationStats,
+  setRoundtripRowEquivalent,
+  setJsonRowFactor,
+} from './builder/select/strategy-estimator'
 
 type Executor = {
   query: (
@@ -32,10 +37,17 @@ export type RelStats = {
 
 export type RelationStatsMap = Record<string, Record<string, RelStats>>
 
+export type EdgeTiming = {
+  ms: number
+  measuredAt: number
+}
+
 export type GeneratePlannerArtifacts = {
   relationStats: RelationStatsMap
   roundtripRowEquivalent: number
   jsonRowFactor: number
+  collectedAt: number
+  edgeTimings: Record<string, EdgeTiming>
 }
 
 type RelEdge = {
@@ -47,6 +59,10 @@ type RelEdge = {
   parentPkColumns: string[]
   childFkColumns: string[]
   isMany: boolean
+}
+
+function edgeKey(edge: RelEdge): string {
+  return `${edge.parentModel}.${edge.relName}`
 }
 
 function quoteIdent(dialect: SqlDialect, ident: string): string {
@@ -90,7 +106,6 @@ function extractMeasurableOneToManyEdges(datamodel: DMMF.Datamodel): RelEdge[] {
     const pkFields = parent.fields.filter((f) => f.isId)
     if (pkFields.length === 0) continue
 
-    const parentPk = pkFields.map((f) => f.dbName || f.name)
     const parentTable = parent.dbName || parent.name
 
     for (const f of parent.fields) {
@@ -448,10 +463,12 @@ async function measureJsonOverhead(params: {
 async function collectPostgresStatsFromCatalog(params: {
   executor: Executor
   datamodel: DMMF.Datamodel
-}): Promise<RelationStatsMap> {
+}): Promise<{ stats: RelationStatsMap; timings: Record<string, EdgeTiming> }> {
   const { executor, datamodel } = params
   const edges = extractMeasurableOneToManyEdges(datamodel)
   const out: RelationStatsMap = {}
+  const timings: Record<string, EdgeTiming> = {}
+  const now = Date.now()
 
   const tablesToAnalyze = new Set<string>()
   for (const edge of edges) {
@@ -485,6 +502,8 @@ async function collectPostgresStatsFromCatalog(params: {
   }
 
   for (const edge of edges) {
+    const key = edgeKey(edge)
+    const start = performance.now()
     const parentRows = rowCounts.get(edge.parentTable) || 0
     const childRows = rowCounts.get(edge.childTable) || 0
 
@@ -497,6 +516,7 @@ async function collectPostgresStatsFromCatalog(params: {
         max: 1,
         coverage: 0,
       }
+      timings[key] = { ms: performance.now() - start, measuredAt: now }
       continue
     }
 
@@ -563,31 +583,111 @@ async function collectPostgresStatsFromCatalog(params: {
       Math.ceil(max),
       coverage,
     )
+    timings[key] = { ms: performance.now() - start, measuredAt: now }
   }
 
-  return out
+  return { stats: out, timings }
 }
 
 async function collectPreciseCardinalities(params: {
   executor: Executor
   datamodel: DMMF.Datamodel
   dialect: SqlDialect
-}): Promise<RelationStatsMap> {
-  const { executor, datamodel, dialect } = params
+  previousArtifacts?: GeneratePlannerArtifacts
+  slowEdgeThresholdMs?: number
+  perEdgeTimeoutMs?: number
+  staleEdgeHours?: number
+}): Promise<{ stats: RelationStatsMap; timings: Record<string, EdgeTiming> }> {
+  const {
+    executor,
+    datamodel,
+    dialect,
+    previousArtifacts,
+    slowEdgeThresholdMs = 10000,
+    perEdgeTimeoutMs = 30000,
+    staleEdgeHours = 168,
+  } = params
   const edges = extractMeasurableOneToManyEdges(datamodel)
   const out: RelationStatsMap = {}
+  const timings: Record<string, EdgeTiming> = {}
+  const now = Date.now()
 
   for (const edge of edges) {
-    const sql = buildFanoutStatsSql(dialect, edge)
-    const rows = await executor.query(sql, [])
-    const row = rows[0] || {}
-    const stats = normalizeStats(row)
+    const key = edgeKey(edge)
+    const prevTiming = previousArtifacts?.edgeTimings[key]
+    const prevStats =
+      previousArtifacts?.relationStats[edge.parentModel]?.[edge.relName]
 
-    if (!out[edge.parentModel]) out[edge.parentModel] = {}
-    out[edge.parentModel][edge.relName] = stats
+    if (prevTiming && prevStats) {
+      const edgeAgeHours = (now - prevTiming.measuredAt) / (3600 * 1000)
+      const wasSlow = prevTiming.ms > slowEdgeThresholdMs
+
+      if (wasSlow && edgeAgeHours < staleEdgeHours) {
+        if (!out[edge.parentModel]) out[edge.parentModel] = {}
+        out[edge.parentModel][edge.relName] = prevStats
+        timings[key] = prevTiming
+        console.log(
+          `  ⏭ ${key} (took ${(prevTiming.ms / 1000).toFixed(1)}s last run, ${edgeAgeHours.toFixed(0)}h old < ${staleEdgeHours}h cap)`,
+        )
+        continue
+      }
+    }
+
+    const sql = buildFanoutStatsSql(dialect, edge)
+    const start = performance.now()
+
+    try {
+      const rows = await Promise.race([
+        executor.query(sql, []),
+        new Promise<never>((_, reject) => {
+          const id = setTimeout(
+            () => reject(new Error('timeout')),
+            perEdgeTimeoutMs,
+          )
+          if (typeof id === 'object' && 'unref' in id) id.unref()
+        }),
+      ])
+
+      const elapsed = performance.now() - start
+      timings[key] = { ms: elapsed, measuredAt: now }
+
+      const row = rows[0] || {}
+      const stats = normalizeStats(row)
+
+      if (!out[edge.parentModel]) out[edge.parentModel] = {}
+      out[edge.parentModel][edge.relName] = stats
+
+      if (elapsed > 5000) {
+        console.log(`  ⚠ ${key}: ${(elapsed / 1000).toFixed(1)}s`)
+      }
+    } catch (err) {
+      const elapsed = performance.now() - start
+
+      if (!out[edge.parentModel]) out[edge.parentModel] = {}
+
+      if (prevStats) {
+        out[edge.parentModel][edge.relName] = prevStats
+        console.warn(
+          `  ⚠ ${key} failed (${(elapsed / 1000).toFixed(1)}s), reusing previous: ${err instanceof Error ? err.message : err}`,
+        )
+      } else {
+        out[edge.parentModel][edge.relName] = {
+          avg: 1,
+          p95: 1,
+          p99: 1,
+          max: 1,
+          coverage: 0,
+        }
+        console.warn(
+          `  ⚠ ${key} failed (${(elapsed / 1000).toFixed(1)}s), using defaults: ${err instanceof Error ? err.message : err}`,
+        )
+      }
+
+      timings[key] = { ms: elapsed, measuredAt: now }
+    }
   }
 
-  return out
+  return { stats: out, timings }
 }
 
 async function collectRelationCardinalities(params: {
@@ -595,14 +695,30 @@ async function collectRelationCardinalities(params: {
   datamodel: DMMF.Datamodel
   dialect: SqlDialect
   mode?: 'fast' | 'precise'
-}): Promise<RelationStatsMap> {
-  const { executor, datamodel, dialect, mode = 'precise' } = params
+  previousArtifacts?: GeneratePlannerArtifacts
+  slowEdgeThresholdMs?: number
+  perEdgeTimeoutMs?: number
+  staleEdgeHours?: number
+}): Promise<{ stats: RelationStatsMap; timings: Record<string, EdgeTiming> }> {
+  const {
+    executor,
+    datamodel,
+    dialect,
+    mode = 'fast',
+    previousArtifacts,
+    slowEdgeThresholdMs,
+    perEdgeTimeoutMs,
+    staleEdgeHours,
+  } = params
 
   if (dialect === 'postgres' && mode === 'fast') {
-    const stats = await collectPostgresStatsFromCatalog({ executor, datamodel })
+    const result = await collectPostgresStatsFromCatalog({
+      executor,
+      datamodel,
+    })
 
     let allTrivial = true
-    for (const model of Object.values(stats)) {
+    for (const model of Object.values(result.stats)) {
       for (const rel of Object.values(model)) {
         if (rel.avg > 1 || rel.coverage > 0.5) {
           allTrivial = false
@@ -612,15 +728,31 @@ async function collectRelationCardinalities(params: {
       if (!allTrivial) break
     }
 
-    if (allTrivial && Object.keys(stats).length > 0) {
+    if (allTrivial && Object.keys(result.stats).length > 0) {
       console.warn('⚠ Catalog stats look stale, falling back to precise mode')
-      return collectPreciseCardinalities({ executor, datamodel, dialect })
+      return collectPreciseCardinalities({
+        executor,
+        datamodel,
+        dialect,
+        previousArtifacts,
+        slowEdgeThresholdMs,
+        perEdgeTimeoutMs,
+        staleEdgeHours,
+      })
     }
 
-    return stats
+    return result
   }
 
-  return collectPreciseCardinalities({ executor, datamodel, dialect })
+  return collectPreciseCardinalities({
+    executor,
+    datamodel,
+    dialect,
+    previousArtifacts,
+    slowEdgeThresholdMs,
+    perEdgeTimeoutMs,
+    staleEdgeHours,
+  })
 }
 
 export async function collectPlannerArtifacts(params: {
@@ -628,14 +760,36 @@ export async function collectPlannerArtifacts(params: {
   datamodel: DMMF.Datamodel
   dialect: SqlDialect
   mode?: 'fast' | 'precise'
+  previousArtifacts?: GeneratePlannerArtifacts
+  slowEdgeThresholdMs?: number
+  perEdgeTimeoutMs?: number
+  staleEdgeHours?: number
 }): Promise<GeneratePlannerArtifacts> {
-  const { executor, datamodel, dialect, mode } = params
+  const {
+    executor,
+    datamodel,
+    dialect,
+    mode = 'fast',
+    previousArtifacts,
+    slowEdgeThresholdMs,
+    perEdgeTimeoutMs,
+    staleEdgeHours,
+  } = params
 
   const largest = await findLargestTable({ executor, dialect, datamodel })
 
-  const [relationStats, roundtripRowEquivalent, jsonRowFactor] =
+  const [cardinalityResult, roundtripRowEquivalent, jsonRowFactor] =
     await Promise.all([
-      collectRelationCardinalities({ executor, datamodel, dialect, mode }),
+      collectRelationCardinalities({
+        executor,
+        datamodel,
+        dialect,
+        mode,
+        previousArtifacts,
+        slowEdgeThresholdMs,
+        perEdgeTimeoutMs,
+        staleEdgeHours,
+      }),
       measureRoundtripCost({ executor, dialect, datamodel }),
       largest && largest.rowCount >= 50 && dialect === 'postgres'
         ? measureJsonOverhead({
@@ -649,7 +803,24 @@ export async function collectPlannerArtifacts(params: {
   console.log(`  Roundtrip cost: ~${roundtripRowEquivalent} row equivalents`)
   console.log(`  JSON overhead factor: ${jsonRowFactor.toFixed(2)}x`)
 
-  return { relationStats, roundtripRowEquivalent, jsonRowFactor }
+  const slowEdges = Object.entries(cardinalityResult.timings)
+    .filter(([, t]) => t.ms > 5000)
+    .sort((a, b) => b[1].ms - a[1].ms)
+
+  if (slowEdges.length > 0) {
+    console.log(`  Slow edges:`)
+    for (const [key, t] of slowEdges) {
+      console.log(`    ${key}: ${(t.ms / 1000).toFixed(1)}s`)
+    }
+  }
+
+  return {
+    relationStats: cardinalityResult.stats,
+    roundtripRowEquivalent,
+    jsonRowFactor,
+    collectedAt: Date.now(),
+    edgeTimings: cardinalityResult.timings,
+  }
 }
 
 export function emitPlannerGeneratedModule(
@@ -664,5 +835,66 @@ export function emitPlannerGeneratedModule(
     ``,
     `export const JSON_ROW_FACTOR = ${artifacts.jsonRowFactor.toFixed(2)}`,
     ``,
+    `export const COLLECTED_AT = ${artifacts.collectedAt}`,
+    ``,
+    `export const EDGE_TIMINGS = ${stableJson(artifacts.edgeTimings)}`,
+    ``,
   ].join('\n')
+}
+
+export function parsePreviousArtifacts(
+  moduleExports: Record<string, unknown>,
+): GeneratePlannerArtifacts | null {
+  const relationStats = moduleExports.RELATION_STATS
+  const roundtrip = moduleExports.ROUNDTRIP_ROW_EQUIVALENT
+  const jsonFactor = moduleExports.JSON_ROW_FACTOR
+  const collectedAt = moduleExports.COLLECTED_AT
+  const edgeTimings = moduleExports.EDGE_TIMINGS
+
+  if (
+    !relationStats ||
+    typeof relationStats !== 'object' ||
+    typeof roundtrip !== 'number' ||
+    typeof jsonFactor !== 'number' ||
+    typeof collectedAt !== 'number'
+  ) {
+    return null
+  }
+
+  return {
+    relationStats: relationStats as RelationStatsMap,
+    roundtripRowEquivalent: roundtrip,
+    jsonRowFactor: jsonFactor,
+    collectedAt,
+    edgeTimings:
+      edgeTimings && typeof edgeTimings === 'object'
+        ? (edgeTimings as Record<string, EdgeTiming>)
+        : {},
+  }
+}
+
+/**
+ * Load planner stats from an external file path at runtime.
+ * Applies RELATION_STATS, ROUNDTRIP_ROW_EQUIVALENT, and JSON_ROW_FACTOR
+ * to the global strategy estimator. Returns true if loaded successfully.
+ */
+export function loadExternalPlannerStats(filePath: string): boolean {
+  try {
+    delete require.cache[require.resolve(filePath)]
+    const mod = require(filePath)
+
+    if (mod.RELATION_STATS && typeof mod.RELATION_STATS === 'object') {
+      setRelationStats(mod.RELATION_STATS)
+    }
+    if (typeof mod.ROUNDTRIP_ROW_EQUIVALENT === 'number') {
+      setRoundtripRowEquivalent(mod.ROUNDTRIP_ROW_EQUIVALENT)
+    }
+    if (typeof mod.JSON_ROW_FACTOR === 'number') {
+      setJsonRowFactor(mod.JSON_ROW_FACTOR)
+    }
+
+    return true
+  } catch {
+    return false
+  }
 }

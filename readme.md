@@ -751,9 +751,9 @@ Set `PRISMA_SQL_SKIP_PLANNER=true` to skip stats collection at generate time. Th
 PRISMA_SQL_SKIP_PLANNER=true npx prisma generate
 ```
 
-### Collect stats before server start
+### Collect stats at runtime
 
-Run `prisma-sql-collect-stats` as a pre-start step, after deployment, when the database is reachable.
+Run `prisma-sql-collect-stats` as a pre-start step or background job, after deployment, when the database is reachable.
 
 ```bash
 prisma-sql-collect-stats \
@@ -767,6 +767,104 @@ prisma-sql-collect-stats \
 | `--prisma-client` | `@prisma/client`                                   | Path to the compiled Prisma client (must expose `Prisma.dmmf`) |
 
 The script reads `DATABASE_URL` from the environment (supports `.env` via `dotenv`). If the connection fails or times out, it exits silently without blocking startup.
+
+### Load stats at runtime
+
+Use `loadExternalPlannerStats` to load planner stats from an external file at runtime. This is useful when the stats file is stored outside the generated SQL directory, for example on a persistent volume that survives redeployments.
+
+```ts
+import { loadExternalPlannerStats } from 'prisma-sql'
+
+const loaded = loadExternalPlannerStats(
+  '/data/planner-stats/planner.generated.js',
+)
+if (loaded) {
+  console.log('Planner stats loaded from volume')
+}
+```
+
+This applies `RELATION_STATS`, `ROUNDTRIP_ROW_EQUIVALENT`, and `JSON_ROW_FACTOR` to the global strategy estimator, overriding whatever was baked into the generated code at build time. Returns `true` on success, `false` if the file doesn't exist or can't be parsed.
+
+### Incremental collection
+
+The collector supports incremental mode. When an output file already exists, it reads previous results and can skip work that doesn't need repeating.
+
+**Freshness check:** If the existing file was written less than `PRISMA_SQL_STATS_MAX_AGE_MS` ago (default 24 hours), the collector exits immediately.
+
+**Fast mode:** By default, the collector uses PostgreSQL catalog statistics (`pg_stats`) instead of running full `GROUP BY` + `PERCENTILE_CONT` queries per relation. This completes in seconds instead of minutes. If catalog stats appear stale (all relations show trivial cardinality), it falls back to precise mode automatically.
+
+**Slow edge skip:** Each relation edge's collection time is recorded. On subsequent runs, edges that previously exceeded `PRISMA_SQL_SLOW_EDGE_MS` (default 10 seconds) are skipped and their previous stats are reused. This prevents a single large table from blocking the entire collection. Skipped edges are re-measured after `PRISMA_SQL_STALE_EDGE_HOURS` (default 168 hours / 7 days).
+
+**Per-edge timeout:** Individual edge queries are bounded by `PRISMA_SQL_EDGE_TIMEOUT_MS` (default 30 seconds). On timeout, the collector falls back to previous stats or conservative defaults.
+
+### Environment variables
+
+| Variable                        | Default          | Description                                                 |
+| ------------------------------- | ---------------- | ----------------------------------------------------------- |
+| `PRISMA_SQL_SKIP_PLANNER`       | `false`          | Skip stats collection entirely during `prisma generate`     |
+| `PRISMA_SQL_STATS_MAX_AGE_MS`   | `86400000` (24h) | Skip collection if existing stats are younger than this     |
+| `PRISMA_SQL_STATS_MODE`         | `fast`           | `fast` uses pg_stats catalog, `precise` uses full queries   |
+| `PRISMA_SQL_SLOW_EDGE_MS`       | `10000` (10s)    | Reuse cached stats for edges slower than this               |
+| `PRISMA_SQL_EDGE_TIMEOUT_MS`    | `30000` (30s)    | Abort individual edge query after this                      |
+| `PRISMA_SQL_STALE_EDGE_HOURS`   | `168` (7 days)   | Force re-measure slow edges after this age                  |
+| `PRISMA_SQL_PLANNER_TIMEOUT_MS` | `15000`          | Total timeout for stats collection during `prisma generate` |
+
+### Example: background collection with persistent storage
+
+For containerized deployments where the generated SQL directory should remain immutable from the image, write planner stats to a separate persistent path and load them at startup.
+
+```ts
+import { PrismaClient } from '@prisma/client'
+import {
+  speedExtension,
+  loadExternalPlannerStats,
+  type SpeedClient,
+} from './generated/sql'
+import postgres from 'postgres'
+import { execFile } from 'child_process'
+
+const PLANNER_PATH = '/data/planner-stats/planner.generated.js'
+
+loadExternalPlannerStats(PLANNER_PATH)
+
+const sql = postgres(process.env.DATABASE_URL!)
+const basePrisma = new PrismaClient()
+
+export const prisma = basePrisma.$extends(
+  speedExtension({ postgres: sql }),
+) as SpeedClient<typeof basePrisma>
+
+execFile(
+  'node',
+  [
+    'node_modules/.bin/prisma-sql-collect-stats',
+    '--output',
+    PLANNER_PATH,
+    '--prisma-client',
+    'dist/prisma/generated/client/index.js',
+  ],
+  (err) => {
+    if (err) return console.error('Stats collection failed:', err.message)
+    loadExternalPlannerStats(PLANNER_PATH)
+    console.log('Planner stats refreshed')
+  },
+)
+```
+
+With Docker Compose, mount only the stats directory:
+
+```yaml
+services:
+  app:
+    image: myapp:latest
+    volumes:
+      - planner-stats:/data/planner-stats
+
+volumes:
+  planner-stats:
+```
+
+Do **not** mount the generated SQL output directory (`./generated/sql`). That directory contains the generated query client (`index.js`) which should stay immutable from the image. Mounting it as a volume causes new deploys to run stale generated code from the first deployment.
 
 ### Example scripts
 
@@ -789,14 +887,6 @@ When stats are not collected, the planner uses conservative defaults:
 - `relationStats`: empty (all relations treated as unknown cardinality)
 
 This means the planner cannot make informed decisions about join strategies. Queries still work correctly — the planner falls back to safe general-purpose strategies — but relation-heavy reads may not use the optimal execution plan.
-
-### Timeout control
-
-Stats collection has a default timeout of 15 seconds. Override with:
-
-```bash
-PRISMA_SQL_PLANNER_TIMEOUT_MS=5000 yarn collect-planner-stats
-```
 
 ### Practical recommendations
 

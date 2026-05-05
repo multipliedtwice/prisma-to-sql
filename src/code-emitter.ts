@@ -165,6 +165,8 @@ export async function generateClient(options: GenerateClientOptions) {
     relationStats: {},
     roundtripRowEquivalent: 73,
     jsonRowFactor: 1.5,
+    collectedAt: 0,
+    edgeTimings: {},
   }
 
   const plannerCode = emitPlannerGeneratedModule(plannerArtifacts)

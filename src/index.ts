@@ -168,3 +168,4 @@ export {
   resetLimits,
   type LimitsConfig,
 } from './builder/shared/constants'
+export { loadExternalPlannerStats } from './cardinality-planner'
