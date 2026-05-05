@@ -1,3 +1,10 @@
+# [1.83.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.82.0...v1.83.0) (2026-05-05)
+
+
+### Features
+
+* enhance planner stats collection with runtime loading and incremental updates ([242f2ee](https://github.com/multipliedtwice/prisma-to-sql/commit/242f2ee7b6dea91e3f1ab9de25ff6a7190b96c4a))
+
 # [1.82.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.81.0...v1.82.0) (2026-04-24)
 
 
