@@ -1,3 +1,10 @@
+# [1.84.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.83.0...v1.84.0) (2026-06-07)
+
+
+### Features
+
+* remove json_agg from strategies as it was caused performance issues ([613be07](https://github.com/multipliedtwice/prisma-to-sql/commit/613be0751efebee01cb7b07f3babe4dfb7cb983e))
+
 # [1.83.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.82.0...v1.83.0) (2026-05-05)
 
 
