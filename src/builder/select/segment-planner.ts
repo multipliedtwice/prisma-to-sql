@@ -29,8 +29,8 @@ export interface WhereInSegment {
   relationName: string
   relArgs: unknown
   childModelName: string
-  fkFieldName: string
-  parentKeyFieldName: string
+  fkFieldNames: string[]
+  parentKeyFieldNames: string[]
   isList: boolean
   perParentTake?: number
   perParentSkip?: number
@@ -90,7 +90,8 @@ function buildWhereInSegment(
   relModel: Model,
 ): WhereInSegment | null {
   const keys = resolveRelationKeys(field, 'whereIn')
-  if (keys.childKeys.length !== 1) return null
+  if (keys.childKeys.length === 0 || keys.parentKeys.length === 0) return null
+  if (keys.childKeys.length !== keys.parentKeys.length) return null
 
   const isList = isListField(field)
   const pagination = isList ? extractPagination(relArgs) : {}
@@ -99,8 +100,8 @@ function buildWhereInSegment(
     relationName: name,
     relArgs,
     childModelName: relModel.name,
-    fkFieldName: keys.childKeys[0],
-    parentKeyFieldName: keys.parentKeys[0],
+    fkFieldNames: [...keys.childKeys],
+    parentKeyFieldNames: [...keys.parentKeys],
     isList,
     perParentTake: pagination.take,
     perParentSkip: pagination.skip,
@@ -142,9 +143,11 @@ function ensureParentKeysInSelect(
   const newSelect = { ...args.select }
 
   for (const seg of segments) {
-    if (!newSelect[seg.parentKeyFieldName]) {
-      newSelect[seg.parentKeyFieldName] = true
-      injected.push(seg.parentKeyFieldName)
+    for (const keyField of seg.parentKeyFieldNames) {
+      if (!newSelect[keyField]) {
+        newSelect[keyField] = true
+        injected.push(keyField)
+      }
     }
   }
 

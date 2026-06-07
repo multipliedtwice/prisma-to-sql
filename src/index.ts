@@ -151,16 +151,23 @@ export {
   executePostgresQuery,
   executeSqliteQuery,
   executeRaw,
+  streamReduce,
+  type StreamReduceConfig,
+  type StreamReduceOptions,
 } from './generated-runtime'
 export {
   setRelationStats,
   getRelationStats,
+  setModelStats,
+  getModelStats,
   setRoundtripRowEquivalent,
   setJsonRowFactor,
   countIncludeDepth,
   setStrategyConfig,
   getStrategyConfig,
   type StrategyConfig,
+  type ModelStats,
+  type ModelStatsMap,
 } from './builder/select/strategy-estimator'
 export {
   setLimits,

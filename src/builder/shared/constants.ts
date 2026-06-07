@@ -185,7 +185,11 @@ export interface LimitsConfig {
   MAX_ALIAS_COUNTER_THRESHOLD: number
   /** Max depth for relation-based orderBy resolution. Default: 10 */
   MAX_RELATION_ORDER_BY_DEPTH: number
-  /** Max depth for join-based include strategy (0 = top-level only). Default: 0 */
+  /**
+   * @deprecated No-op since the array-agg include path was removed.
+   * Kept for non-breaking compatibility; will be removed in the next major version.
+   * Setting this value has no runtime effect.
+   */
   JOIN_INCLUDE_MAX_DEPTH: number
   /** Max recursion depth for where-in segment resolution. Default: 10 */
   MAX_WHERE_IN_RECURSIVE_DEPTH: number

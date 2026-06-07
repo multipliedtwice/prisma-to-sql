@@ -11,6 +11,12 @@ import {
   ensureFkInSelect,
   ensureOrderByPk,
   initRelationPlaceholders,
+  extractTuples,
+  dedupeTuples,
+  maxTuplesPerBatch,
+  extractMainTableAlias,
+  buildTupleInClause,
+  injectAndWhere,
 } from './where-in-utils'
 import { LIMITS } from './constants'
 import { withValidationSuppressed } from './validators/sql-validators'
@@ -29,9 +35,11 @@ async function resolveWithPrerendered(
 ): Promise<boolean> {
   const pre = segment.prerendered
   if (!pre) return false
+  if (segment.parentKeyFieldNames.length !== 1) return false
 
+  const parentKeyField = segment.parentKeyFieldNames[0]
   const parentIds = parentRows
-    .map((r) => r[segment.parentKeyFieldName])
+    .map((r) => r[parentKeyField])
     .filter((v) => v != null)
 
   if (parentIds.length === 0) return true
@@ -79,13 +87,15 @@ async function resolveWithPrerendered(
 
   const parentKeyIndex = buildParentKeyIndex(
     parentRows,
-    segment.parentKeyFieldName,
+    segment.parentKeyFieldNames,
   )
   stitchChildrenToParents(children, segment, parentKeyIndex)
 
   if (pre.needsStripFk) {
     for (const child of children) {
-      delete child[segment.fkFieldName]
+      for (const fk of segment.fkFieldNames) {
+        delete child[fk]
+      }
     }
   }
 
@@ -103,7 +113,7 @@ export async function resolveSingleSegment(
 ): Promise<void> {
   if (depth > LIMITS.MAX_WHERE_IN_RECURSIVE_DEPTH) return
 
-  if (segment.prerendered) {
+  if (segment.prerendered && segment.fkFieldNames.length === 1) {
     const handled = await resolveWithPrerendered(
       segment,
       parentRows,
@@ -119,83 +129,162 @@ export async function resolveSingleSegment(
   const childModel = modelMap.get(segment.childModelName)
   if (!childModel) return
 
-  const parentIds = parentRows
-    .map((r) => r[segment.parentKeyFieldName])
-    .filter((v) => v != null)
+  const parentTuples = extractTuples(parentRows, segment.parentKeyFieldNames)
+  if (parentTuples.length === 0) return
 
-  if (parentIds.length === 0) return
+  const uniqueTuples = dedupeTuples(parentTuples)
+  if (uniqueTuples.length === 0) return
 
-  const uniqueIds = [...new Set(parentIds)]
   const stripPagination = needsPerParentPagination(segment)
+  const isComposite = segment.fkFieldNames.length > 1
+  const keyColumnCount = segment.fkFieldNames.length
 
-  const childArgs = buildChildArgs(
+  const probeBatch = [uniqueTuples[0]]
+  const probeChildArgs = buildChildArgs(
     segment.relArgs,
-    segment.fkFieldName,
-    uniqueIds,
+    segment.fkFieldNames,
+    probeBatch,
     stripPagination,
   )
-
-  ensureOrderByPk(childArgs, childModel)
-  const needsStripFk = ensureFkInSelect(childArgs, segment.fkFieldName)
-
-  const childPlan = planQueryStrategy({
+  ensureOrderByPk(probeChildArgs, childModel)
+  ensureFkInSelect(probeChildArgs, segment.fkFieldNames)
+  const probePlan = planQueryStrategy({
     model: childModel,
     method: 'findMany',
-    args: childArgs,
+    args: probeChildArgs,
     allModels,
     dialect,
   })
-
-  const result = withValidationSuppressed(() =>
+  const probeResult = withValidationSuppressed(() =>
     buildSQL(
       childModel,
       allModels as Model[],
       'findMany',
-      childPlan.filteredArgs,
+      probePlan.filteredArgs,
       dialect,
     ),
   )
+  const probeParamCount = (probeResult.params as unknown[]).length
+  const baseChildParams = isComposite
+    ? probeParamCount
+    : Math.max(0, probeParamCount - 1)
+  const batchSize = maxTuplesPerBatch(
+    dialect,
+    keyColumnCount,
+    baseChildParams,
+  )
 
-  let children = await execute(result.sql, result.params as unknown[])
+  const allChildren: any[] = []
+  let needsStripFk = false
+  let injectedKeysFromLastBatch: string[] = []
 
-  if (result.requiresReduction && result.includeSpec) {
-    const config = buildReducerConfig(childModel, result.includeSpec, allModels)
-    children = reduceFlatRows(children, config)
-  }
+  for (let i = 0; i < uniqueTuples.length; i += batchSize) {
+    const batch = uniqueTuples.slice(i, i + batchSize)
 
-  if (childPlan.whereInSegments.length > 0 && children.length > 0) {
-    for (const child of children) {
-      initRelationPlaceholders(child, childPlan.whereInSegments)
-    }
-
-    await resolveSegments(
-      childPlan.whereInSegments,
-      children,
-      allModels,
-      modelMap,
-      dialect,
-      execute,
-      depth + 1,
+    const childArgs = buildChildArgs(
+      segment.relArgs,
+      segment.fkFieldNames,
+      batch,
+      stripPagination,
     )
 
-    if (childPlan.injectedParentKeys.length > 0) {
-      for (const child of children) {
-        for (const key of childPlan.injectedParentKeys) {
-          delete child[key]
-        }
+    ensureOrderByPk(childArgs, childModel)
+    const stripped = ensureFkInSelect(childArgs, segment.fkFieldNames)
+    if (stripped.length > 0) needsStripFk = true
+
+    const childPlan = planQueryStrategy({
+      model: childModel,
+      method: 'findMany',
+      args: childArgs,
+      allModels,
+      dialect,
+    })
+
+    const result = withValidationSuppressed(() =>
+      buildSQL(
+        childModel,
+        allModels as Model[],
+        'findMany',
+        childPlan.filteredArgs,
+        dialect,
+      ),
+    )
+
+    let sql: string = result.sql
+    let params: unknown[] = result.params as unknown[]
+
+    if (isComposite) {
+      const tableAlias = extractMainTableAlias(sql)
+      if (tableAlias === null && /\bJOIN\b/i.test(sql)) {
+        throw new Error(
+          `Composite-FK where-in for '${segment.relationName}' on ${childModel.name}: ` +
+            `could not extract the child table alias from generated SQL, and the SQL ` +
+            `contains joins. Emitting unqualified column references would cause ` +
+            `ambiguous-column errors. This indicates either an unexpected SQL shape ` +
+            `from the builder or a fragility in extractMainTableAlias.`,
+        )
+      }
+      const tupleClause = buildTupleInClause({
+        childModel,
+        fkFieldNames: segment.fkFieldNames,
+        tuples: batch,
+        tableAlias,
+        paramStartIdx: params.length + 1,
+        dialect,
+      })
+      sql = injectAndWhere(sql, tupleClause.sql)
+      params = [...params, ...tupleClause.params]
+    }
+
+    let batchChildren = await execute(sql, params)
+
+    if (result.requiresReduction && result.includeSpec) {
+      const config = buildReducerConfig(
+        childModel,
+        result.includeSpec,
+        allModels,
+      )
+      batchChildren = reduceFlatRows(batchChildren, config)
+    }
+
+    if (childPlan.whereInSegments.length > 0 && batchChildren.length > 0) {
+      for (const child of batchChildren) {
+        initRelationPlaceholders(child, childPlan.whereInSegments)
+      }
+      await resolveSegments(
+        childPlan.whereInSegments,
+        batchChildren,
+        allModels,
+        modelMap,
+        dialect,
+        execute,
+        depth + 1,
+      )
+      injectedKeysFromLastBatch = childPlan.injectedParentKeys
+    }
+
+    allChildren.push(...batchChildren)
+  }
+
+  if (injectedKeysFromLastBatch.length > 0) {
+    for (const child of allChildren) {
+      for (const key of injectedKeysFromLastBatch) {
+        delete child[key]
       }
     }
   }
 
   const parentKeyIndex = buildParentKeyIndex(
     parentRows,
-    segment.parentKeyFieldName,
+    segment.parentKeyFieldNames,
   )
-  stitchChildrenToParents(children, segment, parentKeyIndex)
+  stitchChildrenToParents(allChildren, segment, parentKeyIndex)
 
   if (needsStripFk) {
-    for (const child of children) {
-      delete child[segment.fkFieldName]
+    for (const child of allChildren) {
+      for (const fk of segment.fkFieldNames) {
+        delete child[fk]
+      }
     }
   }
 }

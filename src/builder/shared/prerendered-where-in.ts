@@ -9,7 +9,7 @@ import { buildReducerConfig } from '../select/reducer'
 import { prepareArrayParam, SqlDialect } from '../../sql-builder-dialect'
 import {
   needsPerParentPagination,
-  buildChildArgs,
+  buildPrerenderChildArgs,
   ensureFkInSelect,
   ensureOrderByPk,
 } from './where-in-utils'
@@ -50,6 +50,8 @@ export function prerenderSegment(
   modelMap: Map<string, Model>,
   dialect: 'postgres' | 'sqlite',
 ): PrerenderedWhereIn | null {
+  if (segment.fkFieldNames.length !== 1) return null
+
   const childModel = modelMap.get(segment.childModelName)
   if (!childModel) return null
 
@@ -57,15 +59,16 @@ export function prerenderSegment(
   const dynamicInName = `${DYNAMIC_IN_PREFIX}_${segmentIndex}`
   const dynamicParam = makeDynamicParam(dynamicInName)
 
-  const childArgs = buildChildArgs(
+  const childArgs = buildPrerenderChildArgs(
     segment.relArgs,
-    segment.fkFieldName,
-    dynamicParam as any,
+    segment.fkFieldNames[0],
+    dynamicParam,
     stripPagination,
   )
 
   ensureOrderByPk(childArgs, childModel)
-  const needsStripFk = ensureFkInSelect(childArgs, segment.fkFieldName)
+  const strippedFks = ensureFkInSelect(childArgs, segment.fkFieldNames)
+  const needsStripFk = strippedFks.length > 0
 
   const childPlan = planQueryStrategy({
     model: childModel,

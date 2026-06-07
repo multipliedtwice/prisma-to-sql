@@ -38,8 +38,8 @@ async function mergeSchema(
     const base = await fs.readFile(basePath, 'utf-8')
     const header =
       dialect === 'postgres'
-        ? 'generator client {\n  provider = "prisma-client"\n  output   = "../generated/postgres-v7"\n  previewFeatures = []\n}\n\ndatasource db {\n  provider = "postgresql"\n}\n'
-        : 'generator client {\n  provider = "prisma-client"\n  output   = "../generated/sqlite-v7"\n  previewFeatures = []\n}\n\ndatasource db {\n  provider = "sqlite"\n}\n'
+        ? 'generator client {\n  provider = "prisma-client"\n  output   = "../generated/postgres-v7"\n  importFileExtension = "ts"\n  previewFeatures = []\n}\n\ndatasource db {\n  provider = "postgresql"\n}\n'
+        : 'generator client {\n  provider = "prisma-client"\n  output   = "../generated/sqlite-v7"\n  importFileExtension = "ts"\n  previewFeatures = []\n}\n\ndatasource db {\n  provider = "sqlite"\n}\n'
 
     const outputPath = path.join(prismaDir, `schema-${dialect}-v7.prisma`)
     await fs.writeFile(outputPath, `${header}\n${base}`)

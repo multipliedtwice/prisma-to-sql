@@ -15,7 +15,18 @@ type RelStats = {
 
 type RelationStatsMap = Record<string, Record<string, RelStats>>
 
+export type ModelStats = {
+  rowCount: number
+  tableName: string
+  schemaName?: string
+  known?: boolean
+}
+
+export type ModelStatsMap = Record<string, ModelStats>
+
 let globalRelationStats: RelationStatsMap | undefined
+let globalModelStats: ModelStatsMap | undefined
+let globalModelStatsWarned = false
 
 export interface StrategyConfig {
   /** Cost (in row-equivalents) of one additional database roundtrip. Default: 73 */
@@ -38,6 +49,10 @@ export interface StrategyConfig {
   minStatsCoverage: number
   /** Assumed take value for dynamic (runtime) parameters. Default: 10 */
   dynamicTakeEstimate: number
+  /** Child table row count threshold above which the pathological-query guard activates. Default: 100000 */
+  largeChildTableRows: number
+  /** Parent count threshold below which the pathological-query guard activates. Default: 1000 */
+  smallParentCountThreshold: number
 }
 
 const strategyStore: StrategyConfig = {
@@ -51,6 +66,8 @@ const strategyStore: StrategyConfig = {
   singleParentMaxFlatJoinDepth: 2,
   minStatsCoverage: 0.1,
   dynamicTakeEstimate: 10,
+  largeChildTableRows: 100000,
+  smallParentCountThreshold: 1000,
 }
 
 /**
@@ -89,7 +106,16 @@ export function getRelationStats(): RelationStatsMap | undefined {
   return globalRelationStats
 }
 
-type IncludeStrategy = 'flat-join' | 'where-in' | 'fallback'
+export function setModelStats(stats: ModelStatsMap): void {
+  globalModelStats = stats
+  globalModelStatsWarned = false
+}
+
+export function getModelStats(): ModelStatsMap | undefined {
+  return globalModelStats
+}
+
+type IncludeStrategy = 'flat-join' | 'where-in' | 'correlated'
 
 interface RelationCostNode {
   name: string
@@ -160,6 +186,84 @@ function hasFlatJoinBlockingRootArgs(args: unknown): boolean {
   )
     return true
   return false
+}
+
+function normalizeTakeEstimate(take: number | null): number | undefined {
+  if (take === null || typeof take !== 'number') return undefined
+  if (!Number.isFinite(take)) return undefined
+  return Math.abs(take)
+}
+
+function checkLargeChildGuard(params: {
+  includeSpec: Record<string, any>
+  model: Model
+  schemas: readonly Model[]
+  takeValue: number | null
+  modelMap?: Map<string, Model>
+}): 'where-in' | null {
+  const stats = globalModelStats
+  if (!stats || Object.keys(stats).length === 0) {
+    if (!globalModelStatsWarned) {
+      globalModelStatsWarned = true
+      console.warn(
+        '[prisma-sql] MODEL_STATS not loaded — pathological-query guard disabled. ' +
+          'Run the planner stats collector against your database to enable it.',
+      )
+    }
+    return null
+  }
+
+  const { includeSpec, model, schemas, takeValue, modelMap } = params
+
+  const takeEstimate = normalizeTakeEstimate(takeValue)
+  const rootStats = stats[model.name]
+  const topLevelParentEstimate =
+    takeEstimate !== undefined
+      ? takeEstimate
+      : rootStats
+        ? Math.min(rootStats.rowCount, strategyStore.defaultParentCount)
+        : strategyStore.defaultParentCount
+
+  if (topLevelParentEstimate >= strategyStore.smallParentCountThreshold) {
+    return null
+  }
+
+  const narrowedStats: ModelStatsMap = stats
+  let fired = false
+
+  function walk(
+    spec: Record<string, any>,
+    parentModel: Model,
+    depth: number,
+  ): void {
+    if (fired || depth > LIMITS.MAX_INCLUDE_DEPTH) return
+    const relations = resolveIncludeRelations(
+      spec,
+      parentModel,
+      schemas,
+      modelMap,
+    )
+    for (const rel of relations) {
+      if (fired) return
+      if (rel.isList) {
+        const childStats = narrowedStats[rel.relModel.name]
+        if (
+          childStats &&
+          childStats.rowCount > strategyStore.largeChildTableRows
+        ) {
+          fired = true
+          return
+        }
+      }
+      if (Object.keys(rel.nestedSpec).length > 0) {
+        walk(rel.nestedSpec, rel.relModel, depth + 1)
+      }
+    }
+  }
+
+  walk(includeSpec, model, 0)
+
+  return fired ? 'where-in' : null
 }
 
 function buildCostTree(
@@ -414,15 +518,38 @@ export function pickIncludeStrategy(params: {
     }
   }
 
+  const guardResult = checkLargeChildGuard({
+    includeSpec,
+    model,
+    schemas,
+    takeValue,
+    modelMap,
+  })
+  if (guardResult === 'where-in') {
+    if (debug)
+      console.log(
+        `  [strategy] ${model.name}: large-child guard → where-in`,
+      )
+    return 'where-in'
+  }
+
   const costTree = buildCostTree(includeSpec, model, schemas, 0, modelMap)
   const treeDepth = maxDepthFromTree(costTree)
 
   if (hasChildPagination && treeDepth >= 2) {
     if (debug)
       console.log(
-        `  [strategy] ${model.name}: childPagination + depth=${treeDepth} ≥ 2 → fallback`,
+        `  [strategy] ${model.name}: childPagination + depth=${treeDepth} ≥ 2 → correlated`,
       )
-    return 'fallback'
+    return 'correlated'
+  }
+
+  if (treeDepth >= 2 && !hasChildPagination) {
+    if (debug)
+      console.log(
+        `  [strategy] ${model.name}: depth=${treeDepth} ≥ 2 + no childPagination → where-in (empirical)`,
+      )
+    return 'where-in'
   }
 
   if (hasChildPagination && treeDepth === 1) {
@@ -432,18 +559,6 @@ export function pickIncludeStrategy(params: {
           `  [strategy] ${model.name}: childPagination + depth=1 + childWhere → where-in`,
         )
       return 'where-in'
-    }
-
-    const hasSelectNarrowing =
-      isPlainObject(args) &&
-      isPlainObject((args as Record<string, unknown>).select)
-
-    if (hasSelectNarrowing) {
-      if (debug)
-        console.log(
-          `  [strategy] ${model.name}: childPagination + depth=1 + selectNarrowing → fallback`,
-        )
-      return 'fallback'
     }
 
     if (debug)
@@ -472,8 +587,9 @@ export function pickIncludeStrategy(params: {
   }
 
   if (costC < costW) {
-    if (debug) console.log(`  [strategy] ${model.name}: costC wins → fallback`)
-    return 'fallback'
+    if (debug)
+      console.log(`  [strategy] ${model.name}: costC wins → correlated`)
+    return 'correlated'
   }
 
   if (debug) console.log(`  [strategy] ${model.name}: costW wins → where-in`)

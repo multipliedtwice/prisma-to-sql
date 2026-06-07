@@ -40,7 +40,7 @@ const dashboard = await prisma.$batch((batch) => ({
 
 `prisma-sql` accelerates Prisma **read** queries by skipping Prisma's read execution path and running generated SQL directly through a database-native client.
 
-It keeps the Prisma client for:
+It keeps Prisma Client for:
 
 - schema and migrations
 - generated types
@@ -109,10 +109,10 @@ model User {
 }
 
 model Post {
-  id        Int    @id @default(autoincrement())
-  title     String
-  authorId  Int
-  author    User   @relation(fields: [authorId], references: [id])
+  id       Int    @id @default(autoincrement())
+  title    String
+  authorId Int
+  author   User   @relation(fields: [authorId], references: [id])
 }
 ```
 
@@ -122,7 +122,14 @@ model Post {
 npx prisma generate
 ```
 
-This generates `./generated/sql/index.ts`.
+This generates:
+
+```txt
+./generated/sql/index.ts
+./generated/sql/planner.generated.ts
+```
+
+`planner.generated.ts` contains relation and model statistics used by the strategy planner.
 
 ### 3) Extend Prisma
 
@@ -248,8 +255,8 @@ model User {
 
 At runtime:
 
-- matching query shape → prebaked SQL
-- non-matching query shape → runtime SQL generation
+- matching query shape: prebaked SQL
+- non-matching query shape: runtime SQL generation
 
 ### 3) PostgreSQL batch queries
 
@@ -265,9 +272,46 @@ const results = await prisma.$batch((batch) => ({
 
 ### 4) Include and relation reduction
 
-For supported include trees, `prisma-sql` can execute flat SQL and reduce rows back into Prisma-like nested results.
+For supported include trees, `prisma-sql` can execute optimized SQL and reduce rows back into Prisma-like nested results.
 
-### 5) Aggregate result type handling
+It supports strategy switching between:
+
+- flat joins
+- where-in segmented loading
+- correlated subqueries for small/bounded cases
+
+### 5) Large to-many include protection
+
+`prisma-sql` uses generated `MODEL_STATS` to avoid expensive correlated per-parent scans over large child tables.
+
+When a query includes a large to-many relation and the parent result is estimated to be small, the planner switches to batched where-in loading:
+
+```ts
+const companies = await prisma.company.findMany({
+  include: {
+    jobAds: true,
+  },
+})
+```
+
+Conceptually, this becomes:
+
+```sql
+SELECT * FROM company;
+SELECT * FROM jobAd WHERE companyId IN (...);
+```
+
+Results are stitched in memory to preserve Prisma-style include semantics. This applies to both bounded and unbounded includes.
+
+Composite foreign keys are supported through row-value tuple `IN`:
+
+```sql
+WHERE (tenantId, companyId) IN (($1, $2), ($3, $4))
+```
+
+SQLite requires version 3.15 or newer for row-value tuple `IN`.
+
+### 6) Aggregate result type handling
 
 Aggregates are mapped back to Prisma-style value types instead of flattening everything into strings or plain numbers.
 
@@ -307,7 +351,7 @@ That includes preserving types like:
   include: {
     posts: true,
     profile: true,
-  }
+  },
 }
 ```
 
@@ -352,13 +396,13 @@ That includes preserving types like:
 
 ## Configuration
 
-`prisma-sql` exposes every internal limit and strategy constant so you can tune the query builder for your schema without forking the library.
+`prisma-sql` exposes internal limit and strategy constants so you can tune the query builder for your schema without forking the library.
 
-### Extension Config
+### Extension config
 
 Pass `limits` and/or `strategy` directly to `speedExtension`:
 
-```typescript
+```ts
 import { speedExtension } from './generated/sql'
 
 const db = prisma.$extends(
@@ -376,13 +420,13 @@ const db = prisma.$extends(
 )
 ```
 
-Both fields accept partial objects — only the keys you provide are overwritten; everything else stays at its default.
+Both fields accept partial objects. Only the keys you provide are overwritten.
 
 ### Programmatic API
 
-If you use `prisma-sql` as a library (without the generated extension), the same knobs are available as standalone functions:
+If you use `prisma-sql` as a library without the generated extension, the same knobs are available as standalone functions:
 
-```typescript
+```ts
 import {
   setLimits,
   getLimits,
@@ -393,48 +437,46 @@ import {
 } from 'prisma-sql'
 
 setLimits({ MAX_INCLUDES_PER_LEVEL: 25 })
-rebuildQueryCache() // required after changing QUERY_CACHE_SIZE
+rebuildQueryCache()
 
 setStrategyConfig({ correlatedBoundedFactor: 0.3 })
 
 console.log(getLimits())
 console.log(getStrategyConfig())
 
-resetLimits() // restore all defaults
+resetLimits()
 ```
 
-> **Note:** `rebuildQueryCache()` must be called after changing `QUERY_CACHE_SIZE`. All other limit changes take effect immediately on the next query.
+`rebuildQueryCache()` must be called after changing `QUERY_CACHE_SIZE`. All other limit changes take effect on the next query.
 
----
-
-### Query Builder Limits
+### Query builder limits
 
 These control safety boundaries and complexity caps for generated SQL.
 
-| Key                            | Default      | Description                                                                                                                               |
-| ------------------------------ | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `MAX_INCLUDE_DEPTH`            | `5`          | Max depth of nested `include`/`select` relations. Increase for deeply nested schemas.                                                     |
-| `MAX_INCLUDES_PER_LEVEL`       | `10`         | Max number of relations included at a single nesting level. Increase for wide schemas with many relations.                                |
-| `MAX_TOTAL_SUBQUERIES`         | `100`        | Total correlated subqueries allowed across the entire query tree. Guards against exponential blowup from deep × wide includes.            |
-| `MAX_SELF_REFERENTIAL_DEPTH`   | `2`          | Max times a model can appear in its own include chain. Controls tree/graph self-referencing models like `Category → children → children`. |
-| `MAX_QUERY_DEPTH`              | `50`         | Max nesting depth for `WHERE` clauses (`AND`/`OR`/`NOT`).                                                                                 |
-| `MAX_NOT_DEPTH`                | `50`         | Max nesting depth for `NOT` operator composition in both `WHERE` and `HAVING`.                                                            |
-| `MAX_HAVING_DEPTH`             | `50`         | Max nesting depth for `HAVING` clause.                                                                                                    |
-| `MAX_NESTED_JOIN_DEPTH`        | `10`         | Max depth for flat-join and lateral-join relation traversal.                                                                              |
-| `MAX_RELATION_ORDER_BY_DEPTH`  | `10`         | Max depth for relation-based `orderBy` resolution (e.g. `orderBy: { author: { name: 'asc' } }`).                                          |
-| `JOIN_INCLUDE_MAX_DEPTH`       | `0`          | Max depth at which join-based include strategy is allowed. `0` means top-level only.                                                      |
-| `MAX_WHERE_IN_RECURSIVE_DEPTH` | `10`         | Max recursion depth for where-in segment resolution.                                                                                      |
-| `MAX_ARRAY_SIZE`               | `10000`      | Max elements in array params (`in`, `hasSome`, etc).                                                                                      |
-| `MAX_STRING_LENGTH`            | `10000`      | Max string length for `LIKE` and JSON string operators.                                                                                   |
-| `MAX_LIMIT_OFFSET`             | `2147483647` | PostgreSQL engine limit for `LIMIT`/`OFFSET`.                                                                                             |
-| `MIN_NEGATIVE_TAKE`            | `-10000`     | Minimum allowed negative `take` value.                                                                                                    |
-| `MAX_ALIAS_COUNTER_THRESHOLD`  | `1000`       | Safety threshold before alias counter overflow.                                                                                           |
-| `QUERY_CACHE_SIZE`             | `1000`       | Max entries in the SQL query cache. Call `rebuildQueryCache()` after changing.                                                            |
-| `STMT_CACHE_SIZE`              | `1000`       | Max entries in the SQLite prepared statement cache per client.                                                                            |
+| Key                            |      Default | Description                                                                                      |
+| ------------------------------ | -----------: | ------------------------------------------------------------------------------------------------ |
+| `MAX_INCLUDE_DEPTH`            |          `5` | Max depth of nested `include` / `select` relations.                                              |
+| `MAX_INCLUDES_PER_LEVEL`       |         `10` | Max number of relations included at a single nesting level.                                      |
+| `MAX_TOTAL_SUBQUERIES`         |        `100` | Total correlated subqueries allowed across the query tree.                                       |
+| `MAX_SELF_REFERENTIAL_DEPTH`   |          `2` | Max times a model can appear in its own include chain.                                           |
+| `MAX_QUERY_DEPTH`              |         `50` | Max nesting depth for `WHERE` clauses.                                                           |
+| `MAX_NOT_DEPTH`                |         `50` | Max nesting depth for `NOT` operator composition.                                                |
+| `MAX_HAVING_DEPTH`             |         `50` | Max nesting depth for `HAVING` clauses.                                                          |
+| `MAX_NESTED_JOIN_DEPTH`        |         `10` | Max depth for join-based relation traversal.                                                     |
+| `MAX_RELATION_ORDER_BY_DEPTH`  |         `10` | Max depth for relation-based `orderBy` resolution.                                               |
+| `JOIN_INCLUDE_MAX_DEPTH`       |          `0` | Deprecated no-op retained for compatibility. Strategy selection no longer depends on this value. |
+| `MAX_WHERE_IN_RECURSIVE_DEPTH` |         `10` | Max recursion depth for where-in segment resolution.                                             |
+| `MAX_ARRAY_SIZE`               |      `10000` | Max elements in array params such as `in` and `hasSome`.                                         |
+| `MAX_STRING_LENGTH`            |      `10000` | Max string length for `LIKE` and JSON string operators.                                          |
+| `MAX_LIMIT_OFFSET`             | `2147483647` | PostgreSQL engine limit for `LIMIT` / `OFFSET`.                                                  |
+| `MIN_NEGATIVE_TAKE`            |     `-10000` | Minimum allowed negative `take` value.                                                           |
+| `MAX_ALIAS_COUNTER_THRESHOLD`  |       `1000` | Safety threshold before alias counter overflow.                                                  |
+| `QUERY_CACHE_SIZE`             |       `1000` | Max entries in the SQL query cache. Call `rebuildQueryCache()` after changing.                   |
+| `STMT_CACHE_SIZE`              |       `1000` | Max entries in the SQLite prepared statement cache per client.                                   |
 
-**Example — wide schema with 15+ relations per model:**
+Example for a wide schema:
 
-```typescript
+```ts
 speedExtension({
   postgres: sql,
   limits: {
@@ -444,9 +486,9 @@ speedExtension({
 })
 ```
 
-**Example — deeply nested tree structure (5+ levels):**
+Example for a deeply nested tree structure:
 
-```typescript
+```ts
 speedExtension({
   postgres: sql,
   limits: {
@@ -456,28 +498,28 @@ speedExtension({
 })
 ```
 
----
+### Strategy cost-model parameters
 
-### Strategy Cost-Model Parameters
+These control how `prisma-sql` chooses between query strategies.
 
-These control how `prisma-sql` chooses between query strategies (flat-join, where-in, correlated subqueries). Tuning these is optional — the defaults are calibrated from benchmarks — but can help if your database has unusual latency characteristics or data distributions.
+| Key                            |  Default | Description                                                                                                             |
+| ------------------------------ | -------: | ----------------------------------------------------------------------------------------------------------------------- |
+| `roundtripRowEquivalent`       |     `73` | Cost, in row-equivalents, of one extra database roundtrip. Lower values favor multi-roundtrip strategies like where-in. |
+| `jsonRowFactor`                |    `1.5` | Multiplier for JSON aggregation overhead per row.                                                                       |
+| `correlatedBoundedFactor`      |    `0.5` | Cost factor for correlated subqueries when the child has `LIMIT`.                                                       |
+| `correlatedUnboundedFactor`    |    `3.0` | Cost factor for correlated subqueries when the child is unbounded.                                                      |
+| `correlatedWherePenalty`       |    `3.0` | Extra cost multiplier when a child relation has `where` inside a correlated subquery.                                   |
+| `defaultFanOut`                |     `10` | Assumed average children per parent when relation stats are unavailable.                                                |
+| `defaultParentCount`           |     `50` | Assumed parent row count when `take` is not specified on the root query.                                                |
+| `dynamicTakeEstimate`          |     `10` | Assumed `take` value when the actual value is a runtime dynamic parameter.                                              |
+| `singleParentMaxFlatJoinDepth` |      `2` | Max include depth that allows flat-join strategy for `findFirst` / `findUnique`.                                        |
+| `minStatsCoverage`             |    `0.1` | Minimum relation stats coverage to trust collected cardinality data.                                                    |
+| `largeChildTableRows`          | `100000` | Child table row threshold for the large to-many include guard.                                                          |
+| `smallParentCountThreshold`    |   `1000` | Parent result estimate threshold for the large to-many include guard.                                                   |
 
-| Key                            | Default | Description                                                                                                                                                               |
-| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `roundtripRowEquivalent`       | `73`    | Cost (in row-equivalents) of one additional database roundtrip. Lower values favor multi-roundtrip strategies like where-in. Higher values favor single-query strategies. |
-| `jsonRowFactor`                | `1.5`   | Multiplier for JSON aggregation overhead per row. Affects flat-join cost estimation.                                                                                      |
-| `correlatedBoundedFactor`      | `0.5`   | Cost factor for correlated subqueries when the child has a `LIMIT`. Lower = cheaper = more likely to pick correlated.                                                     |
-| `correlatedUnboundedFactor`    | `3.0`   | Cost factor for correlated subqueries when the child is unbounded. Higher = more expensive = favors where-in.                                                             |
-| `correlatedWherePenalty`       | `3.0`   | Extra cost multiplier applied when a child relation has a `WHERE` clause inside correlated subqueries.                                                                    |
-| `defaultFanOut`                | `10`    | Assumed average children per parent when no relation statistics are available.                                                                                            |
-| `defaultParentCount`           | `50`    | Assumed parent row count when `take` is not specified on the root query.                                                                                                  |
-| `singleParentMaxFlatJoinDepth` | `2`     | Max include depth that allows the flat-join strategy for `findFirst`/`findUnique`.                                                                                        |
-| `minStatsCoverage`             | `0.1`   | Minimum stats coverage (0–1) to trust collected relation cardinality data. Below this, `defaultFanOut` is used.                                                           |
-| `dynamicTakeEstimate`          | `10`    | Assumed `take` value when the actual value is a runtime dynamic parameter.                                                                                                |
+Example for a low-latency local database:
 
-**Example — low-latency local database (roundtrips are cheap):**
-
-```typescript
+```ts
 speedExtension({
   postgres: sql,
   strategy: {
@@ -486,9 +528,9 @@ speedExtension({
 })
 ```
 
-**Example — remote database with high latency (minimize roundtrips):**
+Example for a remote database with high latency:
 
-```typescript
+```ts
 speedExtension({
   postgres: sql,
   strategy: {
@@ -497,18 +539,18 @@ speedExtension({
 })
 ```
 
-**Example — schema with sparse relations (most parents have 0–2 children):**
+Example for projects where large child tables are well indexed and correlated scans are still cheap:
 
-```typescript
+```ts
 speedExtension({
   postgres: sql,
   strategy: {
-    defaultFanOut: 2,
+    largeChildTableRows: 500000,
   },
 })
 ```
 
-### Pagination and ordering
+## Pagination and ordering
 
 ```ts
 {
@@ -555,7 +597,7 @@ For composite cursors, use an `orderBy` that starts with the cursor fields in th
 
 This matches keyset pagination expectations and avoids unstable page boundaries.
 
-### Aggregates
+## Aggregates
 
 ```ts
 await prisma.user.count({
@@ -589,18 +631,32 @@ await prisma.task.groupBy({
 
 ## Cardinality planner
 
-The cardinality planner is the piece that decides how relation-heavy reads should be executed for best performance.
+The cardinality planner decides how relation-heavy reads should be executed.
 
-In practice, it helps choose between strategies such as:
+It helps choose between:
 
-- direct joins
-- lateral/subquery-style fetches
-- flat row expansion + reducer
-- segmented follow-up loading for high fan-out relations
+- flat joins
+- where-in segmented loading
+- correlated subqueries for small/bounded cases
 
-This matters because the fastest strategy depends on **cardinality**, not just query shape.
+The fastest strategy depends on cardinality, not just query shape.
 
 A `profile` include behaves very differently from a `posts.comments.likes` include.
+
+### Planner stats
+
+During generation, `prisma-sql` can collect planner artifacts into `planner.generated.ts`.
+
+Those artifacts include:
+
+- `RELATION_STATS`
+- `MODEL_STATS`
+- `ROUNDTRIP_ROW_EQUIVALENT`
+- `JSON_ROW_FACTOR`
+
+`MODEL_STATS` is used by the large to-many include guard. When a child table is large and the parent result is small, `prisma-sql` prefers where-in segmented loading instead of correlated per-parent subqueries.
+
+If `MODEL_STATS` is missing or a model has `known: false`, the large-table guard is inactive for that model. Queries still work, but relation-heavy reads may not use the optimal strategy until stats are collected.
 
 ### Why it matters
 
@@ -608,19 +664,26 @@ A naive join strategy can explode row counts:
 
 - `User -> Profile` is usually low fan-out
 - `User -> Posts -> Comments` can multiply rows aggressively
-- `Organization -> Users -> Sessions -> Events` can become huge very quickly
+- `Organization -> Users -> Sessions -> Events` can become huge quickly
 
-The planner tries to keep read amplification under control.
+The planner tries to keep read amplification under control while preserving Prisma-compatible result shapes.
+
+### Strategy behavior
+
+At a high level:
+
+- low-depth includes may use flat joins
+- small bounded child includes may use correlated subqueries
+- large to-many includes use where-in segmented loading
+- composite foreign keys use tuple-IN in the where-in path
+
+This means unbounded nested includes remain valid Prisma-style queries. You do not need to cap a nested include for correctness. Capping with `take` can still be useful for product behavior and latency, but it is not required to make the query valid.
 
 ### Best setup for the planner
-
-To get the best results, prepare your schema and indexes so the planner can make good choices.
 
 #### 1) Model real cardinality accurately
 
 Use correct relation fields and uniqueness constraints.
-
-Good examples:
 
 ```prisma
 model User {
@@ -630,9 +693,9 @@ model User {
 }
 
 model Profile {
-  id      Int  @id @default(autoincrement())
-  userId  Int  @unique
-  user    User @relation(fields: [userId], references: [id])
+  id     Int  @id @default(autoincrement())
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id])
 }
 
 model Post {
@@ -647,7 +710,7 @@ model Post {
 Why this helps:
 
 - `@unique` on one-to-one foreign keys tells the planner the relation is bounded
-- indexes on one-to-many foreign keys make follow-up or segmented loading cheap
+- indexes on one-to-many foreign keys make segmented loading cheap
 
 #### 2) Index every foreign key used in includes and relation filters
 
@@ -657,8 +720,6 @@ At minimum, index:
 - fields used in nested `where`
 - fields used in nested `orderBy`
 - fields used in cursor pagination
-
-Example:
 
 ```prisma
 model Comment {
@@ -677,7 +738,7 @@ model Comment {
 
 #### 3) Prefer deterministic nested ordering
 
-When including collections, always provide a stable order when practical.
+When including collections, provide a stable order when practical.
 
 ```ts
 const users = await prisma.user.findMany({
@@ -690,34 +751,9 @@ const users = await prisma.user.findMany({
 })
 ```
 
-That helps both the planner and the reducer keep result shapes predictable.
-
-### What to configure
-
-Use the cardinality planner wherever your generator/runtime exposes it.
-
-Because config names can differ between versions, the safe rule is:
-
-- enable the planner in generator/runtime config if your build exposes that switch
-- keep it on for relation-heavy workloads
-- tune any thresholds only after measuring with real production-shaped queries
-
-If your project has planner thresholds, start conservatively:
-
-- prefer bounded strategies for one-to-one and unique includes
-- prefer segmented or reduced strategies for one-to-many and many-to-many
-- lower thresholds for deep includes with large child tables
-- raise thresholds only after verifying lower fan-out in production data
-
 ### How to verify the planner is helping
 
 Use `debug` and `onQuery`.
-
-Look for:
-
-- large latency spikes on include-heavy queries
-- unusually large result sets for a small parent page
-- repeated slow nested includes on high-fanout relations
 
 ```ts
 const prisma = basePrisma.$extends(
@@ -732,28 +768,38 @@ const prisma = basePrisma.$extends(
 ) as SpeedClient<typeof basePrisma>
 ```
 
-What good results look like:
+Look for:
+
+- large latency spikes on include-heavy queries
+- unusually large result sets for a small parent page
+- repeated slow nested includes on high-fanout relations
+
+Good results usually look like:
 
 - small parent page stays small in latency
 - bounded child includes remain predictable
-- high-fanout includes stop exploding row counts
-- moving a heavy include into `$batch` or splitting it improves latency materially
+- high-fanout includes avoid correlated per-parent scans
+- unrelated heavy branches improve when split into `$batch`
 
 ## Deployment without database access at build time
 
-The cardinality planner collects relation statistics and roundtrip cost measurements directly from the database during `prisma generate`. In CI/CD pipelines or containerized builds, the database is often unreachable.
+The cardinality planner can collect relation statistics and roundtrip cost measurements from the database during `prisma generate`.
+
+In CI/CD pipelines or containerized builds, the database is often unreachable. In that case, you can skip planner collection during build and collect stats at runtime or in a deployment job.
 
 ### Skip planner during generation
 
-Set `PRISMA_SQL_SKIP_PLANNER=true` to skip stats collection at generate time. The generator will emit default planner values instead.
+Set `PRISMA_SQL_SKIP_PLANNER=true` to skip stats collection at generate time.
 
 ```bash
 PRISMA_SQL_SKIP_PLANNER=true npx prisma generate
 ```
 
+The generator will emit default planner values.
+
 ### Collect stats at runtime
 
-Run `prisma-sql-collect-stats` as a pre-start step or background job, after deployment, when the database is reachable.
+Run `prisma-sql-collect-stats` as a pre-start step or background job after deployment, when the database is reachable.
 
 ```bash
 prisma-sql-collect-stats \
@@ -761,16 +807,16 @@ prisma-sql-collect-stats \
   --prisma-client dist/prisma/generated/client/index.js
 ```
 
-| Flag              | Default                                            | Description                                                    |
-| ----------------- | -------------------------------------------------- | -------------------------------------------------------------- |
-| `--output`        | `./dist/prisma/generated/sql/planner.generated.js` | Path to the generated planner module                           |
-| `--prisma-client` | `@prisma/client`                                   | Path to the compiled Prisma client (must expose `Prisma.dmmf`) |
+| Flag              | Default                                            | Description                                                       |
+| ----------------- | -------------------------------------------------- | ----------------------------------------------------------------- |
+| `--output`        | `./dist/prisma/generated/sql/planner.generated.js` | Path to the generated planner module.                             |
+| `--prisma-client` | `@prisma/client`                                   | Path to the compiled Prisma client. It must expose `Prisma.dmmf`. |
 
-The script reads `DATABASE_URL` from the environment (supports `.env` via `dotenv`). If the connection fails or times out, it exits silently without blocking startup.
+The script reads `DATABASE_URL` from the environment and supports `.env` via `dotenv`. If the connection fails or times out, it exits without blocking startup.
 
 ### Load stats at runtime
 
-Use `loadExternalPlannerStats` to load planner stats from an external file at runtime. This is useful when the stats file is stored outside the generated SQL directory, for example on a persistent volume that survives redeployments.
+Use `loadExternalPlannerStats` to load planner stats from an external file at runtime.
 
 ```ts
 import { loadExternalPlannerStats } from 'prisma-sql'
@@ -778,36 +824,73 @@ import { loadExternalPlannerStats } from 'prisma-sql'
 const loaded = loadExternalPlannerStats(
   '/data/planner-stats/planner.generated.js',
 )
+
 if (loaded) {
   console.log('Planner stats loaded from volume')
 }
 ```
 
-This applies `RELATION_STATS`, `ROUNDTRIP_ROW_EQUIVALENT`, and `JSON_ROW_FACTOR` to the global strategy estimator, overriding whatever was baked into the generated code at build time. Returns `true` on success, `false` if the file doesn't exist or can't be parsed.
+This applies `RELATION_STATS`, `MODEL_STATS`, `ROUNDTRIP_ROW_EQUIVALENT`, and `JSON_ROW_FACTOR` to the global strategy estimator, overriding whatever was baked into the generated code.
+
+Returns `true` on success and `false` if the file does not exist or cannot be parsed.
 
 ### Incremental collection
 
-The collector supports incremental mode. When an output file already exists, it reads previous results and can skip work that doesn't need repeating.
+The collector supports incremental mode. When an output file already exists, it reads previous results and can skip work that does not need repeating.
 
-**Freshness check:** If the existing file was written less than `PRISMA_SQL_STATS_MAX_AGE_MS` ago (default 24 hours), the collector exits immediately.
+Freshness check:
 
-**Fast mode:** By default, the collector uses PostgreSQL catalog statistics (`pg_stats`) instead of running full `GROUP BY` + `PERCENTILE_CONT` queries per relation. This completes in seconds instead of minutes. If catalog stats appear stale (all relations show trivial cardinality), it falls back to precise mode automatically.
+- if the existing file was written less than `PRISMA_SQL_STATS_MAX_AGE_MS` ago, the collector exits immediately
+- default freshness window is 24 hours
 
-**Slow edge skip:** Each relation edge's collection time is recorded. On subsequent runs, edges that previously exceeded `PRISMA_SQL_SLOW_EDGE_MS` (default 10 seconds) are skipped and their previous stats are reused. This prevents a single large table from blocking the entire collection. Skipped edges are re-measured after `PRISMA_SQL_STALE_EDGE_HOURS` (default 168 hours / 7 days).
+Fast mode:
 
-**Per-edge timeout:** Individual edge queries are bounded by `PRISMA_SQL_EDGE_TIMEOUT_MS` (default 30 seconds). On timeout, the collector falls back to previous stats or conservative defaults.
+- default mode
+- uses PostgreSQL catalog statistics
+- usually completes much faster than full relation scans
+- falls back to precise mode if catalog stats appear stale
+
+Precise mode:
+
+- runs full relation cardinality queries
+- can be slower on large schemas
+- useful when catalog stats are stale or missing
+
+Slow edge skip:
+
+- each relation edge's collection time is recorded
+- edges slower than `PRISMA_SQL_SLOW_EDGE_MS` can reuse previous stats
+- skipped slow edges are re-measured after `PRISMA_SQL_STALE_EDGE_HOURS`
+
+Per-edge timeout:
+
+- individual relation edge queries are bounded by `PRISMA_SQL_EDGE_TIMEOUT_MS`
+- on timeout, the collector falls back to previous stats or conservative defaults
+
+### Running `ANALYZE`
+
+By default, planner collection reads existing database statistics and does not run `ANALYZE`.
+
+Set `PRISMA_SQL_ANALYZE=1` to run `ANALYZE` during planner collection.
+
+```bash
+PRISMA_SQL_ANALYZE=1 npx prisma generate
+```
+
+Use this when you want PostgreSQL catalog stats to be refreshed as part of collection. Avoid it in environments where generation should not mutate database planner statistics.
 
 ### Environment variables
 
-| Variable                        | Default          | Description                                                 |
-| ------------------------------- | ---------------- | ----------------------------------------------------------- |
-| `PRISMA_SQL_SKIP_PLANNER`       | `false`          | Skip stats collection entirely during `prisma generate`     |
-| `PRISMA_SQL_STATS_MAX_AGE_MS`   | `86400000` (24h) | Skip collection if existing stats are younger than this     |
-| `PRISMA_SQL_STATS_MODE`         | `fast`           | `fast` uses pg_stats catalog, `precise` uses full queries   |
-| `PRISMA_SQL_SLOW_EDGE_MS`       | `10000` (10s)    | Reuse cached stats for edges slower than this               |
-| `PRISMA_SQL_EDGE_TIMEOUT_MS`    | `30000` (30s)    | Abort individual edge query after this                      |
-| `PRISMA_SQL_STALE_EDGE_HOURS`   | `168` (7 days)   | Force re-measure slow edges after this age                  |
-| `PRISMA_SQL_PLANNER_TIMEOUT_MS` | `15000`          | Total timeout for stats collection during `prisma generate` |
+| Variable                        | Default    | Description                                                                  |
+| ------------------------------- | ---------- | ---------------------------------------------------------------------------- |
+| `PRISMA_SQL_SKIP_PLANNER`       | `false`    | Skip stats collection during `prisma generate`.                              |
+| `PRISMA_SQL_ANALYZE`            | unset      | Set to `1` to run `ANALYZE` during planner stats collection.                 |
+| `PRISMA_SQL_STATS_MAX_AGE_MS`   | `86400000` | Skip collection if existing stats are younger than this age.                 |
+| `PRISMA_SQL_STATS_MODE`         | `fast`     | `fast` uses catalog stats; `precise` uses full relation cardinality queries. |
+| `PRISMA_SQL_SLOW_EDGE_MS`       | `10000`    | Reuse cached stats for edges slower than this threshold.                     |
+| `PRISMA_SQL_EDGE_TIMEOUT_MS`    | `30000`    | Timeout for an individual relation edge query.                               |
+| `PRISMA_SQL_STALE_EDGE_HOURS`   | `168`      | Re-measure slow edges after this age.                                        |
+| `PRISMA_SQL_PLANNER_TIMEOUT_MS` | `15000`    | Total timeout for planner stats collection during `prisma generate`.         |
 
 ### Example: background collection with persistent storage
 
@@ -844,7 +927,11 @@ execFile(
     'dist/prisma/generated/client/index.js',
   ],
   (err) => {
-    if (err) return console.error('Stats collection failed:', err.message)
+    if (err) {
+      console.error('Stats collection failed:', err.message)
+      return
+    }
+
     loadExternalPlannerStats(PLANNER_PATH)
     console.log('Planner stats refreshed')
   },
@@ -864,7 +951,7 @@ volumes:
   planner-stats:
 ```
 
-Do **not** mount the generated SQL output directory (`./generated/sql`). That directory contains the generated query client (`index.js`) which should stay immutable from the image. Mounting it as a volume causes new deploys to run stale generated code from the first deployment.
+Do not mount the generated SQL output directory. That directory contains the generated query client and should stay immutable from the image. Mounting it as a volume can cause new deploys to run stale generated code from the first deployment.
 
 ### Example scripts
 
@@ -876,17 +963,18 @@ Do **not** mount the generated SQL output directory (`./generated/sql`). That di
 }
 ```
 
-The semicolon (`;`) after `collect-planner-stats` ensures the server starts even if stats collection fails. Use `&&` instead if you want startup to abort on failure.
+The semicolon after `collect-planner-stats` ensures the server starts even if stats collection fails. Use `&&` if startup should abort on stats collection failure.
 
 ### What happens with default planner values
 
 When stats are not collected, the planner uses conservative defaults:
 
-- `roundtripRowEquivalent`: 73
-- `jsonRowFactor`: 1.5
-- `relationStats`: empty (all relations treated as unknown cardinality)
+- `roundtripRowEquivalent`: `73`
+- `jsonRowFactor`: `1.5`
+- `relationStats`: empty
+- `modelStats`: empty
 
-This means the planner cannot make informed decisions about join strategies. Queries still work correctly — the planner falls back to safe general-purpose strategies — but relation-heavy reads may not use the optimal execution plan.
+Queries still work correctly. However, without `MODEL_STATS`, the large to-many include guard cannot detect large child tables, so relation-heavy reads may not use the optimal execution plan.
 
 ### Practical recommendations
 
@@ -895,10 +983,12 @@ For best results with the planner:
 1. index all relation keys
 2. encode one-to-one relations with `@unique`
 3. use stable `orderBy`
-4. cap nested collections with `take`
-5. page parents before including deep trees
-6. split unrelated heavy branches into `$batch`
-7. benchmark with real data distributions, not toy fixtures
+4. benchmark with real data distributions
+5. use `take` when the product behavior is naturally bounded
+6. page parents before including deep trees
+7. split unrelated heavy branches into `$batch`
+
+Unbounded nested includes are supported. Use bounds because they match product behavior, not because they are required for correctness.
 
 ## Batch queries
 
@@ -956,9 +1046,10 @@ await prisma.$batch((batch) => ({
 - PostgreSQL only
 - queries are independent
 - not transactional
-- use `$transaction` when you need transactional guarantees
 
-## Configuration
+Use `$transaction` when you need transactional guarantees.
+
+## Debugging and observability
 
 ### Debug logging
 
@@ -1003,17 +1094,20 @@ interface QueryInfo {
 ```prisma
 generator sql {
   provider = "prisma-sql-generator"
-
-  // optional
-  // dialect = "postgres"
-
-  // optional
-  // output = "./generated/sql"
-
-  // optional
-  // skipInvalid = "true"
+  dialect  = "postgres"
+  output   = "./generated/sql"
+  skipInvalid = "true"
 }
 ```
+
+Supported generator fields:
+
+| Field         | Default                | Description                                                        |
+| ------------- | ---------------------- | ------------------------------------------------------------------ |
+| `provider`    | required               | Use `prisma-sql-generator`.                                        |
+| `dialect`     | inferred when possible | `postgres` or `sqlite`.                                            |
+| `output`      | `./generated/sql`      | Generated SQL client output path.                                  |
+| `skipInvalid` | `false`                | Skip invalid `@optimize` directives instead of failing generation. |
 
 ## `@optimize` examples
 
@@ -1080,9 +1174,11 @@ import { speedExtension, type SpeedClient } from './generated/sql'
 import postgres from 'postgres'
 
 const sql = postgres(process.env.DATABASE_URL!)
-const prisma = new PrismaClient().$extends(
+const basePrisma = new PrismaClient()
+
+const prisma = basePrisma.$extends(
   speedExtension({ postgres: sql }),
-) as SpeedClient<typeof PrismaClient>
+) as SpeedClient<typeof basePrisma>
 
 export const config = { runtime: 'edge' }
 
@@ -1126,14 +1222,16 @@ Performance depends on:
 - indexing
 - relation fan-out
 - whether the query is prebaked
-- whether the cardinality planner can choose a bounded strategy
+- whether planner stats are available
+- whether the planner can choose a bounded or segmented strategy
 
 Typical gains are strongest when:
 
 - Prisma overhead dominates total time
-- includes are moderate but structured well
 - query shapes repeat
 - indexes exist on relation and filter columns
+- include trees are relation-heavy but indexed
+- large to-many includes can use where-in segmented loading
 
 Run your own benchmarks on production-shaped data.
 
@@ -1186,10 +1284,31 @@ If behavior differs, open an issue with:
 Check these first:
 
 - missing foreign-key indexes
-- deep unbounded includes
-- no nested `take`
+- missing `MODEL_STATS`
+- stale PostgreSQL catalog stats
+- high-fanout relation trees
 - unstable or missing `orderBy`
-- high-fanout relation trees that should be split into `$batch`
+- unrelated heavy branches that should be split into `$batch`
+
+You can refresh PostgreSQL planner stats during collection with:
+
+```bash
+PRISMA_SQL_ANALYZE=1 npx prisma generate
+```
+
+### Large include still uses the wrong strategy
+
+Check:
+
+- `planner.generated.ts` contains non-empty `MODEL_STATS`
+- the child model's stats have `known: true`
+- `largeChildTableRows` is not set too high
+- `smallParentCountThreshold` is not set too low
+- debug logs show where-in segmented loading for the relation
+
+### SQLite tuple-IN error
+
+Composite foreign-key where-in requires SQLite 3.15 or newer. Upgrade SQLite if row-value tuple `IN` fails.
 
 ### Connection pool exhaustion
 
@@ -1207,37 +1326,49 @@ const sql = postgres(process.env.DATABASE_URL!, {
 
 - basic array operators
 - basic JSON path filtering
+- composite foreign-key includes through tuple-IN in the where-in path
 
 ### Not yet supported
 
 These should fall back to Prisma:
 
+- writes
 - full-text `search`
 - composite/document-style embedded types
 - vendor-specific extensions not yet modeled by the SQL builder
 - some advanced `groupBy` edge cases
 
+### Streaming limitations
+
+`findManyStream` cannot stream queries that require segmented where-in include loading. Use regular `findMany` for those queries, or select scalar columns only.
+
 ## FAQ
 
-**Do I still need Prisma?**  
+**Do I still need Prisma?**
 Yes. Prisma remains the source of truth for schema, migrations, types, writes, and fallback behavior.
 
-**Does this replace Prisma Client?**  
+**Does this replace Prisma Client?**
 No. It extends Prisma Client.
 
-**What gets accelerated?**  
+**What gets accelerated?**
 Supported read queries only.
 
-**What about writes?**  
+**What about writes?**
 Writes continue through Prisma.
 
-**Do I need `@optimize`?**  
+**Do I need `@optimize`?**
 No. It is optional. It only reduces the overhead of repeated hot query shapes.
 
-**Does `$batch` work with SQLite?**  
+**Does `$batch` work with SQLite?**
 Not currently.
 
-**Is it safe to use in production?**  
+**Are unbounded nested includes supported?**
+Yes. `prisma-sql` preserves Prisma-style include semantics. For large to-many branches, the planner can switch to where-in segmented loading and stitch results in memory.
+
+**Do I need planner stats?**
+Queries work without planner stats, but relation-heavy queries may not choose the best strategy. Collect planner stats for best performance on real production-shaped data.
+
+**Is it safe to use in production?**
 Use it the same way you would adopt any query-path optimization layer: benchmark it on real data, compare against Prisma for parity, and keep Prisma fallback enabled for unsupported cases.
 
 ## Migration

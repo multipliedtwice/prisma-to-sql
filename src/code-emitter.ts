@@ -161,8 +161,13 @@ export async function generateClient(options: GenerateClientOptions) {
   const absoluteOutputDir = resolve(process.cwd(), outputDir)
   await mkdir(absoluteOutputDir, { recursive: true })
 
-  const plannerArtifacts = options.plannerArtifacts ?? {
+  const collectedArtifacts =
+    options.plannerArtifacts ??
+    (await collectPlannerWithTimeout(options, config, options.datasourceUrl))
+
+  const plannerArtifacts = collectedArtifacts ?? {
     relationStats: {},
+    modelStats: {},
     roundtripRowEquivalent: 73,
     jsonRowFactor: 1.5,
     collectedAt: 0,
@@ -194,7 +199,7 @@ export async function generateClient(options: GenerateClientOptions) {
   console.log(`✓ Output: ${outputPath}`)
 }
 
-const PLANNER_TOTAL_TIMEOUT_MS = 15000
+const PLANNER_TOTAL_TIMEOUT_MS = 95000
 
 async function collectPlannerWithTimeout(
   options: GenerateClientOptions,
@@ -277,6 +282,7 @@ function generateImports(runtimeImportPath: string): string {
   executeWhereInSegments,
   buildReducerConfig,
   setRelationStats,
+  setModelStats,
   setRoundtripRowEquivalent,
   setJsonRowFactor,
   setLimits,
@@ -296,13 +302,15 @@ function generateImports(runtimeImportPath: string): string {
   executePostgresQuery,
   executeSqliteQuery,
   executeRaw,
+  streamReduce,
 } from ${JSON.stringify(runtimeImportPath)}`
 }
 
 function generateStatsInit(): string {
-  return `import { RELATION_STATS, ROUNDTRIP_ROW_EQUIVALENT, JSON_ROW_FACTOR } from './planner.generated'
+  return `import { RELATION_STATS, MODEL_STATS, ROUNDTRIP_ROW_EQUIVALENT, JSON_ROW_FACTOR } from './planner.generated'
 
 setRelationStats(RELATION_STATS as any)
+setModelStats(MODEL_STATS as any)
 setRoundtripRowEquivalent(ROUNDTRIP_ROW_EQUIVALENT)
 setJsonRowFactor(JSON_ROW_FACTOR)`
 }
@@ -992,6 +1000,7 @@ function generateExtension(runtimeImportPath: string): string {
       let includeSpec: Record<string, any> | undefined
       let isLateral = false
       let lateralMeta: any[] | undefined
+      let skipWhereIn = false
 
       if (prebakedQuery) {
         sql = prebakedQuery.sql
@@ -1000,6 +1009,7 @@ function generateExtension(runtimeImportPath: string): string {
         includeSpec = prebakedQuery.includeSpec
         isLateral = prebakedQuery.isLateral || false
         lateralMeta = prebakedQuery.lateralMeta
+        skipWhereIn = prebakedQuery.skipWhereIn || false
       } else {
         const result = buildSQL(model, MODELS, 'findMany', plan.filteredArgs, DIALECT)
         sql = result.sql
@@ -1008,6 +1018,13 @@ function generateExtension(runtimeImportPath: string): string {
         includeSpec = result.includeSpec
         isLateral = result.isLateral || false
         lateralMeta = result.lateralMeta
+        skipWhereIn = result.skipWhereIn || false
+      }
+
+      if (plan.whereInSegments.length > 0 && !skipWhereIn) {
+        throw new Error(
+          \`findManyStream cannot stream '\${modelName}': this include requires segmented where-in loading, which has no single-pass form. Use findMany, or select scalar columns only.\`
+        )
       }
 
       const normalizedParams = normalizeParams(params)
@@ -1065,6 +1082,103 @@ function generateExtension(runtimeImportPath: string): string {
           yield row
         }
       }
+    }
+
+    async function findManyReduceStreamImpl<TAcc, TOut>(
+      this: ModelContext,
+      args: unknown,
+      reduce: {
+        init: () => TAcc
+        onRow: (row: any, acc: TAcc) => void
+        finalize: (acc: TAcc) => TOut
+      },
+    ): Promise<TOut> {
+      const modelName = this?.name || this?.$name
+
+      if (!modelName || typeof modelName !== 'string') {
+        throw new Error('Cannot determine model name from context')
+      }
+
+      if (DIALECT !== 'postgres') {
+        throw new Error('findManyReduceStream requires postgres.js client')
+      }
+
+      let transformedArgs = transformEnumValuesByModel(modelName, args || {})
+      const model = MODEL_MAP.get(modelName)
+      if (!model) {
+        throw new Error(\`Model '\${modelName}' not found\`)
+      }
+
+      if (transformedArgs.cursor) {
+        const flatCursor = normalizeCompoundCursor(transformedArgs.cursor, model)
+        if (flatCursor !== transformedArgs.cursor) {
+          transformedArgs = { ...transformedArgs, cursor: flatCursor }
+        }
+      }
+
+      const plan = planQueryStrategy({
+        model,
+        method: 'findMany',
+        args: transformedArgs,
+        allModels: MODELS,
+        dialect: DIALECT,
+      })
+
+      const queryKey = normalizeQuery(plan.filteredArgs)
+      const prebakedQuery = QUERIES[modelName]?.['findMany']?.[queryKey]
+
+      let sql: string
+      let params: unknown[]
+      let requiresReduction = false
+      let includeSpec: Record<string, any> | undefined
+      let isLateral = false
+      let lateralMeta: any[] | undefined
+      let skipWhereIn = false
+
+      if (prebakedQuery) {
+        sql = prebakedQuery.sql
+        params = resolveParamsFromMappings(plan.filteredArgs, prebakedQuery.paramMappings)
+        requiresReduction = prebakedQuery.requiresReduction || false
+        includeSpec = prebakedQuery.includeSpec
+        isLateral = prebakedQuery.isLateral || false
+        lateralMeta = prebakedQuery.lateralMeta
+        skipWhereIn = prebakedQuery.skipWhereIn || false
+      } else {
+        const result = buildSQL(model, MODELS, 'findMany', plan.filteredArgs, DIALECT)
+        sql = result.sql
+        params = result.params as unknown[]
+        requiresReduction = result.requiresReduction || false
+        includeSpec = result.includeSpec
+        isLateral = result.isLateral || false
+        lateralMeta = result.lateralMeta
+        skipWhereIn = result.skipWhereIn || false
+      }
+
+      if (plan.whereInSegments.length > 0 && !skipWhereIn) {
+        throw new Error(
+          \`findManyReduceStream cannot stream '\${modelName}': this include requires segmented where-in loading, which has no single-pass form. Use findMany, or select scalar columns only.\`
+        )
+      }
+
+      if (debug) {
+        const strategy = isLateral ? 'LATERAL JOIN' : requiresReduction ? 'STREAMING REDUCTION' : 'STREAMING'
+        console.log(\`[\${DIALECT}] \${modelName}.findManyReduceStream - \${strategy}\`)
+        console.log('  SQL:', sql)
+        console.log('  Params:', params)
+      }
+
+      return streamReduce({
+        client,
+        sql,
+        params,
+        model,
+        allModels: MODELS,
+        requiresReduction,
+        includeSpec,
+        isLateral,
+        lateralMeta,
+        reduce,
+      })
     }
 
     async function batch<T extends Record<string, DeferredQuery>>(
@@ -1259,6 +1373,17 @@ function generateExtension(runtimeImportPath: string): string {
           findManyStream(this: ModelContext, args?: any): AsyncIterableIterator<any> {
             return findManyStream.call(this, args)
           },
+          findManyReduceStream<TAcc, TOut>(
+            this: ModelContext,
+            args: any,
+            reduce: {
+              init: () => TAcc
+              onRow: (row: any, acc: TAcc) => void
+              finalize: (acc: TAcc) => TOut
+            },
+          ): Promise<TOut> {
+            return findManyReduceStreamImpl.call(this, args, reduce)
+          },
         },
       },
     })
@@ -1279,6 +1404,17 @@ export type SpeedClient<T> = T & {
 
 export type WithStreaming<T> = T & {
   findManyStream(args?: any): AsyncIterableIterator<any>
+}
+
+export type WithReduceStream<T> = T & {
+  findManyReduceStream<TAcc, TOut>(
+    args: any,
+    reduce: {
+      init: () => TAcc
+      onRow: (row: any, acc: TAcc) => void
+      finalize: (acc: TAcc) => TOut
+    },
+  ): Promise<TOut>
 }
 
 export type { BatchCountQuery, TransactionQuery, TransactionOptions }`

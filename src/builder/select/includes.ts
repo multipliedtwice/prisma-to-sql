@@ -24,16 +24,11 @@ import {
   getScalarFieldSet,
 } from '../shared/model-field-cache'
 import { ensureDeterministicOrderByInput } from '../shared/order-by-determinism'
-import { isDynamicParameter } from '@dee-wan/schema-parser'
 import { extractRelationEntries } from '../shared/relation-extraction-utils'
 import {
   buildIncludeScope,
   getRelationTableReference,
   emptyJsonArray,
-  canUseJoinInclude,
-  hasNestedRelationInArgs,
-  buildJoinBasedNonPaginated,
-  buildJoinBasedPaginated,
 } from './include-join'
 import { extractWhereInput } from '../shared/relation-query-context'
 import { isListRelation } from '../shared/field-type-utils'
@@ -66,7 +61,6 @@ interface IncludeBuildContext {
   visitSet: Set<string>
   depth: number
   stats: IncludeComplexityStats
-  outerHasLimit?: boolean
 }
 
 interface NestedToOneRelation {
@@ -74,6 +68,28 @@ interface NestedToOneRelation {
   field: Field
   model: Model
   args: unknown
+}
+
+function hasNestedRelationInArgs(
+  relArgs: unknown,
+  relModel: Model,
+): boolean {
+  if (!isPlainObject(relArgs)) return false
+
+  const relationSet = getRelationFieldSet(relModel)
+  const checkSource = (src: unknown): boolean => {
+    if (!isPlainObject(src)) return false
+    for (const k of Object.keys(src)) {
+      if (relationSet.has(k) && (src as Record<string, unknown>)[k] !== false)
+        return true
+    }
+    return false
+  }
+
+  if (checkSource((relArgs as Record<string, unknown>).include)) return true
+  if (checkSource((relArgs as Record<string, unknown>).select)) return true
+
+  return false
 }
 
 function resolveRelationOrThrow(
@@ -817,57 +833,6 @@ function buildSingleInclude(
     return Object.freeze({ name: relName, sql, isOneToOne: true })
   }
 
-  const depth = ctx.depth
-  const outerHasLimit = ctx.outerHasLimit === true
-  const nestedIncludes = hasNestedRelationInArgs(relArgs, relModel)
-
-  if (
-    canUseJoinInclude(
-      ctx.dialect,
-      isList,
-      adjusted.takeVal,
-      paginationConfig.skipVal,
-      depth,
-      outerHasLimit,
-      nestedIncludes,
-    )
-  ) {
-    const hasTakeOrSkip =
-      isNotNullish(adjusted.takeVal) || isNotNullish(paginationConfig.skipVal)
-
-    if (!hasTakeOrSkip) {
-      return buildJoinBasedNonPaginated({
-        relName,
-        relTable,
-        relAlias,
-        relModel,
-        field,
-        whereJoins: whereParts.joins,
-        rawWhereClause: whereParts.rawClause,
-        orderBySql,
-        relSelect,
-        ctx,
-        nestedJoins,
-      })
-    }
-
-    return buildJoinBasedPaginated({
-      relName,
-      relTable,
-      relAlias,
-      relModel,
-      field,
-      whereJoins: whereParts.joins,
-      rawWhereClause: whereParts.rawClause,
-      orderBySql,
-      relSelect,
-      takeVal: adjusted.takeVal as number | undefined,
-      skipVal: paginationConfig.skipVal as number | undefined,
-      ctx,
-      nestedJoins,
-    })
-  }
-
   return buildListIncludeSpec({
     relName,
     relTable,
@@ -990,7 +955,7 @@ export function buildIncludeSql(
   parentAlias: string,
   params: ParamStore,
   dialect: SqlDialect,
-  outerHasLimit: boolean = true,
+  _outerHasLimit: boolean = true,
 ): IncludeSpec[] {
   const aliasGen = createAliasGenerator()
   const stats: IncludeComplexityStats = {
@@ -1014,6 +979,5 @@ export function buildIncludeSql(
     visitSet: new Set<string>(),
     depth: 0,
     stats,
-    outerHasLimit,
   })
 }

@@ -4,6 +4,7 @@ import {
   normalizeValue,
   getRowTransformer,
   createStreamingReducer,
+  createProgressiveReducer,
 } from './index'
 import {
   buildLateralReducerConfig,
@@ -121,6 +122,103 @@ export async function executePostgresQuery(
   })
 
   return results
+}
+
+export interface StreamReduceConfig<TAcc, TOut> {
+  init: () => TAcc
+  onRow: (row: any, acc: TAcc) => void
+  finalize: (acc: TAcc) => TOut
+}
+
+export interface StreamReduceOptions<TAcc, TOut> {
+  client: any
+  sql: string
+  params: unknown[]
+  model: Model
+  allModels: readonly Model[]
+  requiresReduction: boolean
+  includeSpec?: Record<string, any>
+  isLateral?: boolean
+  lateralMeta?: LateralRelationMeta[]
+  reduce: StreamReduceConfig<TAcc, TOut>
+}
+
+/**
+ * Single-pass score-and-accumulate over the postgres socket cursor.
+ *
+ * Fully hydrated entities are handed to `reduce.onRow` as they complete: at the
+ * parent-key transition for progressive reduction, after lateral reduction, or
+ * directly per row when no reduction is required. The caller owns the
+ * accumulator (e.g. a bounded top-K heap) and produces the ordered result in
+ * `finalize` when the stream ends — no buffered full-pool array, no second sort
+ * pass for the non-lateral paths.
+ *
+ * The lateral path must materialize all rows before reduction, so its memory is
+ * not bounded by the accumulator; the progressive and plain paths hold only the
+ * accumulator plus one in-flight parent group.
+ */
+export async function streamReduce<TAcc, TOut>(
+  opts: StreamReduceOptions<TAcc, TOut>,
+): Promise<TOut> {
+  const {
+    client,
+    sql,
+    params,
+    model,
+    allModels,
+    requiresReduction,
+    includeSpec,
+    isLateral,
+    lateralMeta,
+    reduce,
+  } = opts
+
+  const acc = reduce.init()
+  const normalizedParams = normalizeParams(params)
+
+  if (isLateral && lateralMeta) {
+    const config = buildLateralReducerConfig(model, lateralMeta)
+    const rows: any[] = []
+    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+      rows.push(row)
+    })
+    for (const entity of reduceLateralRows(rows, config)) {
+      reduce.onRow(entity, acc)
+    }
+    return reduce.finalize(acc)
+  }
+
+  if (requiresReduction && includeSpec) {
+    const config = buildReducerConfig(model, includeSpec, allModels)
+    const reducer = createProgressiveReducer(config)
+    let lastParentKey: string | null = null
+
+    await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+      reducer.processRow(row)
+      const currentKey = reducer.getCurrentParentKey(row)
+
+      if (currentKey !== lastParentKey && lastParentKey !== null) {
+        const parent = reducer.getCompletedParent(lastParentKey)
+        if (parent) {
+          reduce.onRow(parent, acc)
+        }
+      }
+
+      lastParentKey = currentKey
+    })
+
+    for (const parent of reducer.getRemainingParents()) {
+      reduce.onRow(parent, acc)
+    }
+
+    return reduce.finalize(acc)
+  }
+
+  await client.unsafe(sql, normalizedParams).forEach((row: any) => {
+    reduce.onRow(row, acc)
+  })
+
+  return reduce.finalize(acc)
 }
 
 export function executeSqliteQuery(

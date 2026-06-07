@@ -1,3 +1,7 @@
+// FIXME: ORPHANED. Not invoked by pickIncludeStrategy as of this patch.
+// Scheduled for removal in a follow-up cleanup PR. Do not extend or
+// build new functionality on this module.
+
 import { Model, Field } from '../../types'
 import { SQL_TEMPLATES, LIMITS } from '../shared/constants'
 import { quote, buildTableReference, quoteColumn } from '../shared/sql-utils'

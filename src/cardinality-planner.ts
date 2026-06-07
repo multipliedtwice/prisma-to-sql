@@ -11,6 +11,9 @@ import {
   setRelationStats,
   setRoundtripRowEquivalent,
   setJsonRowFactor,
+  setModelStats,
+  type ModelStats,
+  type ModelStatsMap,
 } from './builder/select/strategy-estimator'
 
 type Executor = {
@@ -37,6 +40,8 @@ export type RelStats = {
 
 export type RelationStatsMap = Record<string, Record<string, RelStats>>
 
+export type { ModelStats, ModelStatsMap }
+
 export type EdgeTiming = {
   ms: number
   measuredAt: number
@@ -44,6 +49,7 @@ export type EdgeTiming = {
 
 export type GeneratePlannerArtifacts = {
   relationStats: RelationStatsMap
+  modelStats: ModelStatsMap
   roundtripRowEquivalent: number
   jsonRowFactor: number
   collectedAt: number
@@ -56,6 +62,8 @@ type RelEdge = {
   childModel: string
   parentTable: string
   childTable: string
+  parentSchema?: string
+  childSchema?: string
   parentPkColumns: string[]
   childFkColumns: string[]
   isMany: boolean
@@ -67,6 +75,17 @@ function edgeKey(edge: RelEdge): string {
 
 function quoteIdent(dialect: SqlDialect, ident: string): string {
   return `"${ident.replace(/"/g, '""')}"`
+}
+
+function tableRefFor(
+  dialect: SqlDialect,
+  schemaName: string | undefined,
+  tableName: string,
+): string {
+  if (dialect === 'postgres' && schemaName) {
+    return `${quoteIdent('postgres', schemaName)}.${quoteIdent('postgres', tableName)}`
+  }
+  return quoteIdent(dialect, tableName)
 }
 
 export async function createDatabaseExecutor(options: {
@@ -107,6 +126,8 @@ function extractMeasurableOneToManyEdges(datamodel: DMMF.Datamodel): RelEdge[] {
     if (pkFields.length === 0) continue
 
     const parentTable = parent.dbName || parent.name
+    const parentSchema =
+      (parent as { schema?: string | null }).schema || undefined
 
     for (const f of parent.fields) {
       if (!f.relationName) continue
@@ -139,6 +160,8 @@ function extractMeasurableOneToManyEdges(datamodel: DMMF.Datamodel): RelEdge[] {
       if (fkFields.length !== references.length) continue
 
       const childTable = child.dbName || child.name
+      const childSchema =
+        (child as { schema?: string | null }).schema || undefined
 
       edges.push({
         parentModel: parent.name,
@@ -146,6 +169,8 @@ function extractMeasurableOneToManyEdges(datamodel: DMMF.Datamodel): RelEdge[] {
         childModel: child.name,
         parentTable,
         childTable,
+        parentSchema,
+        childSchema,
         parentPkColumns: references,
         childFkColumns: fkFields,
         isMany: true,
@@ -157,8 +182,12 @@ function extractMeasurableOneToManyEdges(datamodel: DMMF.Datamodel): RelEdge[] {
 }
 
 function buildPostgresStatsSql(edge: RelEdge): string {
-  const childTable = quoteIdent('postgres', edge.childTable)
-  const parentTable = quoteIdent('postgres', edge.parentTable)
+  const childTable = tableRefFor('postgres', edge.childSchema, edge.childTable)
+  const parentTable = tableRefFor(
+    'postgres',
+    edge.parentSchema,
+    edge.parentTable,
+  )
   const groupCols = edge.childFkColumns
     .map((c) => quoteIdent('postgres', c))
     .join(', ')
@@ -183,8 +212,8 @@ FROM counts
 }
 
 function buildSqliteStatsSql(edge: RelEdge): string {
-  const childTable = quoteIdent('sqlite', edge.childTable)
-  const parentTable = quoteIdent('sqlite', edge.parentTable)
+  const childTable = tableRefFor('sqlite', undefined, edge.childTable)
+  const parentTable = tableRefFor('sqlite', undefined, edge.parentTable)
   const groupCols = edge.childFkColumns
     .map((c) => quoteIdent('sqlite', c))
     .join(', ')
@@ -245,24 +274,148 @@ function buildFanoutStatsSql(dialect: SqlDialect, edge: RelEdge): string {
     : buildSqliteStatsSql(edge)
 }
 
-async function findLargestTable(params: {
-  executor: Executor
-  dialect: SqlDialect
-  datamodel: DMMF.Datamodel
-}): Promise<{ tableName: string; rowCount: number } | null> {
-  const { executor, dialect, datamodel } = params
-
-  let best: { tableName: string; rowCount: number } | null = null
+async function collectModelStatsPostgres(
+  executor: Executor,
+  datamodel: DMMF.Datamodel,
+): Promise<ModelStatsMap> {
+  const out: ModelStatsMap = {}
+  const tableToModel = new Map<string, string>()
+  const unknownModels: string[] = []
 
   for (const model of datamodel.models) {
-    const table = quoteIdent(dialect, model.dbName || model.name)
+    const schema = (model as { schema?: string | null }).schema || 'public'
+    const tableName = model.dbName || model.name
+    tableToModel.set(`${schema}.${tableName}`, model.name)
+    out[model.name] = {
+      rowCount: 0,
+      tableName,
+      schemaName: (model as { schema?: string | null }).schema || undefined,
+      known: false,
+    }
+  }
+
+  const shouldAnalyze = process.env.PRISMA_SQL_ANALYZE === '1'
+  if (shouldAnalyze) {
+    for (const model of datamodel.models) {
+      const schema = (model as { schema?: string | null }).schema || 'public'
+      const tableName = model.dbName || model.name
+      const ref = tableRefFor('postgres', schema, tableName)
+      try {
+        await executor.query(`ANALYZE ${ref}`)
+      } catch (_) {}
+    }
+  }
+
+  const rows = await executor.query(
+    `
+    SELECT
+      n.nspname AS schema_name,
+      c.relname AS table_name,
+      c.reltuples::bigint AS row_count
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p')
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  `,
+    [],
+  )
+
+  const seenModels = new Set<string>()
+
+  for (const row of rows) {
+    const schemaName = String(row.schema_name)
+    const tableName = String(row.table_name)
+    const modelName = tableToModel.get(`${schemaName}.${tableName}`)
+    if (!modelName) continue
+
+    seenModels.add(modelName)
+    const rawCount = toNumberOrZero(row.row_count)
+
+    if (rawCount < 0) {
+      unknownModels.push(modelName)
+      continue
+    }
+
+    out[modelName].rowCount = rawCount
+    out[modelName].known = true
+  }
+
+  for (const model of datamodel.models) {
+    if (!seenModels.has(model.name)) {
+      unknownModels.push(model.name)
+    }
+  }
+
+  if (unknownModels.length > 0) {
+    console.warn(
+      `[planner] ${unknownModels.length} model(s) have unknown row counts ` +
+        `(table not analyzed or not found): ${unknownModels.join(', ')}. ` +
+        `Pathological-query guard will be inactive for these models.`,
+    )
+  }
+
+  return out
+}
+
+async function collectModelStatsSqlite(
+  executor: Executor,
+  datamodel: DMMF.Datamodel,
+  previousArtifacts?: GeneratePlannerArtifacts,
+): Promise<ModelStatsMap> {
+  const out: ModelStatsMap = {}
+
+  for (const model of datamodel.models) {
+    const tableName = model.dbName || model.name
+
+    const cached = previousArtifacts?.modelStats?.[model.name]
+    if (cached) {
+      out[model.name] = cached
+      continue
+    }
+
     try {
+      const table = quoteIdent('sqlite', tableName)
       const rows = await executor.query(`SELECT COUNT(*) AS cnt FROM ${table}`)
-      const count = toNumberOrZero(rows[0]?.cnt)
-      if (!best || count > best.rowCount) {
-        best = { tableName: table, rowCount: count }
+      const rowCount = toNumberOrZero(rows[0]?.cnt)
+      out[model.name] = { rowCount, tableName, known: true }
+    } catch (_) {
+      out[model.name] = { rowCount: 0, tableName, known: false }
+    }
+  }
+
+  return out
+}
+
+async function collectModelStats(params: {
+  executor: Executor
+  datamodel: DMMF.Datamodel
+  dialect: SqlDialect
+  previousArtifacts?: GeneratePlannerArtifacts
+}): Promise<ModelStatsMap> {
+  const { executor, datamodel, dialect, previousArtifacts } = params
+
+  if (dialect === 'postgres') {
+    return collectModelStatsPostgres(executor, datamodel)
+  }
+
+  return collectModelStatsSqlite(executor, datamodel, previousArtifacts)
+}
+
+function findLargestTable(args: {
+  modelStats: ModelStatsMap
+  dialect: SqlDialect
+}): { tableRef: string; rowCount: number } | null {
+  const { modelStats, dialect } = args
+  let best: { tableRef: string; rowCount: number } | null = null
+
+  for (const stats of Object.values(modelStats)) {
+    if (stats.known === false) continue
+    if (!best || stats.rowCount > best.rowCount) {
+      best = {
+        tableRef: tableRefFor(dialect, stats.schemaName, stats.tableName),
+        rowCount: stats.rowCount,
       }
-    } catch (_) {}
+    }
   }
 
   return best
@@ -270,10 +423,10 @@ async function findLargestTable(params: {
 
 async function measureRoundtripCost(params: {
   executor: Executor
+  modelStats: ModelStatsMap
   dialect: SqlDialect
-  datamodel: DMMF.Datamodel
 }): Promise<number> {
-  const { executor, dialect, datamodel } = params
+  const { executor, modelStats, dialect } = params
   const WARMUP = 5
   const SAMPLES = 15
 
@@ -294,22 +447,22 @@ async function measureRoundtripCost(params: {
     `  [roundtrip] SELECT 1 times (ms): min=${roundtripTimes[0].toFixed(3)} median=${medianRoundtrip.toFixed(3)} max=${roundtripTimes[SAMPLES - 1].toFixed(3)}`,
   )
 
-  const largest = await findLargestTable({ executor, dialect, datamodel })
+  const largest = findLargestTable({ modelStats, dialect })
 
   if (!largest || largest.rowCount < 50) {
     console.log(
-      `  [roundtrip] Largest table: ${largest?.tableName ?? 'none'} (${largest?.rowCount ?? 0} rows) — too small, using default 50`,
+      `  [roundtrip] Largest table: ${largest?.tableRef ?? 'none'} (${largest?.rowCount ?? 0} rows) — too small, using default 50`,
     )
     return 50
   }
 
   console.log(
-    `  [roundtrip] Using table ${largest.tableName} (${largest.rowCount} rows)`,
+    `  [roundtrip] Using table ${largest.tableRef} (${largest.rowCount} rows)`,
   )
 
   return estimateFromQueryPairRatio({
     executor,
-    tableName: largest.tableName,
+    tableRef: largest.tableRef,
     medianRoundtrip,
     tableRowCount: largest.rowCount,
   })
@@ -317,11 +470,11 @@ async function measureRoundtripCost(params: {
 
 async function estimateFromQueryPairRatio(params: {
   executor: Executor
-  tableName: string
+  tableRef: string
   medianRoundtrip: number
   tableRowCount: number
 }): Promise<number> {
-  const { executor, tableName, medianRoundtrip, tableRowCount } = params
+  const { executor, tableRef, medianRoundtrip, tableRowCount } = params
   const WARMUP = 5
   const SAMPLES = 10
 
@@ -329,13 +482,13 @@ async function estimateFromQueryPairRatio(params: {
   const largeLimit = Math.min(1000, tableRowCount)
 
   for (let i = 0; i < WARMUP; i++) {
-    await executor.query(`SELECT * FROM ${tableName} LIMIT ${largeLimit}`)
+    await executor.query(`SELECT * FROM ${tableRef} LIMIT ${largeLimit}`)
   }
 
   const smallTimes: number[] = []
   for (let i = 0; i < SAMPLES; i++) {
     const start = performance.now()
-    await executor.query(`SELECT * FROM ${tableName} LIMIT ${smallLimit}`)
+    await executor.query(`SELECT * FROM ${tableRef} LIMIT ${smallLimit}`)
     smallTimes.push(performance.now() - start)
   }
   smallTimes.sort((a, b) => a - b)
@@ -346,7 +499,7 @@ async function estimateFromQueryPairRatio(params: {
   for (let i = 0; i < SAMPLES; i++) {
     const start = performance.now()
     const rows = await executor.query(
-      `SELECT * FROM ${tableName} LIMIT ${largeLimit}`,
+      `SELECT * FROM ${tableRef} LIMIT ${largeLimit}`,
     )
     largeTimes.push(performance.now() - start)
     actualLargeRows = rows.length
@@ -379,9 +532,9 @@ async function estimateFromQueryPairRatio(params: {
   const sequentialTimes: number[] = []
   for (let i = 0; i < SAMPLES; i++) {
     const start = performance.now()
-    await executor.query(`SELECT * FROM ${tableName} LIMIT ${smallLimit}`)
-    await executor.query(`SELECT * FROM ${tableName} LIMIT ${smallLimit}`)
-    await executor.query(`SELECT * FROM ${tableName} LIMIT ${smallLimit}`)
+    await executor.query(`SELECT * FROM ${tableRef} LIMIT ${smallLimit}`)
+    await executor.query(`SELECT * FROM ${tableRef} LIMIT ${smallLimit}`)
+    await executor.query(`SELECT * FROM ${tableRef} LIMIT ${smallLimit}`)
     sequentialTimes.push(performance.now() - start)
   }
   sequentialTimes.sort((a, b) => a - b)
@@ -410,19 +563,19 @@ async function estimateFromQueryPairRatio(params: {
 
 async function measureJsonOverhead(params: {
   executor: Executor
-  tableName: string
+  tableRef: string
   tableRowCount: number
 }): Promise<number> {
-  const { executor, tableName, tableRowCount } = params
+  const { executor, tableRef, tableRowCount } = params
   const WARMUP = 3
   const SAMPLES = 10
   const limit = Math.min(500, tableRowCount)
 
-  const rawSql = `SELECT * FROM ${tableName} LIMIT ${limit}`
+  const rawSql = `SELECT * FROM ${tableRef} LIMIT ${limit}`
 
   const aggSql = `
     WITH sample AS (
-      SELECT * FROM ${tableName} LIMIT ${limit}
+      SELECT * FROM ${tableRef} LIMIT ${limit}
     )
     SELECT COALESCE(json_agg(sample), '[]'::json) AS rows
     FROM sample
@@ -470,25 +623,42 @@ async function collectPostgresStatsFromCatalog(params: {
   const timings: Record<string, EdgeTiming> = {}
   const now = Date.now()
 
-  const tablesToAnalyze = new Set<string>()
+  const tablesToAnalyze = new Map<
+    string,
+    { schema: string; table: string }
+  >()
   for (const edge of edges) {
-    tablesToAnalyze.add(edge.parentTable)
-    tablesToAnalyze.add(edge.childTable)
+    const parentSchema = edge.parentSchema || 'public'
+    const childSchema = edge.childSchema || 'public'
+    tablesToAnalyze.set(`${parentSchema}.${edge.parentTable}`, {
+      schema: parentSchema,
+      table: edge.parentTable,
+    })
+    tablesToAnalyze.set(`${childSchema}.${edge.childTable}`, {
+      schema: childSchema,
+      table: edge.childTable,
+    })
   }
 
-  for (const table of tablesToAnalyze) {
-    try {
-      await executor.query(`ANALYZE ${quoteIdent('postgres', table)}`)
-    } catch (_) {}
+  const shouldAnalyze = process.env.PRISMA_SQL_ANALYZE === '1'
+  if (shouldAnalyze) {
+    for (const { schema, table } of tablesToAnalyze.values()) {
+      try {
+        await executor.query(
+          `ANALYZE ${tableRefFor('postgres', schema, table)}`,
+        )
+      } catch (_) {}
+    }
   }
 
   const tableStatsQuery = `
     SELECT
-      c.relname as table_name,
-      c.reltuples::bigint as row_count
+      n.nspname AS schema_name,
+      c.relname AS table_name,
+      c.reltuples::bigint AS row_count
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relkind = 'r'
+    WHERE c.relkind IN ('r', 'p')
       AND n.nspname NOT IN ('pg_catalog', 'information_schema')
   `
 
@@ -496,16 +666,20 @@ async function collectPostgresStatsFromCatalog(params: {
   const rowCounts = new Map<string, number>()
 
   for (const row of tableStats) {
+    const schemaName = String(row.schema_name)
     const tableName = String(row.table_name)
     const count = toNumberOrZero(row.row_count)
-    rowCounts.set(tableName, count)
+    rowCounts.set(`${schemaName}.${tableName}`, count)
   }
 
   for (const edge of edges) {
     const key = edgeKey(edge)
     const start = performance.now()
-    const parentRows = rowCounts.get(edge.parentTable) || 0
-    const childRows = rowCounts.get(edge.childTable) || 0
+    const parentSchema = edge.parentSchema || 'public'
+    const childSchema = edge.childSchema || 'public'
+    const parentRows =
+      rowCounts.get(`${parentSchema}.${edge.parentTable}`) || 0
+    const childRows = rowCounts.get(`${childSchema}.${edge.childTable}`) || 0
 
     if (parentRows === 0 || childRows === 0) {
       if (!out[edge.parentModel]) out[edge.parentModel] = {}
@@ -528,12 +702,13 @@ async function collectPostgresStatsFromCatalog(params: {
         s.correlation,
         (s.most_common_freqs)[1] as max_freq
       FROM pg_stats s
-      WHERE s.tablename = $1
-        AND s.attname = $2
-        AND s.schemaname NOT IN ('pg_catalog', 'information_schema')
+      WHERE s.schemaname = $1
+        AND s.tablename = $2
+        AND s.attname = $3
     `
 
     const statsRows = await executor.query(statsQuery, [
+      childSchema,
       edge.childTable,
       fkColumn,
     ])
@@ -776,7 +951,15 @@ export async function collectPlannerArtifacts(params: {
     staleEdgeHours,
   } = params
 
-  const largest = await findLargestTable({ executor, dialect, datamodel })
+  console.log('📊 Collecting model row counts...')
+  const modelStats = await collectModelStats({
+    executor,
+    datamodel,
+    dialect,
+    previousArtifacts,
+  })
+
+  const largest = findLargestTable({ modelStats, dialect })
 
   const [cardinalityResult, roundtripRowEquivalent, jsonRowFactor] =
     await Promise.all([
@@ -790,11 +973,11 @@ export async function collectPlannerArtifacts(params: {
         perEdgeTimeoutMs,
         staleEdgeHours,
       }),
-      measureRoundtripCost({ executor, dialect, datamodel }),
+      measureRoundtripCost({ executor, modelStats, dialect }),
       largest && largest.rowCount >= 50 && dialect === 'postgres'
         ? measureJsonOverhead({
             executor,
-            tableName: largest.tableName,
+            tableRef: largest.tableRef,
             tableRowCount: largest.rowCount,
           })
         : Promise.resolve(1.5),
@@ -816,6 +999,7 @@ export async function collectPlannerArtifacts(params: {
 
   return {
     relationStats: cardinalityResult.stats,
+    modelStats,
     roundtripRowEquivalent,
     jsonRowFactor,
     collectedAt: Date.now(),
@@ -830,6 +1014,10 @@ export function emitPlannerGeneratedModule(
     `export const RELATION_STATS = ${stableJson(artifacts.relationStats)} as const`,
     ``,
     `export type RelationStats = typeof RELATION_STATS`,
+    ``,
+    `export const MODEL_STATS = ${stableJson(artifacts.modelStats)} as const`,
+    ``,
+    `export type ModelStats = typeof MODEL_STATS`,
     ``,
     `export const ROUNDTRIP_ROW_EQUIVALENT = ${artifacts.roundtripRowEquivalent}`,
     ``,
@@ -846,6 +1034,7 @@ export function parsePreviousArtifacts(
   moduleExports: Record<string, unknown>,
 ): GeneratePlannerArtifacts | null {
   const relationStats = moduleExports.RELATION_STATS
+  const modelStats = moduleExports.MODEL_STATS
   const roundtrip = moduleExports.ROUNDTRIP_ROW_EQUIVALENT
   const jsonFactor = moduleExports.JSON_ROW_FACTOR
   const collectedAt = moduleExports.COLLECTED_AT
@@ -863,6 +1052,10 @@ export function parsePreviousArtifacts(
 
   return {
     relationStats: relationStats as RelationStatsMap,
+    modelStats:
+      modelStats && typeof modelStats === 'object'
+        ? (modelStats as ModelStatsMap)
+        : {},
     roundtripRowEquivalent: roundtrip,
     jsonRowFactor: jsonFactor,
     collectedAt,
@@ -875,7 +1068,7 @@ export function parsePreviousArtifacts(
 
 /**
  * Load planner stats from an external file path at runtime.
- * Applies RELATION_STATS, ROUNDTRIP_ROW_EQUIVALENT, and JSON_ROW_FACTOR
+ * Applies RELATION_STATS, MODEL_STATS, ROUNDTRIP_ROW_EQUIVALENT, and JSON_ROW_FACTOR
  * to the global strategy estimator. Returns true if loaded successfully.
  */
 export function loadExternalPlannerStats(filePath: string): boolean {
@@ -885,6 +1078,9 @@ export function loadExternalPlannerStats(filePath: string): boolean {
 
     if (mod.RELATION_STATS && typeof mod.RELATION_STATS === 'object') {
       setRelationStats(mod.RELATION_STATS)
+    }
+    if (mod.MODEL_STATS && typeof mod.MODEL_STATS === 'object') {
+      setModelStats(mod.MODEL_STATS)
     }
     if (typeof mod.ROUNDTRIP_ROW_EQUIVALENT === 'number') {
       setRoundtripRowEquivalent(mod.ROUNDTRIP_ROW_EQUIVALENT)

@@ -1,20 +1,94 @@
 import type { Model } from '../../types'
 import type { WhereInSegment } from '../select/segment-planner'
 import { getPrimaryKeyField } from './primary-key-utils'
-import { LIMITS } from './constants'
+
+const POSTGRES_MAX_PARAMS = 65535
+const SQLITE_MAX_PARAMS = 999
+const PARAM_SAFETY_MARGIN = 10
+
+function paramLimitForDialect(dialect: 'postgres' | 'sqlite'): number {
+  return dialect === 'postgres' ? POSTGRES_MAX_PARAMS : SQLITE_MAX_PARAMS
+}
+
+function maxTuplesPerBatch(
+  dialect: 'postgres' | 'sqlite',
+  keyColumnCount: number,
+  baseChildParams: number,
+): number {
+  const limit = paramLimitForDialect(dialect)
+  const cols = Math.max(1, keyColumnCount)
+  const available = limit - baseChildParams - PARAM_SAFETY_MARGIN
+
+  if (available < cols) {
+    throw new Error(
+      `Cannot build where-in batch: child query already uses ${baseChildParams} params, ` +
+        `leaving fewer than ${cols} params for one key tuple under ${dialect} limit ${limit}.`,
+    )
+  }
+
+  return Math.floor(available / cols)
+}
+
+function compositeKey(values: readonly unknown[]): string {
+  return JSON.stringify(values.map(toKeyPart))
+}
+
+function toKeyPart(value: unknown): unknown {
+  if (typeof value === 'bigint') return { __bigint: value.toString() }
+  if (value instanceof Date) return { __date: value.getTime() }
+  return value
+}
+
+function extractTupleSafe(
+  row: any,
+  fieldNames: readonly string[],
+): unknown[] | null {
+  const values: unknown[] = []
+  for (const f of fieldNames) {
+    const v = row[f]
+    if (v == null) return null
+    values.push(v)
+  }
+  return values
+}
+
+function extractTuples(
+  rows: any[],
+  fieldNames: readonly string[],
+): unknown[][] {
+  const tuples: unknown[][] = []
+  for (const row of rows) {
+    const t = extractTupleSafe(row, fieldNames)
+    if (t !== null) tuples.push(t)
+  }
+  return tuples
+}
+
+function dedupeTuples(tuples: unknown[][]): unknown[][] {
+  const seen = new Set<string>()
+  const unique: unknown[][] = []
+  for (const t of tuples) {
+    const k = compositeKey(t)
+    if (seen.has(k)) continue
+    seen.add(k)
+    unique.push(t)
+  }
+  return unique
+}
 
 function buildParentKeyIndex(
   parentRows: any[],
-  parentKeyFieldName: string,
-): Map<unknown, any[]> {
-  const index = new Map<unknown, any[]>()
+  parentKeyFieldNames: readonly string[],
+): Map<string, any[]> {
+  const index = new Map<string, any[]>()
   for (const parent of parentRows) {
-    const keyVal = parent[parentKeyFieldName]
-    if (keyVal == null) continue
-    let arr = index.get(keyVal)
+    const t = extractTupleSafe(parent, parentKeyFieldNames)
+    if (t === null) continue
+    const key = compositeKey(t)
+    let arr = index.get(key)
     if (!arr) {
       arr = []
-      index.set(keyVal, arr)
+      index.set(key, arr)
     }
     arr.push(parent)
   }
@@ -29,38 +103,55 @@ function needsPerParentPagination(segment: WhereInSegment): boolean {
   )
 }
 
+function applyPerParentPagination(
+  groupedChildren: any[],
+  perParentSkip: number,
+  perParentTake: number | undefined,
+): any[] {
+  if (perParentTake !== undefined && perParentTake < 0) {
+    const absTake = -perParentTake
+    const endIdx = groupedChildren.length - perParentSkip
+    if (endIdx <= 0) return []
+    const startIdx = Math.max(0, endIdx - absTake)
+    return groupedChildren.slice(startIdx, endIdx)
+  }
+  const start = perParentSkip
+  const end =
+    perParentTake !== undefined ? start + perParentTake : undefined
+  return groupedChildren.slice(start, end)
+}
+
 function stitchChildrenToParents(
   children: any[],
   segment: WhereInSegment,
-  parentKeyIndex: Map<unknown, any[]>,
+  parentKeyIndex: Map<string, any[]>,
 ): void {
-  const grouped = new Map<unknown, any[]>()
+  const grouped = new Map<string, any[]>()
   for (const child of children) {
-    const childKey = child[segment.fkFieldName]
-    if (childKey == null) continue
-    let arr = grouped.get(childKey)
+    const t = extractTupleSafe(child, segment.fkFieldNames)
+    if (t === null) continue
+    const key = compositeKey(t)
+    let arr = grouped.get(key)
     if (!arr) {
       arr = []
-      grouped.set(childKey, arr)
+      grouped.set(key, arr)
     }
     arr.push(child)
   }
 
   const perParentPaginated = needsPerParentPagination(segment)
 
-  for (const [fkVal, groupedChildren] of grouped) {
-    const matchingParents = parentKeyIndex.get(fkVal)
+  for (const [fkKey, groupedChildren] of grouped) {
+    const matchingParents = parentKeyIndex.get(fkKey)
     if (!matchingParents) continue
 
-    let sliced = groupedChildren
-    if (perParentPaginated) {
-      const start = segment.perParentSkip || 0
-      const end =
-        segment.perParentTake != null
-          ? start + segment.perParentTake
-          : undefined
-      sliced = groupedChildren.slice(start, end)
-    }
+    const sliced = perParentPaginated
+      ? applyPerParentPagination(
+          groupedChildren,
+          segment.perParentSkip || 0,
+          segment.perParentTake,
+        )
+      : groupedChildren
 
     for (const parent of matchingParents) {
       if (segment.isList) {
@@ -77,44 +168,83 @@ function stitchChildrenToParents(
   }
 }
 
-function buildChildArgs(
-  relArgs: unknown,
-  fkFieldName: string,
-  uniqueIds: unknown[],
-  stripPagination: boolean,
-): any {
-  const isObject =
-    relArgs !== true && typeof relArgs === 'object' && relArgs !== null
-
-  const source = isObject ? (relArgs as any) : null
-
+function copyChildArgsBase(source: any, stripPagination: boolean): any {
   const base: any = {}
-
-  if (source) {
-    if (source.select !== undefined) base.select = source.select
-    if (source.include !== undefined) base.include = source.include
-    if (source.orderBy !== undefined) base.orderBy = source.orderBy
-    if (!stripPagination) {
-      if (source.take !== undefined) base.take = source.take
-      if (source.skip !== undefined) base.skip = source.skip
-    }
-    if (source.cursor !== undefined) base.cursor = source.cursor
-    if (source.distinct !== undefined) base.distinct = source.distinct
+  if (source.select !== undefined) base.select = source.select
+  if (source.include !== undefined) base.include = source.include
+  if (source.orderBy !== undefined) base.orderBy = source.orderBy
+  if (!stripPagination) {
+    if (source.take !== undefined) base.take = source.take
+    if (source.skip !== undefined) base.skip = source.skip
   }
-
-  const inCondition = { [fkFieldName]: { in: uniqueIds } }
-
-  base.where =
-    source && source.where ? { AND: [source.where, inCondition] } : inCondition
-
+  if (source.cursor !== undefined) base.cursor = source.cursor
+  if (source.distinct !== undefined) base.distinct = source.distinct
   return base
 }
 
-function ensureFkInSelect(childArgs: any, fkFieldName: string): boolean {
-  if (!childArgs.select) return false
-  if (childArgs.select[fkFieldName]) return false
-  childArgs.select = { ...childArgs.select, [fkFieldName]: true }
-  return true
+function applyWhereCondition(
+  base: any,
+  source: any,
+  inCondition: Record<string, unknown>,
+): void {
+  base.where =
+    source && source.where ? { AND: [source.where, inCondition] } : inCondition
+}
+
+function isObjectArgs(relArgs: unknown): boolean {
+  return relArgs !== true && typeof relArgs === 'object' && relArgs !== null
+}
+
+function buildChildArgs(
+  relArgs: unknown,
+  fkFieldNames: readonly string[],
+  uniqueParentTuples: unknown[][],
+  stripPagination: boolean,
+): any {
+  const source = isObjectArgs(relArgs) ? (relArgs as any) : null
+  const base = source ? copyChildArgsBase(source, stripPagination) : {}
+
+  if (fkFieldNames.length === 1) {
+    const values = uniqueParentTuples.map((t) => t[0])
+    const inCondition = { [fkFieldNames[0]]: { in: values } }
+    applyWhereCondition(base, source, inCondition)
+    return base
+  }
+
+  if (source?.where !== undefined) base.where = source.where
+  return base
+}
+
+function buildPrerenderChildArgs(
+  relArgs: unknown,
+  fkFieldName: string,
+  dynamicParam: string,
+  stripPagination: boolean,
+): any {
+  const source = isObjectArgs(relArgs) ? (relArgs as any) : null
+  const base = source ? copyChildArgsBase(source, stripPagination) : {}
+
+  const inCondition = { [fkFieldName]: { in: dynamicParam as any } }
+  applyWhereCondition(base, source, inCondition)
+  return base
+}
+
+function ensureFkInSelect(
+  childArgs: any,
+  fkFieldNames: readonly string[],
+): string[] {
+  if (!childArgs.select) return []
+  const added: string[] = []
+  const newSelect = { ...childArgs.select }
+  for (const fk of fkFieldNames) {
+    if (!newSelect[fk]) {
+      newSelect[fk] = true
+      added.push(fk)
+    }
+  }
+  if (added.length === 0) return []
+  childArgs.select = newSelect
+  return added
 }
 
 function ensureOrderByPk(childArgs: any, childModel: Model): void {
@@ -129,12 +259,179 @@ function initRelationPlaceholders(row: any, segments: WhereInSegment[]): void {
   }
 }
 
+const SQL_TERMINATOR_KEYWORDS = [
+  'ORDER BY',
+  'GROUP BY',
+  'HAVING',
+  'LIMIT',
+  'OFFSET',
+  'UNION',
+  'INTERSECT',
+  'EXCEPT',
+  'FETCH',
+] as const
+
+function scanSqlForKeywords(sql: string): {
+  whereIdx: number
+  terminatorIdx: number
+} {
+  let depth = 0
+  let inDouble = false
+  let inSingle = false
+  let whereIdx = -1
+  let terminatorIdx = -1
+
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i]
+
+    if (inSingle) {
+      if (c === "'") {
+        if (sql[i + 1] === "'") {
+          i++
+          continue
+        }
+        inSingle = false
+      }
+      continue
+    }
+    if (inDouble) {
+      if (c === '"') {
+        if (sql[i + 1] === '"') {
+          i++
+          continue
+        }
+        inDouble = false
+      }
+      continue
+    }
+    if (c === "'") {
+      inSingle = true
+      continue
+    }
+    if (c === '"') {
+      inDouble = true
+      continue
+    }
+    if (c === '(') {
+      depth++
+      continue
+    }
+    if (c === ')') {
+      depth--
+      continue
+    }
+
+    if (depth !== 0) continue
+
+    const prevC = i > 0 ? sql[i - 1] : ' '
+    if (!/\s/.test(prevC)) continue
+
+    if (whereIdx === -1 && sql.startsWith('WHERE', i)) {
+      const nextC = sql[i + 5]
+      if (nextC === undefined || /\s/.test(nextC)) {
+        whereIdx = i
+        continue
+      }
+    }
+
+    if (terminatorIdx === -1) {
+      for (const kw of SQL_TERMINATOR_KEYWORDS) {
+        if (!sql.startsWith(kw, i)) continue
+        const nextC = sql[i + kw.length]
+        if (nextC === undefined || /\s/.test(nextC)) {
+          terminatorIdx = i
+          break
+        }
+      }
+    }
+  }
+
+  return { whereIdx, terminatorIdx }
+}
+
+function extractMainTableAlias(sql: string): string | null {
+  const match = sql.match(
+    /\bFROM\s+(?:"[^"]+"\.)?"[^"]+"\s+(?:("[^"]+")|([A-Za-z_][A-Za-z0-9_]*))/i,
+  )
+  if (!match) return null
+  return match[1] ?? match[2] ?? null
+}
+
+function buildTupleInClause(args: {
+  childModel: Model
+  fkFieldNames: readonly string[]
+  tuples: readonly unknown[][]
+  tableAlias: string | null
+  paramStartIdx: number
+  dialect: 'postgres' | 'sqlite'
+}): { sql: string; params: unknown[] } {
+  const { childModel, fkFieldNames, tuples, tableAlias, paramStartIdx, dialect } =
+    args
+  const prefix = tableAlias ? `${tableAlias}.` : ''
+  const cols = fkFieldNames
+    .map((name) => {
+      const field = childModel.fields.find((f) => f.name === name)
+      const dbName = field?.dbName || name
+      return `${prefix}"${dbName}"`
+    })
+    .join(', ')
+
+  let paramIdx = paramStartIdx
+  const params: unknown[] = []
+  const tupleParts: string[] = []
+  for (const tuple of tuples) {
+    const phs: string[] = []
+    for (const v of tuple) {
+      params.push(v)
+      phs.push(dialect === 'postgres' ? `$${paramIdx++}` : '?')
+    }
+    tupleParts.push(`(${phs.join(', ')})`)
+  }
+
+  const sql = `(${cols}) IN (${tupleParts.join(', ')})`
+  return { sql, params }
+}
+
+function injectAndWhere(sql: string, additionalClause: string): string {
+  const { whereIdx, terminatorIdx } = scanSqlForKeywords(sql)
+
+  if (whereIdx !== -1) {
+    const whereEnd = terminatorIdx !== -1 ? terminatorIdx : sql.length
+    const whereContent = sql.slice(whereIdx + 6, whereEnd).trim()
+    const rest = whereEnd < sql.length ? ' ' + sql.slice(whereEnd) : ''
+    return (
+      sql.slice(0, whereIdx) +
+      `WHERE (${whereContent}) AND ${additionalClause}` +
+      rest
+    )
+  }
+
+  if (terminatorIdx !== -1) {
+    return (
+      sql.slice(0, terminatorIdx) +
+      `WHERE ${additionalClause} ` +
+      sql.slice(terminatorIdx)
+    )
+  }
+
+  return `${sql} WHERE ${additionalClause}`
+}
+
 export {
   buildParentKeyIndex,
   needsPerParentPagination,
   stitchChildrenToParents,
   buildChildArgs,
+  buildPrerenderChildArgs,
   ensureFkInSelect,
   ensureOrderByPk,
   initRelationPlaceholders,
+  extractTuples,
+  dedupeTuples,
+  maxTuplesPerBatch,
+  paramLimitForDialect,
+  compositeKey,
+  extractMainTableAlias,
+  buildTupleInClause,
+  injectAndWhere,
 }
