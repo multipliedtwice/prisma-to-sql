@@ -274,13 +274,79 @@ function buildFanoutStatsSql(dialect: SqlDialect, edge: RelEdge): string {
     : buildSqliteStatsSql(edge)
 }
 
+const POSTGRES_STATS_QUERY = `
+  SELECT
+    n.nspname AS schema_name,
+    c.relname AS table_name,
+    c.reltuples::bigint AS reltuples,
+    COALESCE(s.n_live_tup, 0)::bigint AS live_tup
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+  WHERE c.relkind IN ('r', 'p')
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+`
+
+interface TableRef {
+  schema: string
+  table: string
+}
+
+function bestRowCount(row: Record<string, unknown>): number {
+  const reltuples = toNumberOrZero(row.reltuples)
+  const liveTup = toNumberOrZero(row.live_tup)
+
+  if (reltuples >= 0) return Math.max(reltuples, liveTup)
+  if (liveTup > 0) return liveTup
+  return -1
+}
+
+async function populatePostgresModelStats(
+  executor: Executor,
+  tableToModel: Map<string, string>,
+  out: ModelStatsMap,
+): Promise<TableRef[]> {
+  const rows = await executor.query(POSTGRES_STATS_QUERY, [])
+  const unknown: TableRef[] = []
+
+  for (const row of rows) {
+    const schemaName = String(row.schema_name)
+    const tableName = String(row.table_name)
+    const modelName = tableToModel.get(`${schemaName}.${tableName}`)
+    if (!modelName) continue
+
+    const count = bestRowCount(row)
+    if (count < 0) {
+      unknown.push({ schema: schemaName, table: tableName })
+      continue
+    }
+
+    out[modelName].rowCount = count
+    out[modelName].known = true
+  }
+
+  return unknown
+}
+
+async function analyzePostgresTables(
+  executor: Executor,
+  tables: readonly TableRef[],
+): Promise<void> {
+  for (const { schema, table } of tables) {
+    try {
+      await executor.query(
+        `ANALYZE ${tableRefFor('postgres', schema, table)}`,
+      )
+    } catch (_) {}
+  }
+}
+
 async function collectModelStatsPostgres(
   executor: Executor,
   datamodel: DMMF.Datamodel,
 ): Promise<ModelStatsMap> {
   const out: ModelStatsMap = {}
   const tableToModel = new Map<string, string>()
-  const unknownModels: string[] = []
 
   for (const model of datamodel.models) {
     const schema = (model as { schema?: string | null }).schema || 'public'
@@ -294,62 +360,34 @@ async function collectModelStatsPostgres(
     }
   }
 
-  const shouldAnalyze = process.env.PRISMA_SQL_ANALYZE === '1'
-  if (shouldAnalyze) {
-    for (const model of datamodel.models) {
-      const schema = (model as { schema?: string | null }).schema || 'public'
-      const tableName = model.dbName || model.name
-      const ref = tableRefFor('postgres', schema, tableName)
-      try {
-        await executor.query(`ANALYZE ${ref}`)
-      } catch (_) {}
-    }
+  const forceAnalyze = process.env.PRISMA_SQL_ANALYZE === '1'
+
+  if (forceAnalyze) {
+    const allTables: TableRef[] = datamodel.models.map((m) => ({
+      schema: (m as { schema?: string | null }).schema || 'public',
+      table: m.dbName || m.name,
+    }))
+    await analyzePostgresTables(executor, allTables)
   }
 
-  const rows = await executor.query(
-    `
-    SELECT
-      n.nspname AS schema_name,
-      c.relname AS table_name,
-      c.reltuples::bigint AS row_count
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relkind IN ('r', 'p')
-      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-  `,
-    [],
-  )
+  let unknown = await populatePostgresModelStats(executor, tableToModel, out)
 
-  const seenModels = new Set<string>()
-
-  for (const row of rows) {
-    const schemaName = String(row.schema_name)
-    const tableName = String(row.table_name)
-    const modelName = tableToModel.get(`${schemaName}.${tableName}`)
-    if (!modelName) continue
-
-    seenModels.add(modelName)
-    const rawCount = toNumberOrZero(row.row_count)
-
-    if (rawCount < 0) {
-      unknownModels.push(modelName)
-      continue
-    }
-
-    out[modelName].rowCount = rawCount
-    out[modelName].known = true
+  if (unknown.length > 0 && !forceAnalyze) {
+    await analyzePostgresTables(executor, unknown)
+    unknown = await populatePostgresModelStats(executor, tableToModel, out)
   }
 
+  const unknownNames: string[] = []
   for (const model of datamodel.models) {
-    if (!seenModels.has(model.name)) {
-      unknownModels.push(model.name)
+    if (!out[model.name].known) {
+      unknownNames.push(model.name)
     }
   }
 
-  if (unknownModels.length > 0) {
+  if (unknownNames.length > 0) {
     console.warn(
-      `[planner] ${unknownModels.length} model(s) have unknown row counts ` +
-        `(table not analyzed or not found): ${unknownModels.join(', ')}. ` +
+      `[planner] ${unknownNames.length} model(s) have unknown row counts ` +
+        `(table not analyzed or not found): ${unknownNames.join(', ')}. ` +
         `Pathological-query guard will be inactive for these models.`,
     )
   }
@@ -1066,11 +1104,6 @@ export function parsePreviousArtifacts(
   }
 }
 
-/**
- * Load planner stats from an external file path at runtime.
- * Applies RELATION_STATS, MODEL_STATS, ROUNDTRIP_ROW_EQUIVALENT, and JSON_ROW_FACTOR
- * to the global strategy estimator. Returns true if loaded successfully.
- */
 export function loadExternalPlannerStats(filePath: string): boolean {
   try {
     delete require.cache[require.resolve(filePath)]
