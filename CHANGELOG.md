@@ -1,3 +1,10 @@
+# [1.85.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.84.0...v1.85.0) (2026-06-09)
+
+
+### Features
+
+* implement PostgreSQL model statistics collection and analysis ([a4d4ee9](https://github.com/multipliedtwice/prisma-to-sql/commit/a4d4ee9362647e5f3c57174b31ada04cd64027a6))
+
 # [1.84.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.83.0...v1.84.0) (2026-06-07)
 
 
