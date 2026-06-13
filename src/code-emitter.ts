@@ -808,10 +808,6 @@ function generateExtension(runtimeImportPath: string): string {
           }
         }
 
-        if (debug && plan.whereInSegments.length > 0) {
-          console.dir(plan.whereInSegments, { depth: null })
-        }
-
         const plan = planQueryStrategy({
           model,
           method,
@@ -819,6 +815,10 @@ function generateExtension(runtimeImportPath: string): string {
           allModels: MODELS,
           dialect: DIALECT,
         })
+
+        if (debug && plan.whereInSegments.length > 0) {
+          console.dir(plan.whereInSegments, { depth: null })
+        }
 
         const queryKey = normalizeQuery(plan.filteredArgs)
         const prebakedQuery = QUERIES[modelName]?.[method]?.[queryKey]
