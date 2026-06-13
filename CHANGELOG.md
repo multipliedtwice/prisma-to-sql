@@ -1,3 +1,10 @@
+# [1.86.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.85.0...v1.86.0) (2026-06-13)
+
+
+### Features
+
+* add support for union-of-ids SQL rewrite and extend SqlBuildOptions ([fb870fc](https://github.com/multipliedtwice/prisma-to-sql/commit/fb870fc92f31fd798ac0fef5ed2c4440ce23707a))
+
 # [1.85.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.84.0...v1.85.0) (2026-06-09)
 
 
