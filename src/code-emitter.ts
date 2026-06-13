@@ -867,6 +867,11 @@ function generateExtension(runtimeImportPath: string): string {
           console.log(\`  Prebaked: \${prebaked}, skipWhereIn: \${skipWhereIn}\`)
           console.log('  SQL:', sql)
           console.log('  Params:', params)
+
+          if (plan.whereInSegments.length > 0) {
+            console.log('  WHERE IN segments:')
+            console.dir(plan.whereInSegments, { depth: null })
+          }
         }
 
         if (plan.whereInSegments.length > 0 && !skipWhereIn) {
@@ -882,14 +887,43 @@ function generateExtension(runtimeImportPath: string): string {
               modelMap: MODEL_MAP,
               dialect: DIALECT,
               execute: async (sql: string, params: unknown[]) => {
+                const normalizedParams = normalizeParams(params)
+
+                if (debug) {
+                  console.log('[where-in child SQL]')
+                  console.log(sql)
+                  console.log('[where-in child params]')
+                  console.dir(normalizedParams, { depth: null })
+                }
+
                 const results: any[] = []
-                await client.unsafe(sql, normalizeParams(params)).forEach((row: any) => {
+
+                await client.unsafe(sql, normalizedParams).forEach((row: any) => {
                   results.push(row)
                 })
+
+                if (debug) {
+                  console.log('[where-in child rows]', results.length)
+
+                  if (results.length > 0) {
+                    console.log('[where-in child first row]')
+                    console.dir(results[0], { depth: null })
+                  }
+                }
+
                 return results
               },
               stream: async (sql: string, params: unknown[], onRow: (row: any) => void) => {
-                await client.unsafe(sql, normalizeParams(params)).forEach(onRow)
+                let rowCount = 0
+
+                await client.unsafe(sql, normalizeParams(params)).forEach((row: any) => {
+                  rowCount++
+                  onRow(row)
+                })
+
+                if (debug) {
+                  console.log('[where-in parent stream rows]', rowCount)
+                }
               },
               parentTake: typeof plan.filteredArgs?.take === 'number'
                 ? plan.filteredArgs.take
