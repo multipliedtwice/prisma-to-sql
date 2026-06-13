@@ -37,6 +37,7 @@ import {
   buildBatchSql,
 } from './batch/batch-builder'
 import { parseBatchCountResults, parseBatchResults } from './batch/batch-result'
+import type { OrRewriteMode, SqlBuildOptions } from './builder/select'
 
 export function buildSQL(
   model: Model,
@@ -44,23 +45,32 @@ export function buildSQL(
   method: PrismaMethod,
   args: Record<string, unknown>,
   dialect: SqlDialect,
+  options?: SqlBuildOptions,
 ): SqlResult {
-  return buildSQLWithCache(model, models, method, args, dialect) as any
+  return buildSQLWithCache(model, models, method, args, dialect, options) as any
+}
+
+interface CreateToSQLOptions {
+  defaultOrRewrite?: OrRewriteMode
 }
 
 function createToSQLFunction(
   models: Model[],
   dialect: SqlDialect,
+  factoryOptions?: CreateToSQLOptions,
 ): (
   model: string,
   method: PrismaMethod,
   args?: Record<string, unknown>,
+  callOptions?: SqlBuildOptions,
 ) => SqlResult {
   if (!models || !Array.isArray(models) || models.length === 0) {
     throw new Error('createToSQL requires non-empty models array')
   }
 
   const modelMap = new Map(models.map((m) => [m.name, m]))
+  const defaultMode: OrRewriteMode =
+    factoryOptions?.defaultOrRewrite ?? 'default'
 
   setGlobalDialect(dialect)
 
@@ -68,6 +78,7 @@ function createToSQLFunction(
     model: string,
     method: PrismaMethod,
     args: Record<string, unknown> = {},
+    callOptions?: SqlBuildOptions,
   ): SqlResult {
     const m = modelMap.get(model)
     if (!m) {
@@ -75,23 +86,29 @@ function createToSQLFunction(
         `Model '${model}' not found. Available: ${[...modelMap.keys()].join(', ')}`,
       )
     }
-    return buildSQL(m, models, method, args, dialect)
+    const resolvedOptions: SqlBuildOptions = {
+      ...callOptions,
+      orRewrite: callOptions?.orRewrite ?? defaultMode,
+    }
+    return buildSQL(m, models, method, args, dialect, resolvedOptions)
   }
 }
 
 export function createToSQL(
   modelsOrDmmf: Model[] | DMMF.Document,
   dialect: SqlDialect,
+  options?: CreateToSQLOptions,
 ): (
   model: string,
   method: PrismaMethod,
   args?: Record<string, unknown>,
+  callOptions?: SqlBuildOptions,
 ) => SqlResult {
   const models = Array.isArray(modelsOrDmmf)
     ? modelsOrDmmf
     : convertDMMFToModels(modelsOrDmmf.datamodel)
 
-  return createToSQLFunction(models, dialect)
+  return createToSQLFunction(models, dialect, options)
 }
 
 export function generateSQL(directive: DirectiveProps): SQLDirective {
@@ -116,6 +133,8 @@ export {
   type PrismaSQLResult,
   type SqlResult,
   type LateralRelationMeta,
+  type OrRewriteMode,
+  type SqlBuildOptions,
 }
 
 export {

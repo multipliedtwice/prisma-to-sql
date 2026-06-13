@@ -4,6 +4,7 @@ import type { ParamMap } from '@dee-wan/schema-parser'
 import type { LateralRelationMeta } from './builder/select/lateral-join'
 import { buildWhereClause } from './builder/where'
 import { buildSelectSql } from './builder/select'
+import type { SqlBuildOptions } from './builder/select'
 import {
   buildAggregateSql,
   buildCountSql,
@@ -84,14 +85,22 @@ function bigintReplacer(_key: string, value: unknown): unknown {
   return value
 }
 
+function optionsKeyFragment(options?: SqlBuildOptions): string {
+  if (!options) return ''
+  const mode = options.orRewrite ?? 'default'
+  return mode === 'default' ? '' : `:or=${mode}`
+}
+
 function canonicalizeQuery(
   modelName: string,
   method: PrismaMethod,
   args: Record<string, unknown>,
   dialect: SqlDialect,
+  options?: SqlBuildOptions,
 ): string {
-  if (!args) return `${dialect}:${modelName}:${method}:{}`
-  return `${dialect}:${modelName}:${method}:${JSON.stringify(args, bigintReplacer)}`
+  const optsFragment = optionsKeyFragment(options)
+  if (!args) return `${dialect}:${modelName}:${method}:{}${optsFragment}`
+  return `${dialect}:${modelName}:${method}:${JSON.stringify(args, bigintReplacer)}${optsFragment}`
 }
 
 function buildSQLFull(
@@ -100,6 +109,7 @@ function buildSQLFull(
   method: PrismaMethod,
   args: Record<string, unknown>,
   dialect: SqlDialect,
+  options?: SqlBuildOptions,
 ): SqlResult {
   const tableName = buildTableReference(
     SQL_TEMPLATES.PUBLIC_SCHEMA,
@@ -170,6 +180,7 @@ function buildSQLFull(
         from: { tableName, alias },
         whereResult,
         dialect,
+        options,
       })
   }
   const needsPlaceholderConversion =
@@ -194,8 +205,9 @@ export function buildSQLWithCache(
   method: PrismaMethod,
   args: Record<string, unknown>,
   dialect: SqlDialect,
+  options?: SqlBuildOptions,
 ): SqlResult {
-  const cacheKey = canonicalizeQuery(model.name, method, args, dialect)
+  const cacheKey = canonicalizeQuery(model.name, method, args, dialect, options)
   const cached = queryCache.get(cacheKey)
   if (cached) {
     queryCacheStats.hit()
@@ -211,15 +223,18 @@ export function buildSQLWithCache(
     }
   }
   queryCacheStats.miss()
-  const fastResult = tryFastPath(model, method, args, dialect)
-  if (fastResult) {
-    queryCache.set(cacheKey, {
-      sql: fastResult.sql,
-      params: [...fastResult.params],
-    })
-    return fastResult
+  const useOrRewrite = options?.orRewrite === 'union-of-ids'
+  if (!useOrRewrite) {
+    const fastResult = tryFastPath(model, method, args, dialect)
+    if (fastResult) {
+      queryCache.set(cacheKey, {
+        sql: fastResult.sql,
+        params: [...fastResult.params],
+      })
+      return fastResult
+    }
   }
-  const result = buildSQLFull(model, models, method, args, dialect)
+  const result = buildSQLFull(model, models, method, args, dialect, options)
   queryCache.set(cacheKey, {
     sql: result.sql,
     params: [...result.params],

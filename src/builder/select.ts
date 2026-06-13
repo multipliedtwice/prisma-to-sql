@@ -27,6 +27,13 @@ import {
   getScalarFieldSet,
   getRelationFieldSet,
 } from './shared/model-field-cache'
+import { tryBuildUnionOfIdsSelectSql } from './select/or-rewrite'
+
+export type OrRewriteMode = 'default' | 'union-of-ids'
+
+export interface SqlBuildOptions {
+  orRewrite?: OrRewriteMode
+}
 
 type OrderByValue =
   | 'asc'
@@ -146,21 +153,6 @@ function validateDistinct(
 
     assertScalarField(model, f, 'distinct')
   }
-}
-
-function isScalarSortValue(v: unknown): boolean {
-  if (typeof v === 'string') {
-    const lower = v.toLowerCase()
-    return lower === 'asc' || lower === 'desc'
-  }
-  if (
-    isPlainObject(v) &&
-    (Object.prototype.hasOwnProperty.call(v, 'sort') ||
-      Object.prototype.hasOwnProperty.call(v, 'direction'))
-  ) {
-    return true
-  }
-  return false
 }
 
 function validateOrderBy(
@@ -459,10 +451,12 @@ type BuildSelectSqlInput = {
   from: { tableName: string; alias: string }
   whereResult: WhereClauseResult
   dialect?: SqlDialect
+  options?: SqlBuildOptions
 }
 
 export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
-  const { method, args, model, schemas, from, whereResult, dialect } = input
+  const { method, args, model, schemas, from, whereResult, dialect, options } =
+    input
 
   assertSafeAlias(from.alias)
   assertSafeTableRef(from.tableName)
@@ -476,6 +470,19 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
   validateDistinct(model, normalizedArgs.distinct)
   validateOrderBy(model, normalizedArgs.orderBy, schemas)
   validateCursor(model, normalizedArgs.cursor, normalizedArgs.distinct)
+
+  if (options?.orRewrite === 'union-of-ids') {
+    const rewritten = tryBuildUnionOfIdsSelectSql({
+      method,
+      normalizedArgs,
+      model,
+      schemas,
+      tableName: from.tableName,
+      alias: from.alias,
+      dialect: dialectToUse,
+    })
+    if (rewritten) return rewritten
+  }
 
   const spec = buildSelectSpec({
     method,
