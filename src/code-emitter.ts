@@ -808,6 +808,10 @@ function generateExtension(runtimeImportPath: string): string {
           }
         }
 
+        if (debug && plan.whereInSegments.length > 0) {
+          console.dir(plan.whereInSegments, { depth: null })
+        }
+
         const plan = planQueryStrategy({
           model,
           method,
