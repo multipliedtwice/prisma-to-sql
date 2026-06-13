@@ -1,3 +1,10 @@
+# [1.87.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.86.0...v1.87.0) (2026-06-13)
+
+
+### Features
+
+* add debug logging for whereInSegments in generateExtension function ([9788a12](https://github.com/multipliedtwice/prisma-to-sql/commit/9788a12725636a64a711c33a14e1f666e85f55ca))
+
 # [1.86.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.85.0...v1.86.0) (2026-06-13)
 
 
