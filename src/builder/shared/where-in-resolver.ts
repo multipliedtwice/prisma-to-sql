@@ -168,11 +168,7 @@ export async function resolveSingleSegment(
   const baseChildParams = isComposite
     ? probeParamCount
     : Math.max(0, probeParamCount - 1)
-  const batchSize = maxTuplesPerBatch(
-    dialect,
-    keyColumnCount,
-    baseChildParams,
-  )
+  const batchSize = maxTuplesPerBatch(dialect, keyColumnCount, baseChildParams)
 
   const allChildren: any[] = []
   let needsStripFk = false
@@ -236,7 +232,48 @@ export async function resolveSingleSegment(
       params = [...params, ...tupleClause.params]
     }
 
+    console.log('[where-in segment]', segment.relationName)
+    console.log('[where-in child model]', childModel.name)
+    console.log('[where-in fk fields]', segment.fkFieldNames)
+    console.log('[where-in parent key fields]', segment.parentKeyFieldNames)
+    console.log('[where-in parent tuples]', batch)
+    console.log('[where-in sql]')
+    console.log(sql)
+    console.log('[where-in params]')
+    console.dir(params, { depth: null })
+
     let batchChildren = await execute(sql, params)
+
+    console.log(
+      '[where-in raw rows]',
+      segment.relationName,
+      batchChildren.length,
+    )
+    if (batchChildren.length > 0) {
+      console.log('[where-in raw first row]', segment.relationName)
+      console.dir(batchChildren[0], { depth: null })
+    }
+
+    if (result.requiresReduction && result.includeSpec) {
+      const config = buildReducerConfig(
+        childModel,
+        result.includeSpec,
+        allModels,
+      )
+      batchChildren = reduceFlatRows(batchChildren, config)
+
+      if (process.env.DEBUG_WHERE_IN === '1') {
+        console.log(
+          '[where-in reduced rows]',
+          segment.relationName,
+          batchChildren.length,
+        )
+        if (batchChildren.length > 0) {
+          console.log('[where-in reduced first row]', segment.relationName)
+          console.dir(batchChildren[0], { depth: null })
+        }
+      }
+    }
 
     if (result.requiresReduction && result.includeSpec) {
       const config = buildReducerConfig(
