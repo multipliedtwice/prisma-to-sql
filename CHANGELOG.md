@@ -1,3 +1,10 @@
+## [1.88.6](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.5...v1.88.6) (2026-06-14)
+
+
+### Bug Fixes
+
+* add ensurePkInSelect utility function and update resolveSingleSegment to utilize it ([00b9293](https://github.com/multipliedtwice/prisma-to-sql/commit/00b9293718ff2f2722bc8083a8a92491dabd9bd9))
+
 ## [1.88.5](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.4...v1.88.5) (2026-06-14)
 
 
