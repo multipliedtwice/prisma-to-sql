@@ -232,27 +232,14 @@ export async function resolveSingleSegment(
       params = [...params, ...tupleClause.params]
     }
 
-    console.log('[where-in segment]', segment.relationName)
-    console.log('[where-in child model]', childModel.name)
-    console.log('[where-in fk fields]', segment.fkFieldNames)
-    console.log('[where-in parent key fields]', segment.parentKeyFieldNames)
-    console.log('[where-in parent tuples]', batch)
-    console.log('[where-in sql]')
-    console.log(sql)
-    console.log('[where-in params]')
-    console.dir(params, { depth: null })
-
     let batchChildren = await execute(sql, params)
 
-    console.log(
-      '[where-in raw rows]',
-      segment.relationName,
-      batchChildren.length,
-    )
-    if (batchChildren.length > 0) {
-      console.log('[where-in raw first row]', segment.relationName)
-      console.dir(batchChildren[0], { depth: null })
-    }
+    console.log('[where-in RAW]', segment.relationName, {
+      count: batchChildren.length,
+      firstKeys: batchChildren[0] ? Object.keys(batchChildren[0]) : [],
+      firstUserId: batchChildren[0]?.userId,
+      firstId: batchChildren[0]?.id,
+    })
 
     if (result.requiresReduction && result.includeSpec) {
       const config = buildReducerConfig(
@@ -262,26 +249,24 @@ export async function resolveSingleSegment(
       )
       batchChildren = reduceFlatRows(batchChildren, config)
 
-      if (process.env.DEBUG_WHERE_IN === '1') {
-        console.log(
-          '[where-in reduced rows]',
-          segment.relationName,
-          batchChildren.length,
-        )
-        if (batchChildren.length > 0) {
-          console.log('[where-in reduced first row]', segment.relationName)
-          console.dir(batchChildren[0], { depth: null })
-        }
-      }
-    }
-
-    if (result.requiresReduction && result.includeSpec) {
-      const config = buildReducerConfig(
-        childModel,
-        result.includeSpec,
-        allModels,
-      )
-      batchChildren = reduceFlatRows(batchChildren, config)
+      console.log('[where-in POST-REDUCE]', segment.relationName, {
+        count: batchChildren.length,
+        firstKeys: batchChildren[0] ? Object.keys(batchChildren[0]) : [],
+        firstUserId: batchChildren[0]?.userId,
+        firstId: batchChildren[0]?.id,
+        hasOwnUserId: batchChildren[0]
+          ? Object.prototype.hasOwnProperty.call(batchChildren[0], 'userId')
+          : null,
+        fkFieldNames: segment.fkFieldNames,
+        firstFkValues: batchChildren[0]
+          ? segment.fkFieldNames.map((f) => batchChildren[0][f])
+          : null,
+      })
+    } else {
+      console.log('[where-in NO-REDUCE]', segment.relationName, {
+        requiresReduction: result.requiresReduction,
+        hasIncludeSpec: !!result.includeSpec,
+      })
     }
 
     if (childPlan.whereInSegments.length > 0 && batchChildren.length > 0) {
@@ -315,7 +300,33 @@ export async function resolveSingleSegment(
     parentRows,
     segment.parentKeyFieldNames,
   )
+
+  console.log('[where-in PRE-STITCH]', segment.relationName, {
+    fkFieldNames: segment.fkFieldNames,
+    parentKeyFieldNames: segment.parentKeyFieldNames,
+    isList: segment.isList,
+    parentRowsCount: parentRows.length,
+    parentFirstId: parentRows[0]?.id,
+    parentFirstKeys: parentRows[0] ? Object.keys(parentRows[0]) : [],
+    parentKeyIndexSize: parentKeyIndex.size,
+    parentKeyIndexKeys: [...parentKeyIndex.keys()].slice(0, 3),
+    allChildrenCount: allChildren.length,
+    childFirstUserId: allChildren[0]?.userId,
+    childFirstKeys: allChildren[0] ? Object.keys(allChildren[0]) : [],
+    childFirstFkValues: allChildren[0]
+      ? segment.fkFieldNames.map((f) => allChildren[0][f])
+      : null,
+  })
+
   stitchChildrenToParents(allChildren, segment, parentKeyIndex)
+
+  console.log('[where-in POST-STITCH]', segment.relationName, {
+    parentId: parentRows[0]?.id,
+    relationLength: Array.isArray(parentRows[0]?.[segment.relationName])
+      ? parentRows[0][segment.relationName].length
+      : 'not-array',
+    relationSample: parentRows[0]?.[segment.relationName],
+  })
 
   if (needsStripFk) {
     for (const child of allChildren) {

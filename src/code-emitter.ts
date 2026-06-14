@@ -937,11 +937,39 @@ function generateExtension(runtimeImportPath: string): string {
                 }
               }
             }
+            console.log('[where-in BEFORE TRANSFORM postgres]', {
+              model: modelName,
+              method,
+              rowsCount: results.length,
+              firstKeys: results[0] ? Object.keys(results[0]) : [],
+              companiesLength: Array.isArray(results[0]?.companies)
+                ? results[0].companies.length
+                : 'not-array',
+              companiesSample: results[0]?.companies,
+            })
 
             const duration = Date.now() - startTime
             onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
 
-            return transformQueryResults(method, results, model)
+            const transformed = transformQueryResults(method, results, model)
+
+            console.log('[where-in AFTER TRANSFORM postgres]', {
+              model: modelName,
+              method,
+              isArray: Array.isArray(transformed),
+              firstKeys: Array.isArray(transformed)
+                ? transformed[0] ? Object.keys(transformed[0]) : []
+                : transformed ? Object.keys(transformed as any) : [],
+              companiesLength: Array.isArray(transformed)
+                ? Array.isArray((transformed as any)[0]?.companies)
+                  ? (transformed as any)[0].companies.length
+                  : 'not-array'
+                : Array.isArray((transformed as any)?.companies)
+                  ? (transformed as any).companies.length
+                  : 'not-array',
+            })
+
+            return transformed
           } else {
             const parentRows = await executeQuery(sql, params, method, requiresReduction, includeSpec, model, isLateral, lateralMeta) as any[]
 
