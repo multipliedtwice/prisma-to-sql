@@ -6,11 +6,11 @@ const POSTGRES_MAX_PARAMS = 65535
 const SQLITE_MAX_PARAMS = 999
 const PARAM_SAFETY_MARGIN = 10
 
-function paramLimitForDialect(dialect: 'postgres' | 'sqlite'): number {
+export function paramLimitForDialect(dialect: 'postgres' | 'sqlite'): number {
   return dialect === 'postgres' ? POSTGRES_MAX_PARAMS : SQLITE_MAX_PARAMS
 }
 
-function maxTuplesPerBatch(
+export function maxTuplesPerBatch(
   dialect: 'postgres' | 'sqlite',
   keyColumnCount: number,
   baseChildParams: number,
@@ -29,17 +29,17 @@ function maxTuplesPerBatch(
   return Math.floor(available / cols)
 }
 
-function compositeKey(values: readonly unknown[]): string {
+export function compositeKey(values: readonly unknown[]): string {
   return JSON.stringify(values.map(toKeyPart))
 }
 
-function toKeyPart(value: unknown): unknown {
+export function toKeyPart(value: unknown): unknown {
   if (typeof value === 'bigint') return { __bigint: value.toString() }
   if (value instanceof Date) return { __date: value.getTime() }
   return value
 }
 
-function extractTupleSafe(
+export function extractTupleSafe(
   row: any,
   fieldNames: readonly string[],
 ): unknown[] | null {
@@ -52,7 +52,7 @@ function extractTupleSafe(
   return values
 }
 
-function extractTuples(
+export function extractTuples(
   rows: any[],
   fieldNames: readonly string[],
 ): unknown[][] {
@@ -64,7 +64,7 @@ function extractTuples(
   return tuples
 }
 
-function dedupeTuples(tuples: unknown[][]): unknown[][] {
+export function dedupeTuples(tuples: unknown[][]): unknown[][] {
   const seen = new Set<string>()
   const unique: unknown[][] = []
   for (const t of tuples) {
@@ -76,7 +76,7 @@ function dedupeTuples(tuples: unknown[][]): unknown[][] {
   return unique
 }
 
-function buildParentKeyIndex(
+export function buildParentKeyIndex(
   parentRows: any[],
   parentKeyFieldNames: readonly string[],
 ): Map<string, any[]> {
@@ -95,7 +95,7 @@ function buildParentKeyIndex(
   return index
 }
 
-function needsPerParentPagination(segment: WhereInSegment): boolean {
+export function needsPerParentPagination(segment: WhereInSegment): boolean {
   return (
     segment.isList &&
     ((segment.perParentSkip != null && segment.perParentSkip > 0) ||
@@ -103,7 +103,7 @@ function needsPerParentPagination(segment: WhereInSegment): boolean {
   )
 }
 
-function applyPerParentPagination(
+export function applyPerParentPagination(
   groupedChildren: any[],
   perParentSkip: number,
   perParentTake: number | undefined,
@@ -116,12 +116,11 @@ function applyPerParentPagination(
     return groupedChildren.slice(startIdx, endIdx)
   }
   const start = perParentSkip
-  const end =
-    perParentTake !== undefined ? start + perParentTake : undefined
+  const end = perParentTake !== undefined ? start + perParentTake : undefined
   return groupedChildren.slice(start, end)
 }
 
-function stitchChildrenToParents(
+export function stitchChildrenToParents(
   children: any[],
   segment: WhereInSegment,
   parentKeyIndex: Map<string, any[]>,
@@ -168,7 +167,7 @@ function stitchChildrenToParents(
   }
 }
 
-function copyChildArgsBase(source: any, stripPagination: boolean): any {
+export function copyChildArgsBase(source: any, stripPagination: boolean): any {
   const base: any = {}
   if (source.select !== undefined) base.select = source.select
   if (source.include !== undefined) base.include = source.include
@@ -182,7 +181,7 @@ function copyChildArgsBase(source: any, stripPagination: boolean): any {
   return base
 }
 
-function applyWhereCondition(
+export function applyWhereCondition(
   base: any,
   source: any,
   inCondition: Record<string, unknown>,
@@ -191,11 +190,11 @@ function applyWhereCondition(
     source && source.where ? { AND: [source.where, inCondition] } : inCondition
 }
 
-function isObjectArgs(relArgs: unknown): boolean {
+export function isObjectArgs(relArgs: unknown): boolean {
   return relArgs !== true && typeof relArgs === 'object' && relArgs !== null
 }
 
-function buildChildArgs(
+export function buildChildArgs(
   relArgs: unknown,
   fkFieldNames: readonly string[],
   uniqueParentTuples: unknown[][],
@@ -215,7 +214,7 @@ function buildChildArgs(
   return base
 }
 
-function buildPrerenderChildArgs(
+export function buildPrerenderChildArgs(
   relArgs: unknown,
   fkFieldName: string,
   dynamicParam: string,
@@ -229,7 +228,7 @@ function buildPrerenderChildArgs(
   return base
 }
 
-function ensureFkInSelect(
+export function ensureFkInSelect(
   childArgs: any,
   fkFieldNames: readonly string[],
 ): string[] {
@@ -247,19 +246,22 @@ function ensureFkInSelect(
   return added
 }
 
-function ensureOrderByPk(childArgs: any, childModel: Model): void {
+export function ensureOrderByPk(childArgs: any, childModel: Model): void {
   if (childArgs.orderBy) return
   const pkField = getPrimaryKeyField(childModel)
   childArgs.orderBy = { [pkField]: 'asc' }
 }
 
-function initRelationPlaceholders(row: any, segments: WhereInSegment[]): void {
+export function initRelationPlaceholders(
+  row: any,
+  segments: WhereInSegment[],
+): void {
   for (const seg of segments) {
     row[seg.relationName] = seg.isList ? [] : null
   }
 }
 
-const SQL_TERMINATOR_KEYWORDS = [
+export const SQL_TERMINATOR_KEYWORDS = [
   'ORDER BY',
   'GROUP BY',
   'HAVING',
@@ -271,7 +273,7 @@ const SQL_TERMINATOR_KEYWORDS = [
   'FETCH',
 ] as const
 
-function scanSqlForKeywords(sql: string): {
+export function scanSqlForKeywords(sql: string): {
   whereIdx: number
   terminatorIdx: number
 } {
@@ -349,7 +351,7 @@ function scanSqlForKeywords(sql: string): {
   return { whereIdx, terminatorIdx }
 }
 
-function extractMainTableAlias(sql: string): string | null {
+export function extractMainTableAlias(sql: string): string | null {
   const match = sql.match(
     /\bFROM\s+(?:"[^"]+"\.)?"[^"]+"\s+(?:("[^"]+")|([A-Za-z_][A-Za-z0-9_]*))/i,
   )
@@ -357,7 +359,7 @@ function extractMainTableAlias(sql: string): string | null {
   return match[1] ?? match[2] ?? null
 }
 
-function buildTupleInClause(args: {
+export function buildTupleInClause(args: {
   childModel: Model
   fkFieldNames: readonly string[]
   tuples: readonly unknown[][]
@@ -365,8 +367,14 @@ function buildTupleInClause(args: {
   paramStartIdx: number
   dialect: 'postgres' | 'sqlite'
 }): { sql: string; params: unknown[] } {
-  const { childModel, fkFieldNames, tuples, tableAlias, paramStartIdx, dialect } =
-    args
+  const {
+    childModel,
+    fkFieldNames,
+    tuples,
+    tableAlias,
+    paramStartIdx,
+    dialect,
+  } = args
   const prefix = tableAlias ? `${tableAlias}.` : ''
   const cols = fkFieldNames
     .map((name) => {
@@ -392,7 +400,7 @@ function buildTupleInClause(args: {
   return { sql, params }
 }
 
-function injectAndWhere(sql: string, additionalClause: string): string {
+export function injectAndWhere(sql: string, additionalClause: string): string {
   const { whereIdx, terminatorIdx } = scanSqlForKeywords(sql)
 
   if (whereIdx !== -1) {
@@ -417,21 +425,13 @@ function injectAndWhere(sql: string, additionalClause: string): string {
   return `${sql} WHERE ${additionalClause}`
 }
 
-export {
-  buildParentKeyIndex,
-  needsPerParentPagination,
-  stitchChildrenToParents,
-  buildChildArgs,
-  buildPrerenderChildArgs,
-  ensureFkInSelect,
-  ensureOrderByPk,
-  initRelationPlaceholders,
-  extractTuples,
-  dedupeTuples,
-  maxTuplesPerBatch,
-  paramLimitForDialect,
-  compositeKey,
-  extractMainTableAlias,
-  buildTupleInClause,
-  injectAndWhere,
+export function ensurePkInSelect(
+  childArgs: any,
+  childModel: Model,
+): string | null {
+  if (!childArgs.select) return null
+  const pkField = getPrimaryKeyField(childModel)
+  if (childArgs.select[pkField]) return null
+  childArgs.select = { ...childArgs.select, [pkField]: true }
+  return pkField
 }

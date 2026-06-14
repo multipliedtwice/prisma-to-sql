@@ -17,6 +17,7 @@ import {
   extractMainTableAlias,
   buildTupleInClause,
   injectAndWhere,
+  ensurePkInSelect,
 } from './where-in-utils'
 import { LIMITS } from './constants'
 import { withValidationSuppressed } from './validators/sql-validators'
@@ -164,6 +165,7 @@ export async function resolveSingleSegment(
   )
   ensureOrderByPk(probeChildArgs, childModel)
   ensureFkInSelect(probeChildArgs, segment.fkFieldNames)
+  ensurePkInSelect(probeChildArgs, childModel)
   const probePlan = planQueryStrategy({
     model: childModel,
     method: 'findMany',
@@ -188,6 +190,7 @@ export async function resolveSingleSegment(
 
   const allChildren: any[] = []
   let needsStripFk = false
+  let addedPkField: string | null = null
   let injectedKeysFromLastBatch: string[] = []
 
   for (let i = 0; i < uniqueTuples.length; i += batchSize) {
@@ -203,6 +206,8 @@ export async function resolveSingleSegment(
     ensureOrderByPk(childArgs, childModel)
     const stripped = ensureFkInSelect(childArgs, segment.fkFieldNames)
     if (stripped.length > 0) needsStripFk = true
+    const pkAdded = ensurePkInSelect(childArgs, childModel)
+    if (pkAdded) addedPkField = pkAdded
 
     const childPlan = planQueryStrategy({
       model: childModel,
@@ -356,6 +361,12 @@ export async function resolveSingleSegment(
       for (const fk of segment.fkFieldNames) {
         delete child[fk]
       }
+    }
+  }
+
+  if (addedPkField) {
+    for (const child of allChildren) {
+      delete child[addedPkField]
     }
   }
 }
