@@ -1,3 +1,10 @@
+## [1.88.3](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.2...v1.88.3) (2026-06-14)
+
+
+### Bug Fixes
+
+* improve debug logging in resolveSingleSegment and generateExtension for better traceability ([8c7a5e6](https://github.com/multipliedtwice/prisma-to-sql/commit/8c7a5e68db1db4a7b4ad95990e40590cfc5b4ba1))
+
 ## [1.88.2](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.1...v1.88.2) (2026-06-13)
 
 
