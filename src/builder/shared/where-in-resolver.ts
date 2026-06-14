@@ -24,10 +24,7 @@ import { resolvePrerenderedParams } from './prerendered-where-in'
 
 export type ExecuteFn = (sql: string, params: unknown[]) => Promise<any[]>
 
-const DEBUG = process.env.DEBUG_WHERE_IN === '1'
-
 function dlog(label: string, payload?: unknown): void {
-  if (!DEBUG) return
   if (payload === undefined) {
     console.log(label)
     return
