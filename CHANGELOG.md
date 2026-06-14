@@ -1,3 +1,10 @@
+## [1.88.5](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.4...v1.88.5) (2026-06-14)
+
+
+### Bug Fixes
+
+* remove debug logging condition in dlog function for consistent logging ([62863f9](https://github.com/multipliedtwice/prisma-to-sql/commit/62863f968ab0d5f19d87353cb0449a7e30d100d0))
+
 ## [1.88.4](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.3...v1.88.4) (2026-06-14)
 
 
