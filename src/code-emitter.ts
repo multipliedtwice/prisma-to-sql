@@ -668,9 +668,7 @@ function generateExtension(runtimeImportPath: string): string {
   postgres?: any
   sqlite?: any
   debug?: boolean
-  /** Override query builder limits (MAX_INCLUDE_DEPTH, MAX_INCLUDES_PER_LEVEL, etc.) */
   limits?: Partial<LimitsConfig>
-  /** Override strategy cost-model parameters (roundtripRowEquivalent, defaultFanOut, etc.) */
   strategy?: Partial<StrategyConfig>
   onQuery?: (info: {
     model: string
@@ -753,6 +751,36 @@ function generateExtension(runtimeImportPath: string): string {
     return stmt.all(...normalizedParams)
   }
 
+  function logBeforeTransform(label: string, modelName: string, method: string, rows: any[]): void {
+    if (!debug) return
+    console.log(label, {
+      model: modelName,
+      method,
+      rowsCount: rows.length,
+      firstKeys: rows[0] ? Object.keys(rows[0]) : [],
+      companiesLength: Array.isArray(rows[0]?.companies)
+        ? rows[0].companies.length
+        : 'not-array',
+      companiesSample: rows[0]?.companies,
+    })
+  }
+
+  function logAfterTransform(label: string, modelName: string, method: string, transformed: unknown): void {
+    if (!debug) return
+    const isArr = Array.isArray(transformed)
+    const target: any = isArr ? (transformed as any[])[0] : transformed
+    console.log(label, {
+      model: modelName,
+      method,
+      isArray: isArr,
+      firstKeys: target ? Object.keys(target) : [],
+      companiesLength: Array.isArray(target?.companies)
+        ? target.companies.length
+        : 'not-array',
+      companiesSample: target?.companies,
+    })
+  }
+
   return (prisma: any) => {
     const txExecutor = createTransactionExecutor({
       modelMap: MODEL_MAP,
@@ -770,7 +798,7 @@ function generateExtension(runtimeImportPath: string): string {
       $parent?: any
     }
 
-  async function handleMethod(
+    async function handleMethod(
       this: ModelContext,
       method: PrismaMethod,
       args: unknown
@@ -937,37 +965,14 @@ function generateExtension(runtimeImportPath: string): string {
                 }
               }
             }
-            console.log('[where-in BEFORE TRANSFORM postgres]', {
-              model: modelName,
-              method,
-              rowsCount: results.length,
-              firstKeys: results[0] ? Object.keys(results[0]) : [],
-              companiesLength: Array.isArray(results[0]?.companies)
-                ? results[0].companies.length
-                : 'not-array',
-              companiesSample: results[0]?.companies,
-            })
+
+            logBeforeTransform('[where-in BEFORE TRANSFORM postgres]', modelName, method, results)
 
             const duration = Date.now() - startTime
             onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
 
             const transformed = transformQueryResults(method, results, model)
-
-            console.log('[where-in AFTER TRANSFORM postgres]', {
-              model: modelName,
-              method,
-              isArray: Array.isArray(transformed),
-              firstKeys: Array.isArray(transformed)
-                ? transformed[0] ? Object.keys(transformed[0]) : []
-                : transformed ? Object.keys(transformed as any) : [],
-              companiesLength: Array.isArray(transformed)
-                ? Array.isArray((transformed as any)[0]?.companies)
-                  ? (transformed as any)[0].companies.length
-                  : 'not-array'
-                : Array.isArray((transformed as any)?.companies)
-                  ? (transformed as any).companies.length
-                  : 'not-array',
-            })
+            logAfterTransform('[where-in AFTER TRANSFORM postgres]', modelName, method, transformed)
 
             return transformed
           } else {
@@ -993,10 +998,15 @@ function generateExtension(runtimeImportPath: string): string {
               }
             }
 
+            logBeforeTransform('[where-in BEFORE TRANSFORM sqlite]', modelName, method, parentRows)
+
             const duration = Date.now() - startTime
             onQuery?.({ model: modelName, method, sql, params, duration, prebaked })
 
-            return transformQueryResults(method, parentRows, model)
+            const transformed = transformQueryResults(method, parentRows, model)
+            logAfterTransform('[where-in AFTER TRANSFORM sqlite]', modelName, method, transformed)
+
+            return transformed
           }
         }
 
