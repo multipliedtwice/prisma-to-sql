@@ -1,3 +1,10 @@
+## [1.88.4](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.3...v1.88.4) (2026-06-14)
+
+
+### Bug Fixes
+
+* enhance debug logging in where-in-resolver and code-emitter for better traceability ([ac4f96d](https://github.com/multipliedtwice/prisma-to-sql/commit/ac4f96d85fa5ca58ea1bb04536f68afab746f02e))
+
 ## [1.88.3](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.2...v1.88.3) (2026-06-14)
 
 
