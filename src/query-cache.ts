@@ -29,6 +29,7 @@ interface SqlResult {
   isLateral?: boolean
   lateralMeta?: LateralRelationMeta[]
   skipWhereIn?: boolean
+  orRewriteApplied?: 'union-of-ids'
 }
 
 interface CacheStats {
@@ -62,10 +63,6 @@ class QueryCacheStats {
 let queryCache = createBoundedCache<string, SqlResult>(LIMITS.QUERY_CACHE_SIZE)
 const queryCacheStats = new QueryCacheStats()
 
-/**
- * Recreate the query cache with the current LIMITS.QUERY_CACHE_SIZE.
- * Call after setLimits({ QUERY_CACHE_SIZE: N }) to apply the new size.
- */
 export function rebuildQueryCache(): void {
   queryCache = createBoundedCache<string, SqlResult>(LIMITS.QUERY_CACHE_SIZE)
   queryCacheStats.reset()
@@ -85,22 +82,14 @@ function bigintReplacer(_key: string, value: unknown): unknown {
   return value
 }
 
-function optionsKeyFragment(options?: SqlBuildOptions): string {
-  if (!options) return ''
-  const mode = options.orRewrite ?? 'default'
-  return mode === 'default' ? '' : `:or=${mode}`
-}
-
 function canonicalizeQuery(
   modelName: string,
   method: PrismaMethod,
   args: Record<string, unknown>,
   dialect: SqlDialect,
-  options?: SqlBuildOptions,
 ): string {
-  const optsFragment = optionsKeyFragment(options)
-  if (!args) return `${dialect}:${modelName}:${method}:{}${optsFragment}`
-  return `${dialect}:${modelName}:${method}:${JSON.stringify(args, bigintReplacer)}${optsFragment}`
+  if (!args) return `${dialect}:${modelName}:${method}:{}`
+  return `${dialect}:${modelName}:${method}:${JSON.stringify(args, bigintReplacer)}`
 }
 
 function buildSQLFull(
@@ -109,7 +98,6 @@ function buildSQLFull(
   method: PrismaMethod,
   args: Record<string, unknown>,
   dialect: SqlDialect,
-  options?: SqlBuildOptions,
 ): SqlResult {
   const tableName = buildTableReference(
     SQL_TEMPLATES.PUBLIC_SCHEMA,
@@ -138,6 +126,7 @@ function buildSQLFull(
     isLateral?: boolean
     lateralMeta?: LateralRelationMeta[]
     skipWhereIn?: boolean
+    orRewriteApplied?: 'union-of-ids'
   }
   switch (method) {
     case 'aggregate':
@@ -180,7 +169,6 @@ function buildSQLFull(
         from: { tableName, alias },
         whereResult,
         dialect,
-        options,
       })
   }
   const needsPlaceholderConversion =
@@ -196,6 +184,7 @@ function buildSQLFull(
     isLateral: result.isLateral,
     lateralMeta: result.lateralMeta,
     skipWhereIn: result.skipWhereIn,
+    orRewriteApplied: result.orRewriteApplied,
   }
 }
 
@@ -205,9 +194,9 @@ export function buildSQLWithCache(
   method: PrismaMethod,
   args: Record<string, unknown>,
   dialect: SqlDialect,
-  options?: SqlBuildOptions,
+  _options?: SqlBuildOptions,
 ): SqlResult {
-  const cacheKey = canonicalizeQuery(model.name, method, args, dialect, options)
+  const cacheKey = canonicalizeQuery(model.name, method, args, dialect)
   const cached = queryCache.get(cacheKey)
   if (cached) {
     queryCacheStats.hit()
@@ -220,21 +209,21 @@ export function buildSQLWithCache(
       isLateral: cached.isLateral,
       lateralMeta: cached.lateralMeta,
       skipWhereIn: cached.skipWhereIn,
+      orRewriteApplied: cached.orRewriteApplied,
     }
   }
   queryCacheStats.miss()
-  const useOrRewrite = options?.orRewrite === 'union-of-ids'
-  if (!useOrRewrite) {
-    const fastResult = tryFastPath(model, method, args, dialect)
-    if (fastResult) {
-      queryCache.set(cacheKey, {
-        sql: fastResult.sql,
-        params: [...fastResult.params],
-      })
-      return fastResult
-    }
+
+  const fastResult = tryFastPath(model, method, args, dialect)
+  if (fastResult) {
+    queryCache.set(cacheKey, {
+      sql: fastResult.sql,
+      params: [...fastResult.params],
+    })
+    return fastResult
   }
-  const result = buildSQLFull(model, models, method, args, dialect, options)
+
+  const result = buildSQLFull(model, models, method, args, dialect)
   queryCache.set(cacheKey, {
     sql: result.sql,
     params: [...result.params],
@@ -244,6 +233,7 @@ export function buildSQLWithCache(
     isLateral: result.isLateral,
     lateralMeta: result.lateralMeta,
     skipWhereIn: result.skipWhereIn,
+    orRewriteApplied: result.orRewriteApplied,
   })
   return result
 }

@@ -33,6 +33,7 @@ export interface SQLDirective {
   isLateral: boolean
   lateralMeta?: LateralRelationMeta[]
   skipWhereIn?: boolean
+  orRewriteApplied?: 'union-of-ids'
   originalDirective: DirectiveProps
 }
 
@@ -308,6 +309,7 @@ function buildAndNormalizeSql(args: {
   isLateral: boolean
   lateralMeta?: LateralRelationMeta[]
   skipWhereIn?: boolean
+  orRewriteApplied?: 'union-of-ids'
 } {
   const {
     method,
@@ -350,6 +352,7 @@ function buildAndNormalizeSql(args: {
     isLateral: sqlResult.isLateral === true,
     lateralMeta: sqlResult.lateralMeta,
     skipWhereIn: sqlResult.skipWhereIn === true,
+    orRewriteApplied: sqlResult.orRewriteApplied,
   }
 }
 
@@ -364,6 +367,7 @@ function finalizeDirective(args: {
   isLateral: boolean
   lateralMeta?: LateralRelationMeta[]
   skipWhereIn?: boolean
+  orRewriteApplied?: 'union-of-ids'
 }): SQLDirective {
   const {
     directive,
@@ -376,6 +380,7 @@ function finalizeDirective(args: {
     isLateral,
     lateralMeta,
     skipWhereIn,
+    orRewriteApplied,
   } = args
 
   const params = normalizedMappings.map((m) => m.value ?? undefined)
@@ -396,19 +401,16 @@ function finalizeDirective(args: {
     isLateral,
     lateralMeta,
     skipWhereIn,
+    orRewriteApplied,
     originalDirective: directive,
   }
 }
 
 export function generateSQL(directive: DirectiveProps): SQLDirective {
   const { query } = directive
-
   const { schemaModels, modelDef } = resolveModelContext(directive)
-
   const dialect = getGlobalDialect()
-
   const { tableName, alias } = buildMainTableAndAlias({ modelDef, dialect })
-
   const whereResult = buildMainWhere({
     processed: query.processed,
     alias,
@@ -416,9 +418,7 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
     modelDef,
     dialect,
   })
-
   const method = resolveMethod(directive)
-
   const built = buildAndNormalizeSql({
     method,
     processed: query.processed,
@@ -429,7 +429,6 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
     schemaModels,
     dialect,
   })
-
   return finalizeDirective({
     directive,
     method,
@@ -441,5 +440,6 @@ export function generateSQL(directive: DirectiveProps): SQLDirective {
     isLateral: built.isLateral,
     lateralMeta: built.lateralMeta,
     skipWhereIn: built.skipWhereIn,
+    orRewriteApplied: built.orRewriteApplied,
   })
 }

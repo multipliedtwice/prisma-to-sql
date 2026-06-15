@@ -18,6 +18,7 @@ export interface SqlResult {
   isLateral?: boolean
   lateralMeta?: LateralRelationMeta[]
   skipWhereIn?: boolean
+  orRewriteApplied?: 'union-of-ids'
 }
 
 export interface PrismaQueryArgs {

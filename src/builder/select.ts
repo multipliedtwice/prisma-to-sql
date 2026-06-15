@@ -455,8 +455,7 @@ type BuildSelectSqlInput = {
 }
 
 export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
-  const { method, args, model, schemas, from, whereResult, dialect, options } =
-    input
+  const { method, args, model, schemas, from, whereResult, dialect } = input
 
   assertSafeAlias(from.alias)
   assertSafeTableRef(from.tableName)
@@ -471,7 +470,7 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
   validateOrderBy(model, normalizedArgs.orderBy, schemas)
   validateCursor(model, normalizedArgs.cursor, normalizedArgs.distinct)
 
-  if (options?.orRewrite === 'union-of-ids') {
+  if (method === 'findMany') {
     const rewritten = tryBuildUnionOfIdsSelectSql({
       method,
       normalizedArgs,

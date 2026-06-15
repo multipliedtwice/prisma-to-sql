@@ -104,6 +104,7 @@ function processModelDirectives(
         isLateral: sqlDirective.isLateral || false,
         lateralMeta: sqlDirective.lateralMeta,
         skipWhereIn: sqlDirective.skipWhereIn || false,
+        orRewriteApplied: sqlDirective.orRewriteApplied,
       })
     } catch (error) {
       if (!config.skipInvalid) throw error
@@ -470,6 +471,7 @@ const QUERIES: Record<string, Record<string, Record<string, {
   isLateral?: boolean
   lateralMeta?: any[]
   skipWhereIn?: boolean
+  orRewriteApplied?: 'union-of-ids'
 }>>> = ${formatQueries(queries)}
 
 const DIALECT = ${JSON.stringify(dialect)}
@@ -857,6 +859,7 @@ function generateExtension(runtimeImportPath: string): string {
         let isLateral = false
         let lateralMeta: any[] | undefined
         let skipWhereIn = false
+        let orRewriteApplied: 'union-of-ids' | undefined
 
         if (prebakedQuery) {
           sql = prebakedQuery.sql
@@ -867,6 +870,7 @@ function generateExtension(runtimeImportPath: string): string {
           isLateral = prebakedQuery.isLateral || false
           lateralMeta = prebakedQuery.lateralMeta
           skipWhereIn = prebakedQuery.skipWhereIn || false
+          orRewriteApplied = prebakedQuery.orRewriteApplied
         } else {
           const buildArgs = plan.whereInSegments.length > 0
             ? { ...plan.filteredArgs, __originalArgs: plan.originalArgs }
@@ -879,6 +883,7 @@ function generateExtension(runtimeImportPath: string): string {
           isLateral = result.isLateral || false
           lateralMeta = result.lateralMeta
           skipWhereIn = result.skipWhereIn || false
+          orRewriteApplied = (result as any).orRewriteApplied
         }
 
         if (debug) {
@@ -890,7 +895,11 @@ function generateExtension(runtimeImportPath: string): string {
             ? (DIALECT === 'postgres' ? 'STREAMING PARALLEL' : 'SEQUENTIAL')
             : 'NONE'
 
-          console.log(\`[\${DIALECT}] \${modelName}.\${method} - \${strategy} + WHERE IN: \${whereInMode}\`)
+          const orRewriteSuffix = orRewriteApplied
+            ? \` + OR-REWRITE: \${orRewriteApplied}\`
+            : ''
+
+          console.log(\`[\${DIALECT}] \${modelName}.\${method} - \${strategy} + WHERE IN: \${whereInMode}\${orRewriteSuffix}\`)
           console.log(\`  Invoked: \${modelName}.\${method}(\`, args, \`)\`)
           console.log(\`  Prebaked: \${prebaked}, skipWhereIn: \${skipWhereIn}\`)
           console.log('  SQL:', sql)
@@ -1077,6 +1086,7 @@ function generateExtension(runtimeImportPath: string): string {
       let isLateral = false
       let lateralMeta: any[] | undefined
       let skipWhereIn = false
+      let orRewriteApplied: 'union-of-ids' | undefined
 
       if (prebakedQuery) {
         sql = prebakedQuery.sql
@@ -1086,6 +1096,7 @@ function generateExtension(runtimeImportPath: string): string {
         isLateral = prebakedQuery.isLateral || false
         lateralMeta = prebakedQuery.lateralMeta
         skipWhereIn = prebakedQuery.skipWhereIn || false
+        orRewriteApplied = prebakedQuery.orRewriteApplied
       } else {
         const result = buildSQL(model, MODELS, 'findMany', plan.filteredArgs, DIALECT)
         sql = result.sql
@@ -1095,12 +1106,27 @@ function generateExtension(runtimeImportPath: string): string {
         isLateral = result.isLateral || false
         lateralMeta = result.lateralMeta
         skipWhereIn = result.skipWhereIn || false
+        orRewriteApplied = (result as any).orRewriteApplied
       }
 
       if (plan.whereInSegments.length > 0 && !skipWhereIn) {
         throw new Error(
           \`findManyStream cannot stream '\${modelName}': this include requires segmented where-in loading, which has no single-pass form. Use findMany, or select scalar columns only.\`
         )
+      }
+
+      if (debug) {
+        const strategy = isLateral
+          ? 'LATERAL JOIN'
+          : requiresReduction
+            ? 'STREAMING REDUCTION'
+            : 'STREAMING'
+        const orRewriteSuffix = orRewriteApplied
+          ? \` + OR-REWRITE: \${orRewriteApplied}\`
+          : ''
+        console.log(\`[\${DIALECT}] \${modelName}.findManyStream - \${strategy}\${orRewriteSuffix}\`)
+        console.log('  SQL:', sql)
+        console.log('  Params:', params)
       }
 
       const normalizedParams = normalizeParams(params)
@@ -1210,6 +1236,7 @@ function generateExtension(runtimeImportPath: string): string {
       let isLateral = false
       let lateralMeta: any[] | undefined
       let skipWhereIn = false
+      let orRewriteApplied: 'union-of-ids' | undefined
 
       if (prebakedQuery) {
         sql = prebakedQuery.sql
@@ -1219,6 +1246,7 @@ function generateExtension(runtimeImportPath: string): string {
         isLateral = prebakedQuery.isLateral || false
         lateralMeta = prebakedQuery.lateralMeta
         skipWhereIn = prebakedQuery.skipWhereIn || false
+        orRewriteApplied = prebakedQuery.orRewriteApplied
       } else {
         const result = buildSQL(model, MODELS, 'findMany', plan.filteredArgs, DIALECT)
         sql = result.sql
@@ -1228,6 +1256,7 @@ function generateExtension(runtimeImportPath: string): string {
         isLateral = result.isLateral || false
         lateralMeta = result.lateralMeta
         skipWhereIn = result.skipWhereIn || false
+        orRewriteApplied = (result as any).orRewriteApplied
       }
 
       if (plan.whereInSegments.length > 0 && !skipWhereIn) {
@@ -1238,7 +1267,10 @@ function generateExtension(runtimeImportPath: string): string {
 
       if (debug) {
         const strategy = isLateral ? 'LATERAL JOIN' : requiresReduction ? 'STREAMING REDUCTION' : 'STREAMING'
-        console.log(\`[\${DIALECT}] \${modelName}.findManyReduceStream - \${strategy}\`)
+        const orRewriteSuffix = orRewriteApplied
+          ? \` + OR-REWRITE: \${orRewriteApplied}\`
+          : ''
+        console.log(\`[\${DIALECT}] \${modelName}.findManyReduceStream - \${strategy}\${orRewriteSuffix}\`)
         console.log('  SQL:', sql)
         console.log('  Params:', params)
       }
@@ -1525,9 +1557,7 @@ function generateCode(
 function formatQueries(
   queries: Map<string, Map<string, Map<string, any>>>,
 ): string {
-  if (queries.size === 0) {
-    return '{}'
-  }
+  if (queries.size === 0) return '{}'
 
   const modelEntries: string[] = []
 
@@ -1551,9 +1581,13 @@ function formatQueries(
           parts.push(`      isLateral: true`)
           parts.push(`      lateralMeta: ${JSON.stringify(query.lateralMeta)}`)
         }
-
         if (query.skipWhereIn) {
           parts.push(`      skipWhereIn: true`)
+        }
+        if (query.orRewriteApplied) {
+          parts.push(
+            `      orRewriteApplied: ${JSON.stringify(query.orRewriteApplied)}`,
+          )
         }
 
         queryEntries.push(
