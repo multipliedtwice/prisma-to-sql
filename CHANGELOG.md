@@ -1,3 +1,10 @@
+# [1.89.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.6...v1.89.0) (2026-06-15)
+
+
+### Features
+
+* add orRewriteApplied property to SqlResult and related functions for union-of-ids support ([ff39368](https://github.com/multipliedtwice/prisma-to-sql/commit/ff39368236f429200970dff1d99add453dad0c67))
+
 ## [1.88.6](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.5...v1.88.6) (2026-06-14)
 
 
