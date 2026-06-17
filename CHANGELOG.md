@@ -1,3 +1,10 @@
+## [1.89.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.89.0...v1.89.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* Trigger CI pipeline ([815e566](https://github.com/multipliedtwice/prisma-to-sql/commit/815e566efd2822dff04fb136f5377e90ebd1b8a6))
+
 # [1.89.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.88.6...v1.89.0) (2026-06-15)
 
 
