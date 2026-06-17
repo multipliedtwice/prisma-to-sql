@@ -797,18 +797,16 @@ function generateExtension(runtimeImportPath: string): string {
     interface ModelContext {
       name?: string
       $name?: string
-      $parent?: any
     }
 
-    async function handleMethod(
-      this: ModelContext,
+    async function executeAccelerated(
+      modelName: string,
       method: PrismaMethod,
-      args: unknown
+      args: unknown,
+      fallback: (args: unknown) => Promise<unknown>,
     ): Promise<unknown> {
-      const modelName = this?.name || this?.$name
-
       if (!modelName || typeof modelName !== 'string') {
-        throw new Error('Cannot determine model name from context')
+        return fallback(args)
       }
 
       const startTime = Date.now()
@@ -825,10 +823,7 @@ function generateExtension(runtimeImportPath: string): string {
 
         const model = MODEL_MAP.get(modelName)
         if (!model) {
-          if (!this.$parent?.[modelName]?.[method]) {
-            throw new Error(\`Model '\${modelName}' not found and no Prisma fallback available\`)
-          }
-          return this.$parent[modelName][method](args)
+          return fallback(args)
         }
 
         if (transformedArgs.cursor) {
@@ -1033,11 +1028,7 @@ function generateExtension(runtimeImportPath: string): string {
           console.warn(error.stack)
         }
 
-        if (!this.$parent?.[modelName]?.[method]) {
-          throw error
-        }
-
-        return this.$parent[modelName][method](args)
+        return fallback(args)
       }
     }
 
@@ -1460,24 +1451,6 @@ function generateExtension(runtimeImportPath: string): string {
       },
       model: {
         $allModels: {
-          async findMany(this: ModelContext, args: any) {
-            return handleMethod.call(this, 'findMany', args)
-          },
-          async findFirst(this: ModelContext, args: any) {
-            return handleMethod.call(this, 'findFirst', args)
-          },
-          async findUnique(this: ModelContext, args: any) {
-            return handleMethod.call(this, 'findUnique', args)
-          },
-          async count(this: ModelContext, args: any) {
-            return handleMethod.call(this, 'count', args)
-          },
-          async aggregate(this: ModelContext, args: any) {
-            return handleMethod.call(this, 'aggregate', args)
-          },
-          async groupBy(this: ModelContext, args: any) {
-            return handleMethod.call(this, 'groupBy', args)
-          },
           findManyStream(this: ModelContext, args?: any): AsyncIterableIterator<any> {
             return findManyStream.call(this, args)
           },
@@ -1491,6 +1464,26 @@ function generateExtension(runtimeImportPath: string): string {
             },
           ): Promise<TOut> {
             return findManyReduceStreamImpl.call(this, args, reduce)
+          },
+        },
+      },
+      query: {
+        $allModels: {
+          async $allOperations({ model, operation, args, query }: {
+            model: string
+            operation: string
+            args: unknown
+            query: (args: unknown) => Promise<unknown>
+          }) {
+            if (!ACCELERATED_METHODS.has(operation as PrismaMethod)) {
+              return query(args)
+            }
+            return executeAccelerated(
+              model,
+              operation as PrismaMethod,
+              args,
+              query,
+            )
           },
         },
       },
