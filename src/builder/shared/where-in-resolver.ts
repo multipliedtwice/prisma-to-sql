@@ -25,14 +25,6 @@ import { resolvePrerenderedParams } from './prerendered-where-in'
 
 export type ExecuteFn = (sql: string, params: unknown[]) => Promise<any[]>
 
-function dlog(label: string, payload?: unknown): void {
-  if (payload === undefined) {
-    console.log(label)
-    return
-  }
-  console.log(label, payload)
-}
-
 async function resolveWithPrerendered(
   segment: WhereInSegment,
   parentRows: any[],
@@ -140,12 +132,6 @@ export async function resolveSingleSegment(
 
   const parentTuples = extractTuples(parentRows, segment.parentKeyFieldNames)
   if (parentTuples.length === 0) {
-    dlog('[where-in EARLY EXIT no parent tuples]', {
-      relation: segment.relationName,
-      parentKeyFieldNames: segment.parentKeyFieldNames,
-      parentRowsCount: parentRows.length,
-      parentFirstKeys: parentRows[0] ? Object.keys(parentRows[0]) : [],
-    })
     return
   }
 
@@ -255,17 +241,6 @@ export async function resolveSingleSegment(
 
     let batchChildren = await execute(sql, params)
 
-    dlog('[where-in RAW]', {
-      relation: segment.relationName,
-      count: batchChildren.length,
-      firstKeys: batchChildren[0] ? Object.keys(batchChildren[0]) : [],
-      firstUserId: batchChildren[0]?.userId,
-      firstId: batchChildren[0]?.id,
-      firstFkValues: batchChildren[0]
-        ? segment.fkFieldNames.map((f) => batchChildren[0][f])
-        : null,
-    })
-
     if (result.requiresReduction && result.includeSpec) {
       const config = buildReducerConfig(
         childModel,
@@ -273,26 +248,6 @@ export async function resolveSingleSegment(
         allModels,
       )
       batchChildren = reduceFlatRows(batchChildren, config)
-
-      dlog('[where-in POST-REDUCE]', {
-        relation: segment.relationName,
-        count: batchChildren.length,
-        firstKeys: batchChildren[0] ? Object.keys(batchChildren[0]) : [],
-        firstUserId: batchChildren[0]?.userId,
-        firstId: batchChildren[0]?.id,
-        hasOwnUserId: batchChildren[0]
-          ? Object.prototype.hasOwnProperty.call(batchChildren[0], 'userId')
-          : null,
-        firstFkValues: batchChildren[0]
-          ? segment.fkFieldNames.map((f) => batchChildren[0][f])
-          : null,
-      })
-    } else {
-      dlog('[where-in NO-REDUCE]', {
-        relation: segment.relationName,
-        requiresReduction: result.requiresReduction,
-        hasIncludeSpec: !!result.includeSpec,
-      })
     }
 
     if (childPlan.whereInSegments.length > 0 && batchChildren.length > 0) {
@@ -327,34 +282,7 @@ export async function resolveSingleSegment(
     segment.parentKeyFieldNames,
   )
 
-  dlog('[where-in PRE-STITCH]', {
-    relation: segment.relationName,
-    fkFieldNames: segment.fkFieldNames,
-    parentKeyFieldNames: segment.parentKeyFieldNames,
-    isList: segment.isList,
-    parentRowsCount: parentRows.length,
-    parentFirstId: parentRows[0]?.id,
-    parentFirstKeys: parentRows[0] ? Object.keys(parentRows[0]) : [],
-    parentKeyIndexSize: parentKeyIndex.size,
-    parentKeyIndexKeys: [...parentKeyIndex.keys()].slice(0, 3),
-    allChildrenCount: allChildren.length,
-    childFirstUserId: allChildren[0]?.userId,
-    childFirstKeys: allChildren[0] ? Object.keys(allChildren[0]) : [],
-    childFirstFkValues: allChildren[0]
-      ? segment.fkFieldNames.map((f) => allChildren[0][f])
-      : null,
-  })
-
   stitchChildrenToParents(allChildren, segment, parentKeyIndex)
-
-  dlog('[where-in POST-STITCH]', {
-    relation: segment.relationName,
-    parentId: parentRows[0]?.id,
-    relationLength: Array.isArray(parentRows[0]?.[segment.relationName])
-      ? parentRows[0][segment.relationName].length
-      : 'not-array',
-    relationSample: parentRows[0]?.[segment.relationName],
-  })
 
   if (needsStripFk) {
     for (const child of allChildren) {
