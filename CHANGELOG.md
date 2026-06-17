@@ -1,3 +1,10 @@
+## [1.89.2](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.89.1...v1.89.2) (2026-06-17)
+
+
+### Bug Fixes
+
+* remove debug logging from where-in resolver functions ([109b6bf](https://github.com/multipliedtwice/prisma-to-sql/commit/109b6bf7f3c84fdd78b2b57f49cd31ea7c34bba9))
+
 ## [1.89.1](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.89.0...v1.89.1) (2026-06-17)
 
 
