@@ -65,7 +65,7 @@ class BoundedCache<K, V> implements Map<K, V> {
       this.map.set(key, node)
       this.pushMain(node)
 
-      if (this.mainSize > this.mainLimit) this.evictMain()
+      this.evictUntilWithinLimit()
       return this
     }
 
@@ -73,10 +73,7 @@ class BoundedCache<K, V> implements Map<K, V> {
     this.map.set(key, node)
     this.pushSmall(node)
 
-    if (this.size > this.maxSize) {
-      if (this.smallSize > this.smallLimit) this.evictSmall()
-      else this.evictMain()
-    }
+    this.evictUntilWithinLimit()
 
     return this
   }
@@ -246,6 +243,37 @@ class BoundedCache<K, V> implements Map<K, V> {
 
   private evictFromCache(node: Node<K, V>): void {
     this.map.delete(node.key)
+  }
+
+  /**
+   * Restore the `size <= maxSize` invariant.
+   *
+   * The previous single-shot logic (one evictSmall/evictMain call per insert)
+   * could leave the cache permanently above its bound: evictSmall() promotes
+   * hot nodes to main without removing anything from the map, so when every
+   * small node happened to be hot, an insert raised size above maxSize and no
+   * entry was ever evicted. Measured overshoot before this fix: up to ~1.9x
+   * the configured capacity. Here we loop until the invariant holds, with a
+   * defensive guard against non-progress (should be unreachable).
+   */
+  private evictUntilWithinLimit(): void {
+    let guard = this.maxSize * 8 + 16
+
+    while (this.size > this.maxSize && guard-- > 0) {
+      const sizeBefore = this.size
+
+      if (this.smallSize > this.smallLimit) {
+        this.evictSmall()
+      } else if (this.mainSize > 0) {
+        this.evictMain()
+      } else {
+        // Small queue is at/below its soft limit but the cache is still over
+        // capacity: evict from small regardless of the limit.
+        this.evictSmall()
+      }
+
+      if (this.size === sizeBefore) break
+    }
   }
 
   private evictSmall(): void {

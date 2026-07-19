@@ -2203,6 +2203,8 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
         }),
       )
 
+      expect(captured.queries).toHaveLength(1)
+
       const sqlText = captured.queries.map((q) => q.sql).join('\n')
 
       expect(normalizeValue(captured.result)).toEqual(
@@ -2233,6 +2235,8 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
           orderBy: { id: 'asc' },
         }),
       )
+
+      expect(captured.queries).toHaveLength(1)
 
       const sqlText = captured.queries.map((q) => q.sql).join('\n')
 
@@ -2305,6 +2309,8 @@ describe('Prisma Parity E2E - PostgreSQL', () => {
       expect(normalizeValue(captured.result)).toEqual(
         normalizeValue(prismaResult),
       )
+
+      expect(captured.queries).toHaveLength(1)
 
       const sqlText = captured.queries.map((q) => q.sql).join('\n')
       expect(/\bOFFSET\b/i.test(sqlText)).toBe(false)

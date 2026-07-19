@@ -15,8 +15,14 @@ const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000
 const DEFAULT_SLOW_EDGE_MS = 10000
 const DEFAULT_EDGE_TIMEOUT_MS = 30000
 const DEFAULT_STALE_EDGE_HOURS = 168
+const DEFAULT_STATEMENT_TIMEOUT_MS = 15000
+const DEFAULT_TOTAL_BUDGET_MS = 60000
 
-function parseArgs(argv: string[]): { output: string; clientPath: string } {
+function parseArgs(argv: string[]): {
+  output: string
+  clientPath: string
+  light: boolean
+} {
   const outputIdx = argv.indexOf('--output')
   const clientIdx = argv.indexOf('--prisma-client')
 
@@ -30,7 +36,7 @@ function parseArgs(argv: string[]): { output: string; clientPath: string } {
       ? argv[clientIdx + 1]
       : '@prisma/client'
 
-  return { output, clientPath }
+  return { output, clientPath, light: argv.includes('--light') }
 }
 
 function resolveOutput(output: string): string {
@@ -81,18 +87,21 @@ async function loadPreviousArtifacts(
 async function connectWithTimeout(
   databaseUrl: string,
   dialect: 'postgres' | 'sqlite',
+  statementTimeoutMs: number,
 ): Promise<{ executor: any; cleanup: () => Promise<void> }> {
   let settled = false
 
-  const connectPromise = createDatabaseExecutor({ databaseUrl, dialect }).then(
-    (conn) => {
-      if (settled) {
-        conn.cleanup().catch(() => {})
-        throw new Error('Timed out')
-      }
-      return conn
-    },
-  )
+  const connectPromise = createDatabaseExecutor({
+    databaseUrl,
+    dialect,
+    statementTimeoutMs,
+  }).then((conn) => {
+    if (settled) {
+      conn.cleanup().catch(() => {})
+      throw new Error('Timed out')
+    }
+    return conn
+  })
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     const id = setTimeout(() => {
@@ -126,7 +135,11 @@ async function main() {
     process.exit(0)
   }
 
-  const { output, clientPath } = parseArgs(process.argv.slice(2))
+  const {
+    output,
+    clientPath,
+    light: lightFlag,
+  } = parseArgs(process.argv.slice(2))
   const outputPath = resolveOutput(output)
 
   const maxAgeMs = getEnvNumber(
@@ -145,6 +158,31 @@ async function main() {
     'PRISMA_SQL_STALE_EDGE_HOURS',
     DEFAULT_STALE_EDGE_HOURS,
   )
+  const statementTimeoutMs = getEnvNumber(
+    'PRISMA_SQL_STATS_STATEMENT_TIMEOUT_MS',
+    DEFAULT_STATEMENT_TIMEOUT_MS,
+  )
+  const totalBudgetMs = getEnvNumber(
+    'PRISMA_SQL_STATS_BUDGET_MS',
+    DEFAULT_TOTAL_BUDGET_MS,
+  )
+  const exactMaxChildRows = getEnvNumber(
+    'PRISMA_SQL_STATS_EXACT_MAX_CHILD_ROWS',
+    0,
+  )
+  const exactMaxChildBytes = getEnvNumber(
+    'PRISMA_SQL_STATS_EXACT_MAX_CHILD_BYTES',
+    0,
+  )
+  const allowUncancelledQueries =
+    process.env.PRISMA_SQL_STATS_ALLOW_UNCANCELLED === '1' ||
+    process.env.PRISMA_SQL_STATS_ALLOW_UNCANCELLED === 'true' ||
+    undefined
+  const light =
+    lightFlag ||
+    process.env.PRISMA_SQL_STATS_LIGHT === '1' ||
+    process.env.PRISMA_SQL_STATS_LIGHT === 'true' ||
+    undefined // let the planner auto-detect weak hosts when not forced
   const mode = (
     process.env.PRISMA_SQL_STATS_MODE === 'precise' ? 'precise' : 'fast'
   ) as 'fast' | 'precise'
@@ -179,7 +217,7 @@ async function main() {
   let cleanup: (() => Promise<void>) | undefined
 
   try {
-    const conn = await connectWithTimeout(url, 'postgres')
+    const conn = await connectWithTimeout(url, 'postgres', statementTimeoutMs)
     executor = conn.executor
     cleanup = conn.cleanup
   } catch (err) {
@@ -216,6 +254,12 @@ async function main() {
       slowEdgeThresholdMs: slowEdgeMs,
       perEdgeTimeoutMs: edgeTimeoutMs,
       staleEdgeHours,
+      totalBudgetMs,
+      light,
+      statementTimeoutMs,
+      allowUncancelledQueries,
+      exactMaxChildRows: exactMaxChildRows || undefined,
+      exactMaxChildBytes: exactMaxChildBytes || undefined,
     })
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)

@@ -237,15 +237,19 @@ async function collectPlannerWithTimeout(
     })
   }
 
+  // The timer MUST be cleared once collection settles: otherwise it fires
+  // later in a long-lived process and prints a false "timed out" warning
+  // after the stats were already collected successfully.
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<undefined>((resolve) => {
-    const id = setTimeout(() => {
+    timeoutId = setTimeout(() => {
       settled = true
       console.warn(
         `⚠ Planner stats collection timed out after ${timeoutMs}ms, using defaults`,
       )
       resolve(undefined)
     }, timeoutMs)
-    if (typeof id === 'object' && 'unref' in id) id.unref()
+    if (typeof timeoutId === 'object' && 'unref' in timeoutId) timeoutId.unref()
   })
 
   try {
@@ -261,6 +265,7 @@ async function collectPlannerWithTimeout(
     }
     return undefined
   } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
     if (cleanup) {
       await cleanup().catch(() => {})
     }
@@ -670,6 +675,7 @@ function generateExtension(runtimeImportPath: string): string {
   postgres?: any
   sqlite?: any
   debug?: boolean
+  fallbackOnError?: boolean
   limits?: Partial<LimitsConfig>
   strategy?: Partial<StrategyConfig>
   onQuery?: (info: {
@@ -681,7 +687,13 @@ function generateExtension(runtimeImportPath: string): string {
     prebaked: boolean
   }) => void
 }) {
-  const { postgres, sqlite, debug, onQuery } = config
+  const {
+    postgres,
+    sqlite,
+    debug,
+    onQuery,
+    fallbackOnError = true,
+  } = config
   if (!postgres && !sqlite) {
     throw new Error('speedExtension requires postgres or sqlite client')
   }
@@ -806,6 +818,11 @@ function generateExtension(runtimeImportPath: string): string {
       fallback: (args: unknown) => Promise<unknown>,
     ): Promise<unknown> {
       if (!modelName || typeof modelName !== 'string') {
+        if (!fallbackOnError) {
+          throw new Error(
+            \`Cannot accelerate \${String(modelName)}.\${method}: invalid model name\`,
+          )
+        }
         return fallback(args)
       }
 
@@ -823,6 +840,11 @@ function generateExtension(runtimeImportPath: string): string {
 
         const model = MODEL_MAP.get(modelName)
         if (!model) {
+          if (!fallbackOnError) {
+            throw new Error(
+              \`Cannot accelerate \${modelName}.\${method}: model is missing from the generated model map\`,
+            )
+          }
           return fallback(args)
         }
 
@@ -1026,6 +1048,10 @@ function generateExtension(runtimeImportPath: string): string {
 
         if (debug && error instanceof Error && error.stack) {
           console.warn(error.stack)
+        }
+
+        if (!fallbackOnError) {
+          throw error
         }
 
         return fallback(args)
@@ -1412,7 +1438,12 @@ function generateExtension(runtimeImportPath: string): string {
       )
 
       if (!isTransactionQuery) {
-        return Promise.all(queries)
+        // Standard PrismaPromise arrays MUST be delegated: PrismaPromise only
+        // executes when awaited, and Promise.all(queries) would run them
+        // concurrently on separate connections with NO transaction, silently
+        // losing atomicity. The original client implementation runs them in a
+        // single atomic transaction.
+        return originalTransaction(queriesOrFn, options)
       }
 
       const startTime = Date.now()

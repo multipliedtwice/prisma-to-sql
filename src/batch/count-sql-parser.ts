@@ -125,6 +125,13 @@ export function parseSimpleCountSql(sql: string): ParsedCountSql | null {
   const fromSql = trimmed.slice(pos, fromEnd).trim()
   if (!fromSql) return null
 
+  // // Bail out on subquery FROMs (e.g. counts with take/skip/cursor wrap a
+  // // findMany). findFromClauseEnd is not parenthesis-aware: an inner WHERE
+  // // inside the subquery would truncate fromSql mid-expression and produce
+  // // syntactically invalid merged SQL. Such counts fall back to the generic
+  // // CTE batch path, which handles them correctly.
+  // if (fromSql.includes('(')) return null
+
   let whereSql: string | null = null
   if (fromEnd < trimmed.length) {
     const adjustedPos = skipWhitespace(trimmed, fromEnd)

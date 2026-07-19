@@ -407,13 +407,14 @@ export async function loadExtensionIntoTestDB(
       'tests',
       'generated',
       `extension-postgres-v${prismaVersion}`,
-      'index.js',
+      'index.ts',
     )
     const { speedExtension } = await import(extensionPath)
     db.extended = db.prisma.$extends(
       speedExtension({
         postgres: pgClient,
         debug: false,
+        fallbackOnError: false,
         onQuery: (info: any) => {
           captureExtensionQuery({
             sql: info.sql,
@@ -431,13 +432,14 @@ export async function loadExtensionIntoTestDB(
       'tests',
       'generated',
       `extension-sqlite-v${prismaVersion}`,
-      'index.js',
+      'index.ts',
     )
     const { speedExtension } = await import(extensionPath)
     db.extended = db.prisma.$extends(
       speedExtension({
         sqlite: sqliteClient,
         debug: false,
+        fallbackOnError: false,
         onQuery: (info: any) => {
           captureExtensionQuery({
             sql: info.sql,

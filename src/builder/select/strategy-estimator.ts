@@ -20,6 +20,13 @@ export type ModelStats = {
   tableName: string
   schemaName?: string
   known?: boolean
+  /**
+   * Physical size in bytes; always current (pg_relation_size, or the summed
+   * size of all leaf partitions for partitioned tables).
+   */
+  relBytes?: number
+  /** 'partitioned' for declarative partitioned tables (relkind 'p'). */
+  relationKind?: 'table' | 'partitioned'
 }
 
 export type ModelStatsMap = Record<string, ModelStats>
@@ -527,9 +534,7 @@ export function pickIncludeStrategy(params: {
   })
   if (guardResult === 'where-in') {
     if (debug)
-      console.log(
-        `  [strategy] ${model.name}: large-child guard → where-in`,
-      )
+      console.log(`  [strategy] ${model.name}: large-child guard → where-in`)
     return 'where-in'
   }
 

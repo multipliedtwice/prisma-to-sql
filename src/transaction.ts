@@ -96,9 +96,10 @@ export function createTransactionExecutor(deps: {
 
         if (options?.timeout !== undefined && options.timeout !== null) {
           const validatedTimeout = validateTimeout(options.timeout)
-          await sql.unsafe(`SET LOCAL statement_timeout = $1`, [
-            validatedTimeout,
-          ])
+          // PostgreSQL does not accept bind parameters in SET statements
+          // (utility commands reject $1). validatedTimeout is a floored,
+          // finite, non-negative number, so inlining is safe.
+          await sql.unsafe(`SET LOCAL statement_timeout = ${validatedTimeout}`)
         }
 
         for (const q of queries) {

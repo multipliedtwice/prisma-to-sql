@@ -9,6 +9,7 @@ export type CapturedQuery = {
 const prismaStore = new AsyncLocalStorage<CapturedQuery[]>()
 const drizzleStore = new AsyncLocalStorage<CapturedQuery[]>()
 const extensionStore = new AsyncLocalStorage<CapturedQuery[]>()
+const activeExtensionCollectors = new Set<CapturedQuery[]>()
 const registeredPrismaClients = new WeakSet<object>()
 
 function parseMaybeJson(value: unknown): unknown {
@@ -75,6 +76,12 @@ export function captureExtensionQuery(query: CapturedQuery): void {
   const store = extensionStore.getStore()
   if (store) {
     store.push(query)
+    return
+  }
+
+  if (activeExtensionCollectors.size === 1) {
+    const collector = activeExtensionCollectors.values().next().value
+    collector?.push(query)
   }
 }
 
@@ -82,8 +89,14 @@ export async function withExtensionCapture<T>(
   fn: () => Promise<T>,
 ): Promise<{ result: T; queries: CapturedQuery[] }> {
   const queries: CapturedQuery[] = []
-  const result = await extensionStore.run(queries, fn)
-  return { result, queries }
+  activeExtensionCollectors.add(queries)
+
+  try {
+    const result = await extensionStore.run(queries, fn)
+    return { result, queries }
+  } finally {
+    activeExtensionCollectors.delete(queries)
+  }
 }
 
 export function formatCapturedQueries(
