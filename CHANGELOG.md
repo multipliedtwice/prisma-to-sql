@@ -1,3 +1,10 @@
+## [1.89.3](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.89.2...v1.89.3) (2026-07-19)
+
+
+### Bug Fixes
+
+* memory boundaries at cardinality planner ([9a2203a](https://github.com/multipliedtwice/prisma-to-sql/commit/9a2203a9d6832f70deb734a07667d6fcc4847f33))
+
 ## [1.89.2](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.89.1...v1.89.2) (2026-06-17)
 
 
