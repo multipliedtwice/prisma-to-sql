@@ -1,3 +1,10 @@
+# [1.90.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.89.3...v1.90.0) (2026-08-14)
+
+
+### Features
+
+* add support for negative take in list includes and enhance ordering logic ([4c37ce5](https://github.com/multipliedtwice/prisma-to-sql/commit/4c37ce53455a07598b08d8928e9330bc7cf2199e))
+
 ## [1.89.3](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.89.2...v1.89.3) (2026-07-19)
 
 
