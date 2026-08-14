@@ -15,7 +15,7 @@ import {
 } from './shared/order-by-utils'
 import { buildOrderByWithRelations } from './shared/order-by-relation'
 import { createParamStoreFrom } from './shared/param-store'
-import { assertSafeAlias, assertSafeTableRef } from './shared/sql-utils'
+import { assertSafeAlias, assertSafeTableRef, quote } from './shared/sql-utils'
 import { WhereClauseResult, SqlResult, SelectQuerySpec } from './shared/types'
 import {
   isNotNullish,
@@ -264,6 +264,105 @@ function normalizeArgsForNegativeTake(
   }
 }
 
+const NEG_TAKE_REORDER_ALIAS = '__tp_negtake'
+
+/**
+ * Set of output field identifiers for a query, or `null` when no explicit
+ * `select` is given (in which case every scalar field is returned and any
+ * scalar orderBy field is therefore present in the output).
+ */
+function selectedOutputFields(args: PrismaQueryArgs): Set<string> | null {
+  const sel = args.select
+  if (!isPlainObject(sel)) return null
+  const out = new Set<string>()
+  for (const k of Object.keys(sel)) {
+    if ((sel as Record<string, unknown>)[k]) out.add(k)
+  }
+  return out
+}
+
+function renderReorderOrderBy(entries: OrderByItem[], alias: string): string {
+  const parts: string[] = []
+  for (const item of entries) {
+    const field = Object.keys(item)[0]
+    const val = (item as Record<string, OrderByValue>)[field]
+    const dir = typeof val === 'string' ? val : val.direction
+    const nulls = typeof val === 'string' ? undefined : val.nulls
+    let clause = `${alias}.${quote(field)} ${dir.toUpperCase()}`
+    if (nulls) clause += ` NULLS ${nulls.toUpperCase()}`
+    parts.push(clause)
+  }
+  return parts.join(', ')
+}
+
+/**
+ * Prisma's `take: -N` returns the *last* N rows in the requested order.
+ * `normalizeArgsForNegativeTake` reverses the orderBy and takes `abs(N)` so a
+ * single LIMIT captures the correct *set*, but that leaves the rows in reversed
+ * order. This plans an outer wrapper that restores the original order.
+ *
+ * Returns `null` when no re-reversal is needed. Throws for combinations that
+ * cannot be re-reversed by output column (relation orderBy, or an orderBy field
+ * excluded by an explicit `select`) — a clear error beats silently wrong order.
+ */
+function planNegativeTakeReorder(
+  method: string,
+  args: PrismaQueryArgs,
+): { orderBySql: string } | null {
+  if (method !== 'findMany') return null
+  const take = args.take
+  if (typeof take !== 'number' || !Number.isInteger(take) || take >= 0) {
+    return null
+  }
+  if (!isNotNullish(args.orderBy)) return null
+
+  const entries = normalizeOrderByInput(args.orderBy)
+  if (entries.length === 0) return null
+
+  const output = selectedOutputFields(args)
+
+  for (const item of entries) {
+    const field = Object.keys(item)[0]
+    const val = (item as Record<string, unknown>)[field]
+    const isScalarDirection =
+      typeof val === 'string' || (isPlainObject(val) && 'direction' in val)
+    if (!isScalarDirection) {
+      throw new Error(
+        `Negative take with orderBy on relation field '${field}' is not supported. ` +
+          `Order by a scalar field, or use a positive take with a reversed orderBy.`,
+      )
+    }
+    if (output && !output.has(field)) {
+      throw new Error(
+        `Negative take requires every orderBy field to be selected. Field '${field}' ` +
+          `is ordered by but missing from 'select'. Add '${field}: true' to select, or drop it from orderBy.`,
+      )
+    }
+  }
+
+  return {
+    orderBySql: renderReorderOrderBy(entries, quote(NEG_TAKE_REORDER_ALIAS)),
+  }
+}
+
+function wrapNegativeTakeReorder(
+  result: SqlResult,
+  plan: { orderBySql: string } | null,
+): SqlResult {
+  if (!plan) return result
+  // Flat-join reduction ships one flat row per parent×child; re-ordering it here
+  // would interleave a parent's child rows. That strategy is not chosen for the
+  // multi-parent findMany that negative take requires, so skip rather than risk it.
+  if (result.requiresReduction) return result
+
+  return {
+    ...result,
+    sql: `SELECT * FROM (${result.sql}) AS ${quote(
+      NEG_TAKE_REORDER_ALIAS,
+    )} ORDER BY ${plan.orderBySql}`,
+  }
+}
+
 function normalizeArgsForDialect(
   dialect: SqlDialect,
   args: PrismaQueryArgs,
@@ -462,6 +561,9 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
 
   const dialectToUse = resolveDialect(dialect)
 
+  // Computed from the original args, before the orderBy is reversed below.
+  const negTakeReorder = planNegativeTakeReorder(method, args)
+
   const argsForSql = normalizeArgsForNegativeTake(method, args)
   const argsWithDialect = normalizeArgsForDialect(dialectToUse, argsForSql)
   const normalizedArgs = normalizeArgsCompoundCursor(argsWithDialect, model)
@@ -480,7 +582,7 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
       alias: from.alias,
       dialect: dialectToUse,
     })
-    if (rewritten) return rewritten
+    if (rewritten) return wrapNegativeTakeReorder(rewritten, negTakeReorder)
   }
 
   const spec = buildSelectSpec({
@@ -494,5 +596,5 @@ export function buildSelectSql(input: BuildSelectSqlInput): SqlResult {
     dialect: dialectToUse,
   })
 
-  return constructFinalSql(spec)
+  return wrapNegativeTakeReorder(constructFinalSql(spec), negTakeReorder)
 }

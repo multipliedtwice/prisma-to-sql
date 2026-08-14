@@ -691,6 +691,7 @@ function buildListIncludeSpec(args: {
   skipVal: OptionalIntOrDynamic
   ctx: IncludeBuildContext
   nestedJoins: string[]
+  negativeTake?: boolean
 }): IncludeSpec {
   const rowExpr = jsonBuildObject(args.relSelect, args.ctx.dialect)
   const noTake = !isNotNullish(args.takeVal)
@@ -722,8 +723,20 @@ function buildListIncludeSpec(args: {
     `${args.relName}${ROW_SUBQUERY_ALIAS_SUFFIX}`,
   )
 
+  // Negative take reverses the orderBy so a single LIMIT captures the last N
+  // rows, but that leaves them reversed. Number them over the reversed order,
+  // then re-order the numbered rows descending to restore the requested order
+  // before aggregating. Portable across dialects (plain ORDER BY, no aggregate
+  // ORDER BY). Only applies when a reversal actually happened.
+  const reorderNegativeTake = Boolean(args.negativeTake && args.orderBySql)
+  const ordinalCol = '"__tp_ord"'
+
+  const baseSelectExpr = reorderNegativeTake
+    ? `${rowExpr} ${SQL_TEMPLATES.AS} row, ROW_NUMBER() OVER (${SQL_TEMPLATES.ORDER_BY} ${args.orderBySql}) ${SQL_TEMPLATES.AS} ${ordinalCol}`
+    : `${rowExpr} ${SQL_TEMPLATES.AS} row`
+
   let base = buildBaseSql({
-    selectExpr: `${rowExpr} ${SQL_TEMPLATES.AS} row`,
+    selectExpr: baseSelectExpr,
     relTable: args.relTable,
     relAlias: args.relAlias,
     joins: args.joins,
@@ -745,12 +758,16 @@ function buildListIncludeSpec(args: {
     scopeBase,
   )
 
+  const rowSource = reorderNegativeTake
+    ? `${SQL_TEMPLATES.SELECT} row ${SQL_TEMPLATES.FROM} (${base}) ${SQL_TEMPLATES.AS} ${rowAlias}_r ${SQL_TEMPLATES.ORDER_BY} ${ordinalCol} DESC`
+    : base
+
   const agg = jsonAgg('row', args.ctx.dialect)
   const selectExpr = `COALESCE(${agg}, ${emptyJson})`
 
   const sql =
     `${SQL_TEMPLATES.SELECT} ${selectExpr} ` +
-    `${SQL_TEMPLATES.FROM} (${base}) ${SQL_TEMPLATES.AS} ${rowAlias}`
+    `${SQL_TEMPLATES.FROM} (${rowSource}) ${SQL_TEMPLATES.AS} ${rowAlias}`
 
   return Object.freeze({ name: args.relName, sql, isOneToOne: false })
 }
@@ -792,6 +809,10 @@ function buildSingleInclude(
   ) {
     throw new Error('Negative take is only supported for list relations')
   }
+
+  const negativeTake =
+    typeof paginationConfig.takeVal === 'number' &&
+    paginationConfig.takeVal < 0
 
   const adjusted = maybeReverseNegativeTake(
     paginationConfig.takeVal,
@@ -846,6 +867,7 @@ function buildSingleInclude(
     skipVal: paginationConfig.skipVal,
     ctx,
     nestedJoins,
+    negativeTake,
   })
 }
 

@@ -214,6 +214,24 @@ If a query shape is unsupported or cannot be accelerated safely, the extension f
 
 Enable `debug: true` to see generated SQL and fallback behavior.
 
+### Optional relation null ordering
+
+`SpeedClient` intentionally extends Prisma's `orderBy` type for accelerated `findMany` and `findFirst` queries. A required scalar reached through an optional to-one relation can use `{ sort, nulls }` because the relation's `LEFT JOIN` makes the SQL expression nullable.
+
+```ts
+await prisma.jobAd.findMany({
+  orderBy: {
+    boost: {
+      boostedUntil: { sort: 'desc', nulls: 'last' },
+    },
+  },
+})
+```
+
+The extension applies at any supported relation depth when the scalar path crosses an optional to-one relation. Required root scalars and fully required relation paths keep Prisma's original ordering types. Prisma's existing nullable-scalar ordering and all write types stay unchanged.
+
+Queries using this extended form execute through `prisma-sql`. If acceleration fails, they return an explicit `prisma-sql cannot fall back` error instead of forwarding an input Prisma Client rejects.
+
 ## Features
 
 ### 1) Runtime SQL generation

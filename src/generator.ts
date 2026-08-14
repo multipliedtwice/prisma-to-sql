@@ -2,6 +2,7 @@
 import { generatorHandler, GeneratorOptions } from '@prisma/generator-helper'
 import { generateClient } from './code-emitter'
 import { dirname, join, resolve } from 'path'
+import { getClientImportPath } from './generator-paths'
 const { version } = require('../package.json')
 
 function getDialectFromProvider(provider: string): 'postgres' | 'sqlite' {
@@ -21,7 +22,9 @@ function getOutputDir(options: GeneratorOptions): string {
     return resolve(schemaDir, options.generator.output.value)
   }
   const clientGenerator = options.otherGenerators.find(
-    (g) => g.provider.value === 'prisma-client-js',
+    (g) =>
+      g.provider.value === 'prisma-client-js' ||
+      g.provider.value === 'prisma-client',
   )
   if (clientGenerator?.output?.value) {
     const clientOutput = resolve(schemaDir, clientGenerator.output.value)
@@ -73,6 +76,7 @@ generatorHandler({
     }
 
     const outputDir = getOutputDir(options)
+    const clientImportPath = getClientImportPath(options, outputDir)
     const datasourceUrl = getDatasourceUrl(options)
 
     console.info(`Generating SQL client to ${outputDir}`)
@@ -88,6 +92,7 @@ generatorHandler({
       outputDir,
       config,
       datasourceUrl,
+      clientImportPath,
     })
 
     console.info('✓ Generated SQL client successfully')

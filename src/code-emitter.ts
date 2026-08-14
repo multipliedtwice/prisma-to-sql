@@ -27,6 +27,7 @@ interface GenerateClientOptions {
   outputDir: string
   config: GenerateConfig
   runtimeImportPath?: string
+  clientImportPath?: string
   plannerArtifacts?: GeneratePlannerArtifacts
   executor?: {
     query: (
@@ -185,6 +186,7 @@ export async function generateClient(options: GenerateClientOptions) {
     config.dialect,
     datamodel,
     runtimeImportPath,
+    options.clientImportPath ?? '@prisma/client',
   )
   const outputPath = join(absoluteOutputDir, 'index.ts')
   await writeFile(outputPath, code)
@@ -403,6 +405,56 @@ function getByPath(obj: any, path: string): unknown {
     result = result[key]
   }
   return result
+}
+
+function requiresPrismaSqlRelationOrder(
+  model: Model,
+  orderBy: unknown,
+  nullablePath = false,
+): boolean {
+  if (!orderBy || typeof orderBy !== 'object') return false
+
+  const entries = Array.isArray(orderBy) ? orderBy : [orderBy]
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+
+    for (const [fieldName, value] of Object.entries(entry)) {
+      const field = model.fields.find(
+        (candidate: any) => candidate.name === fieldName,
+      )
+      if (!field) continue
+
+      if (field.isRelation && !String(field.type).endsWith('[]')) {
+        const relatedModelName =
+          field.relatedModel || String(field.type).replace(/\\?$/, '')
+        const relatedModel = MODEL_MAP.get(relatedModelName)
+        if (
+          relatedModel &&
+          requiresPrismaSqlRelationOrder(
+            relatedModel,
+            value,
+            nullablePath || field.isRequired === false,
+          )
+        ) {
+          return true
+        }
+        continue
+      }
+
+      if (
+        nullablePath &&
+        field.isRequired === true &&
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        'sort' in value
+      ) {
+        return true
+      }
+    }
+  }
+
+  return false
 }
 
 function resolveParamsFromMappings(args: any, paramMappings: any[]): unknown[] {
@@ -828,6 +880,7 @@ function generateExtension(runtimeImportPath: string): string {
 
       const startTime = Date.now()
       let sql: string | undefined
+      let hasPrismaSqlRelationOrder = false
 
       try {
         if (args !== undefined && args !== null && typeof args !== 'object') {
@@ -835,8 +888,6 @@ function generateExtension(runtimeImportPath: string): string {
             \`Invalid args type for \${modelName}.\${method}: expected object, got \${typeof args}\`
           )
         }
-
-        let transformedArgs = transformEnumValuesByModel(modelName, args || {})
 
         const model = MODEL_MAP.get(modelName)
         if (!model) {
@@ -847,6 +898,13 @@ function generateExtension(runtimeImportPath: string): string {
           }
           return fallback(args)
         }
+
+        const inputArgs = args || {}
+        hasPrismaSqlRelationOrder = requiresPrismaSqlRelationOrder(
+          model,
+          'orderBy' in inputArgs ? inputArgs.orderBy : undefined,
+        )
+        let transformedArgs = transformEnumValuesByModel(modelName, inputArgs)
 
         if (transformedArgs.cursor) {
           const flatCursor = normalizeCompoundCursor(transformedArgs.cursor, model)
@@ -1052,6 +1110,12 @@ function generateExtension(runtimeImportPath: string): string {
 
         if (!fallbackOnError) {
           throw error
+        }
+
+        if (hasPrismaSqlRelationOrder) {
+          throw new Error(
+            \`prisma-sql cannot fall back for \${modelName}.\${method}: optional-relation orderBy uses the prisma-sql sort object extension. Acceleration error: \${msg}\`,
+          )
         }
 
         return fallback(args)
@@ -1523,10 +1587,123 @@ function generateExtension(runtimeImportPath: string): string {
 }`
 }
 
-function generateTypeExports(): string {
-  return `type SpeedExtensionReturn = ReturnType<ReturnType<typeof speedExtension>>
+function lowerFirst(value: string): string {
+  return value.charAt(0).toLowerCase() + value.slice(1)
+}
 
-export type SpeedClient<T> = T & {
+function propertyKey(value: string): string {
+  return JSON.stringify(value)
+}
+
+function generateOrderByTypes(datamodel: DMMF.Datamodel): string {
+  const modelsByName = new Map(
+    datamodel.models.map((model) => [model.name, model]),
+  )
+
+  return datamodel.models
+    .flatMap((model) => {
+      const toOneRelations = model.fields.filter(
+        (field) =>
+          field.kind === 'object' &&
+          !field.isList &&
+          modelsByName.has(field.type),
+      )
+      const scalarFields = model.fields.filter(
+        (field) => field.kind !== 'object',
+      )
+      const relationKeys = toOneRelations.map((field) => propertyKey(field.name))
+      const nullableKeys = [
+        ...scalarFields.map((field) => propertyKey(field.name)),
+        ...relationKeys,
+      ]
+      const regularRelations = toOneRelations.map((field) => {
+        const target = field.isRequired
+          ? `Speed${field.type}OrderByWithRelationInput`
+          : `Speed${field.type}NullablePathOrderByWithRelationInput`
+        return `  ${propertyKey(field.name)}?: ${target}`
+      })
+      const nullableScalars = scalarFields.map(
+        (field) =>
+          `  ${propertyKey(field.name)}?: PrismaTypes.${model.name}OrderByWithRelationInput[${propertyKey(field.name)}] | SpeedRelationSortOrderInput`,
+      )
+      const nullableRelations = toOneRelations.map(
+        (field) =>
+          `  ${propertyKey(field.name)}?: Speed${field.type}NullablePathOrderByWithRelationInput`,
+      )
+      const regularBase = relationKeys.length
+        ? `Omit<PrismaTypes.${model.name}OrderByWithRelationInput, ${relationKeys.join(' | ')}>`
+        : `PrismaTypes.${model.name}OrderByWithRelationInput`
+      const nullableBase = nullableKeys.length
+        ? `Omit<PrismaTypes.${model.name}OrderByWithRelationInput, ${nullableKeys.join(' | ')}>`
+        : `PrismaTypes.${model.name}OrderByWithRelationInput`
+
+      return [
+        `type Speed${model.name}OrderByWithRelationInput = ${regularBase}${
+          regularRelations.length ? ` & {\n${regularRelations.join('\n')}\n}` : ''
+        }`,
+        `type Speed${model.name}NullablePathOrderByWithRelationInput = ${nullableBase} & {\n${[
+          ...nullableScalars,
+          ...nullableRelations,
+        ].join('\n')}\n}`,
+      ]
+    })
+    .join('\n\n')
+}
+
+function generateDelegateTypes(datamodel: DMMF.Datamodel): string {
+  return datamodel.models
+    .map(
+      (model) => `type Speed${model.name}FindManyArgs<Delegate> = Omit<PrismaTypes.Args<Delegate, 'findMany'>, 'orderBy'> & {
+  orderBy?: Speed${model.name}OrderByWithRelationInput | Speed${model.name}OrderByWithRelationInput[]
+}
+
+type Speed${model.name}FindFirstArgs<Delegate> = Omit<PrismaTypes.Args<Delegate, 'findFirst'>, 'orderBy'> & {
+  orderBy?: Speed${model.name}OrderByWithRelationInput | Speed${model.name}OrderByWithRelationInput[]
+}
+
+interface Speed${model.name}Delegate<Delegate> {
+  findMany<A extends Speed${model.name}FindManyArgs<Delegate> = Speed${model.name}FindManyArgs<Delegate>>(
+    args?: PrismaTypes.SelectSubset<A, Speed${model.name}FindManyArgs<Delegate>>,
+  ): PrismaTypes.PrismaPromise<PrismaTypes.Result<Delegate, A, 'findMany'>>
+  findFirst<A extends Speed${model.name}FindFirstArgs<Delegate> = Speed${model.name}FindFirstArgs<Delegate>>(
+    args?: PrismaTypes.SelectSubset<A, Speed${model.name}FindFirstArgs<Delegate>>,
+  ): PrismaTypes.PrismaPromise<PrismaTypes.Result<Delegate, A, 'findFirst'>>
+}`,
+    )
+    .join('\n\n')
+}
+
+function generateClientModelType(datamodel: DMMF.Datamodel): string {
+  const branches = datamodel.models.map(
+    (model) =>
+      `K extends ${propertyKey(lowerFirst(model.name))} ? Omit<T[K], 'findMany' | 'findFirst'> & Speed${model.name}Delegate<T[K]> :`,
+  )
+
+  return `type SpeedClientModels<T> = {
+  [K in keyof T]: ${branches.join('\n    ')} T[K]
+}`
+}
+
+function generateTypeExports(
+  datamodel: DMMF.Datamodel,
+  clientImportPath: string,
+): string {
+  return `import type { Prisma as PrismaTypes } from ${JSON.stringify(clientImportPath)}
+
+type SpeedRelationSortOrderInput = {
+  sort: 'asc' | 'desc'
+  nulls?: 'first' | 'last'
+}
+
+${generateOrderByTypes(datamodel)}
+
+${generateDelegateTypes(datamodel)}
+
+${generateClientModelType(datamodel)}
+
+type SpeedExtensionReturn = ReturnType<ReturnType<typeof speedExtension>>
+
+export type SpeedClient<T> = SpeedClientModels<T> & {
   $batch<T extends Record<string, DeferredQuery>>(
     callback: (batch: BatchProxy) => T | Promise<T>,
   ): Promise<{ [K in keyof T]: any }>
@@ -1558,6 +1735,7 @@ function generateCode(
   dialect: 'postgres' | 'sqlite',
   datamodel: DMMF.Datamodel,
   runtimeImportPath: string,
+  clientImportPath: string,
 ): string {
   const cleanModels = models.map((model) => ({
     ...model,
@@ -1574,7 +1752,7 @@ function generateCode(
     generateDataConstants(cleanModels, mappings, fieldTypes, queries, dialect),
     generateTransformLogic(),
     generateExtension(runtimeImportPath),
-    generateTypeExports(),
+    generateTypeExports(datamodel, clientImportPath),
   ].join('\n\n')
 }
 

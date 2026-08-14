@@ -156,12 +156,14 @@ async function generateSpeedExtension(
     'generated',
     `extension-${dialect}-v${version}`,
   )
+  const clientImportPath = `../${dialect}${version === 7 ? '-v7' : ''}/client`
 
   await generateClient({
     datamodel,
     outputDir,
     config: { dialect, skipInvalid: false },
     runtimeImportPath: '../../../src/index',
+    clientImportPath,
     datasourceUrl: dialect === 'postgres' ? PG_URL : SQLITE_URL,
   })
 }
