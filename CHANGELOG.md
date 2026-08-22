@@ -1,3 +1,10 @@
+# [1.91.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.90.0...v1.91.0) (2026-08-22)
+
+
+### Features
+
+* implement sharded reads with createShardedReader and add related tests ([2b37a24](https://github.com/multipliedtwice/prisma-to-sql/commit/2b37a24bfdc013cb7c6513b82f34b05149a1af57))
+
 # [1.90.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.89.3...v1.90.0) (2026-08-14)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "prisma-sql",
-  "version": "1.90.0",
+  "version": "1.91.0",
   "description": "Prerender Prisma queries to SQL and run them through postgres.js or better-sqlite3. Same Prisma API and types, lower read overhead.",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
