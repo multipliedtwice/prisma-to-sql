@@ -195,3 +195,10 @@ export {
   type LimitsConfig,
 } from './builder/shared/constants'
 export { loadExternalPlannerStats } from './cardinality-planner'
+export {
+  createShardedReader,
+  type ShardController,
+  type ShardExecutor,
+  type ShardRead,
+  type ToSQLFn,
+} from './shard'

@@ -1067,6 +1067,46 @@ await prisma.$batch((batch) => ({
 
 Use `$transaction` when you need transactional guarantees.
 
+## Sharded reads
+
+`createShardedReader` is the injectable slot for hosts that split storage across databases or shards. prisma-sql generates the SQL; your controller decides where it runs.
+
+```ts
+import { createShardedReader, createToSQL } from 'prisma-sql'
+import { MODELS } from './generated/sql'
+
+const toSQL = createToSQL(MODELS, 'sqlite')
+
+// The controller is yours. This example routes by tenant to a D1 binding.
+const controller = {
+  async resolve(tenantId: string) {
+    const db = await shardRegistry.bindingFor(tenantId) // throws when unroutable
+    return {
+      async execute(sql, params) {
+        const result = await db.prepare(sql).bind(...params).all()
+        if (!result.success) throw new Error('shard read failed')
+        return result.results
+      },
+    }
+  },
+}
+
+const read = createShardedReader(toSQL, controller)
+
+const rows = await read(tenantId, {
+  model: 'User',
+  method: 'findMany',
+  args: { where: { status: 'ACTIVE' }, take: 20 },
+})
+```
+
+The contract, in full:
+
+- **The shard key is explicit.** `read(key, ...)` receives it from the call site. prisma-sql never inspects query args to infer tenancy — if you compose with prisma-guard (or any validation layer), the key comes from the validated context, so tenancy is enforced in exactly one place.
+- **Fail closed.** A controller that throws means the read never executes anywhere. There is no default executor and no silent reroute.
+- **Reads only.** Writes are not part of the slot; keep them on Prisma Client (or your own write path) with the same key resolution.
+- **Executor-agnostic.** Anything that runs `(sql, params) => rows` works: D1, Hyperdrive, a pooled `postgres.js` client, a test double.
+
 ## Debugging and observability
 
 ### Debug logging
@@ -1231,6 +1271,8 @@ export default {
 }
 ```
 
+For sharded storage, replace the hand-rolled `prepare()` call with `createShardedReader` — see [Sharded reads](#sharded-reads). The host supplies an executor per shard key, which is exactly where a D1 binding fits.
+
 ## Performance
 
 Performance depends on:
@@ -1382,6 +1424,9 @@ Not currently.
 
 **Are unbounded nested includes supported?**
 Yes. `prisma-sql` preserves Prisma-style include semantics. For large to-many branches, the planner can switch to where-in segmented loading and stitch results in memory.
+
+**How does this work with sharded databases?**
+Through `createShardedReader` (see [Sharded reads](#sharded-reads)): you inject a controller that maps your shard key to an executor. The library stays unaware of your topology, never infers the key from query args, and fails closed when the controller cannot route.
 
 **Do I need planner stats?**
 Queries work without planner stats, but relation-heavy queries may not choose the best strategy. Collect planner stats for best performance on real production-shaped data.

@@ -31,6 +31,8 @@ better-sqlite3 is synchronous and local, so there is no network roundtrip to sav
 ### Cloudflare Workers: full extension support
 Today Workers only get standalone SQL generation (`createToSQL`) because postgres.js needs Node sockets or compat flags. Spike needed: HTTP-based driver (D1 REST / Hyperdrive / Neon serverless driver) behind the same executor interface used by `generated-runtime.ts`. If the executor interface holds, full acceleration follows without builder changes.
 
+Partial step landed: the shard slot (`createShardedReader`) gives Workers a supported execution path today — the host injects its own executor (e.g. D1 `prepare().bind()` behind a controller that resolves an explicit shard key), so prerendered reads no longer require this library to own the driver. What remains planned here is exactly the HTTP-driver spike above, which would let the generated `speedExtension` itself run on Workers.
+
 ## Explicitly rejected (for now)
 
 ### Silent auto-tuning of strategy constants

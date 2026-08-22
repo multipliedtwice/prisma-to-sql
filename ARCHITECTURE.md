@@ -69,6 +69,7 @@ Alias generation, param stores, FK join helpers, primary key utils, negative-tak
 | `transaction.ts` | Transaction executor wrapper. |
 | `result-transformers.ts` | Top-level entry that applies reducers/transformers to raw driver rows. |
 | `generated-runtime.ts` | Driver execution helpers: postgres.js query runner, better-sqlite3 prepared-statement cache (`SQLITE_STMT_CACHE`), raw execute, stream reduce plumbing. |
+| `shard.ts` | Injectable shard slot: `createShardedReader(toSQL, controller)`. The library generates SQL; the host's `ShardController` maps an EXPLICIT key to an executor. No argument inference, no default executor — a refusing controller means the SQL never runs anywhere. |
 | `utils/s3-fifo.ts` | S3-FIFO eviction used by caches. |
 | `maintenance/` | Empty. Reserved. |
 
@@ -77,3 +78,4 @@ Alias generation, param stores, FK join helpers, primary key utils, negative-tak
 1. Never return wrong results: unsupported shape -> fall back to Prisma (or raise explicit no-fallback error for extended orderBy forms Prisma cannot parse).
 2. Result shapes must match Prisma, including value types (Decimal, BigInt, DateTime).
 3. Strategy choice affects speed only, never correctness.
+4. Shard routing is the host's decision: the slot takes an explicit key from the call site and never inspects query args; resolution failure is loud, never a silent default executor.
