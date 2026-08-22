@@ -40,8 +40,43 @@ jobs:
       - name: Build package
         run: npm run build
 
+  ordering-types:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        prisma-version:
+          - '6.19.2'
+          - '7.4.1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Prisma ${{ matrix.prisma-version }}
+        run: >
+          npm install --no-save --package-lock=false --legacy-peer-deps
+          prisma@${{ matrix.prisma-version }}
+          @prisma/client@${{ matrix.prisma-version }}
+          @prisma/internals@${{ matrix.prisma-version }}
+          @prisma/generator-helper@${{ matrix.prisma-version }}
+
+      - name: Generate and compile ordering types
+        run: npm run test:ordering-types
+        env:
+          PRISMA_VERSION: ${{ matrix.prisma-version }}
+
   publish:
-    needs: test
+    needs:
+      - test
+      - ordering-types
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
@@ -68,6 +103,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
 
   build-docs:
     needs: publish

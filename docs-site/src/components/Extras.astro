@@ -1,0 +1,31 @@
+---
+interface Props {
+  t: any;
+}
+
+const { t } = Astro.props;
+const e = t.extras;
+---
+
+<section class="py-12 sm:py-16 lg:py-20 bg-white" id="extras">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-10 sm:mb-14">
+      <div class="inline-block bg-accent/10 text-green-700 px-3 py-1 rounded-full text-xs font-semibold mb-3">
+        {e.badge}
+      </div>
+      <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-3">{e.title}</h2>
+      <p class="text-lg text-gray-600 max-w-3xl mx-auto">{e.subtitle}</p>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-3">
+      {e.items.map((item) => (
+        <div class="rounded-xl border border-gray-200 bg-gray-50 p-6 flex flex-col hover:border-green-300 transition-colors">
+          <h3 class="text-xl font-bold text-primary">{item.name}</h3>
+          <p class="text-sm font-medium text-green-700 mt-1 mb-2">{item.tagline}</p>
+          <p class="text-sm text-gray-600 flex-1">{item.description}</p>
+          <pre class="mt-4 bg-gray-950 text-gray-100 rounded-lg p-4 text-xs overflow-x-auto leading-relaxed"><code>{item.code}</code></pre>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

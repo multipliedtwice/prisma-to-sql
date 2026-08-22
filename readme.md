@@ -1422,6 +1422,27 @@ const users = await prisma.user.findMany()
 - `tests/e2e/sqlite.e2e.test.ts`
 - `tests/sql-injection/batch-transaction.test.ts`
 
+## Verify parity
+
+Run the same read queries through Prisma and through `prisma-sql` against one database and diff the results.
+
+```bash
+npx prisma-sql-verify \
+  --corpus queries.jsonl \
+  --generated ./generated/sql \
+  --client @prisma/client \
+  --sqlite ./data.db
+```
+
+Corpus format: one JSON object per line.
+
+```jsonl
+{"model":"user","method":"findMany","args":{"take":5}}
+{"model":"user","method":"findFirst","args":{"include":{"posts":true},"orderBy":{"id":"asc"}}}
+```
+
+Exit code 0 means all queries match, including value types (`DateTime`, `BigInt`, `Decimal`) and nested include shapes. Use it before adopting and after upgrades.
+
 ## Development
 
 ```bash
@@ -1431,6 +1452,8 @@ npm install
 npm run build
 npm test
 ```
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the source map and [ROADMAP.md](./ROADMAP.md) for planned work.
 
 ## License
 

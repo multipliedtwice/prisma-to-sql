@@ -1,6 +1,4 @@
-import { execFile } from 'node:child_process'
 import {
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -9,14 +7,10 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { promisify } from 'node:util'
-import { getDMMF } from '@prisma/internals'
 import ts from 'typescript'
 import { Prisma } from '../generated/postgres/client'
 import { generateClient } from '../../src/code-emitter'
 import { getClientImportPath } from '../../src/generator-paths'
-
-const execFileAsync = promisify(execFile)
 
 const plannerArtifacts = {
   relationStats: {},
@@ -301,166 +295,4 @@ void acceptedQueries
     expect(fallback).toHaveBeenCalledTimes(2)
   })
 
-  it('generates and compiles against a Prisma 7 client', async () => {
-    const prismaDir = join(fixtureDir, 'prisma-7')
-    const clientDir = join(prismaDir, 'client')
-    const outputDir = join(prismaDir, 'sql')
-    const schemaPath = join(prismaDir, 'schema.prisma')
-    mkdirSync(prismaDir, { recursive: true })
-
-    const schema = `generator client {
-  provider = "prisma-client"
-  output   = "./client"
-}
-
-datasource db {
-  provider = "postgresql"
-}
-
-model Parent {
-  id              Int            @id @default(autoincrement())
-  requiredDate    DateTime
-  nullableDate    DateTime?
-  tags            String[]
-  optionalChild   OptionalChild?
-  requiredChildId Int            @unique
-  requiredChild   RequiredChild  @relation(fields: [requiredChildId], references: [id])
-}
-
-model OptionalChild {
-  id           Int      @id @default(autoincrement())
-  requiredDate DateTime
-  parentId     Int      @unique
-  parent       Parent   @relation(fields: [parentId], references: [id])
-}
-
-model RequiredChild {
-  id           Int      @id @default(autoincrement())
-  requiredDate DateTime
-  parent       Parent?
-}
-`
-    writeFileSync(schemaPath, schema)
-
-    await execFileAsync(process.execPath, [
-      resolve('node_modules/prisma/build/index.js'),
-      'generate',
-      `--schema=${schemaPath}`,
-    ])
-
-    const clientImportPath = getClientImportPath(
-      {
-        schemaPath,
-        otherGenerators: [
-          {
-            provider: { value: 'prisma-client' },
-            output: { value: './client' },
-          },
-        ],
-      },
-      outputDir,
-    )
-    expect(clientImportPath).toBe('../client/client')
-
-    const dmmf = await getDMMF({ datamodel: schema })
-    await generateClient({
-      datamodel: dmmf.datamodel,
-      outputDir,
-      config: { dialect: 'postgres', skipInvalid: false },
-      runtimeImportPath: resolve('src/index'),
-      clientImportPath,
-      plannerArtifacts,
-    })
-
-    const generatedSource = readFileSync(join(outputDir, 'index.ts'), 'utf8')
-    expect(generatedSource).toContain(
-      `from ${JSON.stringify(clientImportPath)}`,
-    )
-
-    const consumerPath = join(outputDir, 'consumer.ts')
-    writeFileSync(
-      consumerPath,
-      `import { PrismaClient } from ${JSON.stringify(join(clientDir, 'client'))}
-import { PrismaPg } from '@prisma/adapter-pg'
-import type { SpeedClient } from './index'
-
-const baseClient = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: 'postgres://test:test@localhost/test' }),
-})
-declare const client: SpeedClient<typeof baseClient>
-
-async function acceptedQueries() {
-  const baseSelected = await baseClient.parent.findMany({
-    select: { id: true },
-  })
-  baseSelected[0].id
-  // @ts-expect-error native Prisma 7 payload stays narrow
-  baseSelected[0].requiredDate
-
-  await client.parent.findMany({
-    orderBy: {
-      optionalChild: {
-        requiredDate: { sort: 'desc', nulls: 'last' },
-      },
-    },
-  })
-
-  await client.parent.findFirst({
-    orderBy: [
-      { requiredDate: 'asc' },
-      {
-        optionalChild: {
-          requiredDate: { sort: 'asc', nulls: 'first' },
-        },
-      },
-    ],
-  })
-
-  await client.parent.findMany({
-    orderBy: { nullableDate: { sort: 'asc', nulls: 'first' } },
-  })
-
-  const selected = await client.parent.findMany({
-    select: { id: true },
-    orderBy: {
-      optionalChild: {
-        requiredDate: { sort: 'desc', nulls: 'last' },
-      },
-    },
-  })
-  selected[0].id
-  // @ts-expect-error selected payload stays narrow
-  selected[0].requiredDate
-
-  const included = await client.parent.findFirst({
-    include: { optionalChild: true },
-    orderBy: {
-      optionalChild: {
-        requiredDate: { sort: 'desc', nulls: 'last' },
-      },
-    },
-  })
-  included?.optionalChild?.requiredDate
-
-  await client.parent.findMany({
-    // @ts-expect-error required root scalar stays Prisma-typed
-    orderBy: { requiredDate: { sort: 'desc', nulls: 'last' } },
-  })
-
-  await client.parent.findMany({
-    // @ts-expect-error fully required relation path stays Prisma-typed
-    orderBy: {
-      requiredChild: {
-        requiredDate: { sort: 'desc', nulls: 'last' },
-      },
-    },
-  })
-}
-
-void acceptedQueries
-`,
-    )
-
-    expectConsumerCompiles(consumerPath, ts.ModuleResolutionKind.Bundler)
-  }, 30000)
 })

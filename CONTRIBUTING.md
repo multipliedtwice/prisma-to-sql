@@ -43,34 +43,13 @@ yarn test:coverage # With coverage
 ## Questions?
 
 Open a [Discussion](https://github.com/multipliedtwice/prisma-to-sql/discussions) or reach out to maintainers.
-```
 
-### 3. **.npmignore** (Redundant but safer)
-```
-# Source files
-src/
-tests/
-example/
+## Maintainers
 
-# Config files
-*.config.ts
-*.config.js
-tsconfig.json
-vitest.config.ts
-.releaserc.json
-
-# Development
-.github/
-.vscode/
-coverage/
-*.log
-*.tsbuildinfo
-
-# Testing
-test-output/
-test-temp/
-*.test.ts
-*.spec.ts
-
-# Documentation development
-docs/
+- Releases run only from CI (`semantic-release` on `main`). No manual `npm publish`.
+- npm publishing rights are held by the CI workflow (provenance enabled), not by personal accounts.
+- A regular contributor becomes a co-maintainer after:
+  1. several substantial merged PRs touching the query builder or planner,
+  2. demonstrated ability to run the full test suite and reproduce release builds from a clean clone,
+  3. explicit invitation from an existing maintainer.
+- Behavioral or cost-model decisions (strategy selection, defaults, limits) should be recorded as short ADRs under `docs/adr/` so the reasoning does not depend on one person's memory.

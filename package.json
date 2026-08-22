@@ -1,13 +1,14 @@
 {
   "name": "prisma-sql",
   "version": "1.90.0",
-  "description": "Convert Prisma queries to optimized SQL with type safety. 2-7x faster than Prisma Client.",
+  "description": "Prerender Prisma queries to SQL and run them through postgres.js or better-sqlite3. Same Prisma API and types, lower read overhead.",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "prisma-sql-generator": "./dist/generator.cjs",
-    "prisma-sql-collect-stats": "./dist/collect-planner-stats.cjs"
+    "prisma-sql-collect-stats": "./dist/collect-planner-stats.cjs",
+    "prisma-sql-verify": "./dist/verify.cjs"
   },
   "exports": {
     ".": {
@@ -32,6 +33,7 @@
     "docs:build": "yarn --cwd docs-site build",
     "docs:preview": "yarn --cwd docs-site preview",
     "test": "vitest --config=vitest.config.ts",
+    "test:ordering-types": "vitest --config=vitest.config.ts run tests/integration/versioned-ordering-types.test.ts",
     "test:coverage": "vitest --coverage",
     "test:e2e": "vitest run tests/e2e",
     "bench": "npx tsx tests/helpers/run-benchmarks.ts",

@@ -1,0 +1,119 @@
+---
+import Layout from './Layout.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import en from '../i18n/en.json';
+
+interface DocPage {
+  path: string;
+  title: string;
+}
+
+interface Props {
+  title: string;
+  description: string;
+  active: string;
+  frontmatter?: Record<string, unknown>;
+  headings?: { depth: number; slug: string; text: string }[];
+}
+
+const { title, description, active } = Astro.props;
+const t = en;
+const locale = 'en';
+
+const base = '/prisma-to-sql';
+
+const pages: DocPage[] = [
+  { path: `${base}/docs`, title: 'Getting started' },
+  { path: `${base}/docs/queries`, title: 'Query examples' },
+  { path: `${base}/docs/batch-optimize`, title: '$batch & @optimize' },
+  { path: `${base}/docs/planner`, title: 'Cardinality planner' },
+  { path: `${base}/docs/configuration`, title: 'Configuration' },
+  { path: `${base}/docs/verify`, title: 'Verify parity' },
+  { path: `${base}/docs/troubleshooting`, title: 'Troubleshooting & limits' },
+];
+---
+
+<Layout title={title} description={description} locale={locale}>
+  <Header t={t} locale={locale} />
+
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12">
+    <div class="lg:grid lg:grid-cols-[240px_1fr] lg:gap-10">
+      <aside class="mb-8 lg:mb-0">
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Documentation</p>
+
+        <nav class="flex lg:flex-col gap-1 overflow-x-auto pb-2 lg:pb-0" aria-label="Docs">
+          {pages.map((p) => (
+            <a
+              href={p.path}
+              aria-current={active === p.path ? 'page' : undefined}
+              class:list={[
+                'whitespace-nowrap rounded-lg px-3 py-2 text-sm transition',
+                active === p.path
+                  ? 'bg-accent/10 text-green-700 font-semibold'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-primary',
+              ]}
+            >
+              {p.title}
+            </a>
+          ))}
+        </nav>
+
+        <div class="hidden lg:block mt-8 border-t border-gray-200 pt-4 text-sm">
+          <a class="text-gray-500 hover:text-green-700" href="https://github.com/multipliedtwice/prisma-to-sql#readme">Full README</a>
+        </div>
+      </aside>
+
+      <main class="docs-prose min-w-0">
+        <slot />
+      </main>
+    </div>
+  </div>
+
+  <Footer t={t} locale={locale} />
+</Layout>
+
+<style>
+  .docs-prose :global(h1) {
+    @apply text-3xl sm:text-4xl font-bold text-primary mb-4;
+  }
+  .docs-prose :global(h2) {
+    @apply text-2xl font-bold text-primary mt-10 mb-3;
+  }
+  .docs-prose :global(h3) {
+    @apply text-lg font-semibold text-primary mt-6 mb-2;
+  }
+  .docs-prose :global(p) {
+    @apply text-gray-600 leading-relaxed mb-4;
+  }
+  .docs-prose :global(ul) {
+    @apply list-disc pl-6 mb-4 space-y-1 text-gray-600;
+  }
+  .docs-prose :global(ol) {
+    @apply list-decimal pl-6 mb-4 space-y-1 text-gray-600;
+  }
+  .docs-prose :global(a) {
+    @apply text-green-700 underline decoration-2 underline-offset-2;
+  }
+  .docs-prose :global(code:not(pre code)) {
+    @apply bg-gray-100 text-primary rounded px-1.5 py-0.5 text-sm;
+  }
+  .docs-prose :global(pre) {
+    @apply bg-gray-950 text-gray-100 rounded-xl p-4 overflow-x-auto text-sm leading-relaxed mb-4;
+  }
+  .docs-prose :global(pre code) {
+    @apply bg-transparent text-gray-100 p-0;
+  }
+  .docs-prose :global(table) {
+    @apply w-full text-sm mb-4 border border-gray-200 rounded-lg overflow-hidden;
+  }
+  .docs-prose :global(th) {
+    @apply bg-gray-50 text-left font-semibold text-gray-700 px-3 py-2 border-b border-gray-200;
+  }
+  .docs-prose :global(td) {
+    @apply px-3 py-2 border-b border-gray-100 text-gray-600 align-top;
+  }
+  .docs-prose :global(blockquote) {
+    @apply border-l-4 border-green-300 bg-green-50/60 px-4 py-2 mb-4 text-gray-700 rounded-r-lg;
+  }
+</style>

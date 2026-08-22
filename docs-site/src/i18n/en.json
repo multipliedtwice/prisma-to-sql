@@ -976,6 +976,41 @@
       "highVariance": "high variance"
     },
     "regressionWarning": "{count} test(s) with statistically significant regressions beyond the {threshold}ms threshold.",
-    "viewRawData": "View raw benchmark data on GitHub →"
+    "viewRawData": "View raw benchmark data on GitHub →",
+    "methodology": {
+      "title": "Methodology",
+      "lines": [
+        "Reproduce with: `npm run bench` (`BENCHMARK_JSON_OUTPUT=1` writes JSON). Results land in `benchmark-results/summary-<date>.json`; `v<N>-<dialect>-latest.json` feeds this page.",
+        "Every query runs against the same database for all clients: Prisma, prisma-sql, Drizzle. Per-test sample size is shown in the n column.",
+        "Reported per side: mean, median, stdDev, p95, p99, CV%. Significance uses Welch's t-test with a 1ms practical threshold; error bars are 95% CI.",
+        "Runtime mode measured: SQL is converted per request. Prerendered (@optimize) queries skip conversion entirely and are faster than shown.",
+        "Hardware and versions vary between runs - each JSON file carries its own timestamp. Compare runs from the same machine."
+      ]
+    }
+  },
+  "extras": {
+    "badge": "Extras on top of Prisma's API",
+    "title": "Beyond faster reads",
+    "subtitle": "prisma-sql adds capabilities Prisma Client does not have. Same types, same code style.",
+    "items": [
+      {
+        "name": "$batch",
+        "tagline": "N dashboard queries, one round trip",
+        "description": "Combine independent reads into a single PostgreSQL round trip. Typed object result, no Promise.all juggling.",
+        "code": "const dash = await prisma.$batch((b) => ({\n  users: b.user.count(),\n  posts: b.post.findMany({ take: 10 }),\n  stats: b.task.aggregate({ _count: true }),\n}))"
+      },
+      {
+        "name": "@optimize",
+        "tagline": "Prebake your hottest queries",
+        "description": "Annotate a model in schema.prisma. At generate time the exact SQL is baked; matching runtime shapes skip conversion completely.",
+        "code": "/// @optimize {\n///   \"method\": \"findMany\",\n///   \"query\": {\n///     \"where\": { \"status\": \"$status\" },\n///     \"take\": \"$take\"\n///   }\n/// }\nmodel User { ... }"
+      },
+      {
+        "name": "Cardinality planner",
+        "tagline": "Strategy chosen by data, not by guess",
+        "description": "Collected relation stats drive strategy switching between flat joins, correlated subqueries and where-in segmented loading. Large child tables never trigger per-parent scans.",
+        "code": "prisma-sql-collect-stats \\\n  --output dist/planner.generated.js \\\n  --prisma-client dist/client/index.js"
+      }
+    ]
   }
 }

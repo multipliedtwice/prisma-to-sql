@@ -32,7 +32,7 @@ describe('generated client optional relation null ordering', () => {
     rmSync(fixtureDir, { recursive: true, force: true })
   })
 
-  it('orders absent related rows and preserves tie precedence', async () => {
+  it('orders absent related rows and preserves unique tie-break precedence', async () => {
     const schema = `generator client {
   provider = "prisma-client"
   output   = "./client"
@@ -44,7 +44,7 @@ datasource db {
 
 model Parent {
   id            Int            @id @default(autoincrement())
-  label         String
+  label         String         @unique
   optionalChild OptionalChild?
 }
 
@@ -79,7 +79,7 @@ model OptionalChild {
       PRAGMA foreign_keys = ON;
       CREATE TABLE "Parent" (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "label" TEXT NOT NULL
+        "label" TEXT NOT NULL UNIQUE
       );
       CREATE TABLE "OptionalChild" (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

@@ -29,3 +29,6 @@ docs-site/.astro/
 docs/.DS_Store
 demo/.yarn/cache
 src/.DS_Store
+.DS_Store
+*.patch
+benchmark-results/summary-*.json

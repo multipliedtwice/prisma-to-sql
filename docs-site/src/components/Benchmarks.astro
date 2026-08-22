@@ -430,6 +430,20 @@ const b = t.benchmarks
         </a>
       </div>
     )}
+
+    {b.methodology && (
+      <div class="mt-10 max-w-4xl mx-auto bg-gray-900/60 border border-gray-800 rounded-xl px-6 py-5">
+        <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">{b.methodology.title}</h3>
+        <ul class="space-y-2 text-sm text-gray-500">
+          {b.methodology.lines.map((line: string) => (
+            <li class="flex gap-2">
+              <span class="text-gray-700 mt-0.5">–</span>
+              <span set:html={line.replace(/`([^`]+)`/g, '<code class="bg-gray-800 px-1.5 py-0.5 rounded text-xs text-gray-300">$1</code>')} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
   </div>
 </section>
 
