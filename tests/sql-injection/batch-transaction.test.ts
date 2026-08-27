@@ -7,7 +7,6 @@ import { convertDMMFToModels } from '@dee-wan/schema-parser'
 import { type Model } from '../../src/types'
 import postgres from 'postgres'
 import { buildBatchSql, parseBatchResults } from '../../src'
-import { speedExtension } from '../generated/extension-postgres-v6'
 
 const PG_URL = 'postgresql://postgres:postgres@localhost:5433/prisma_test'
 
@@ -16,6 +15,7 @@ let seed: SeedResult
 let pgClient: ReturnType<typeof postgres>
 let models: Model[]
 let modelMap: Map<string, Model>
+let speedExtension: (options: Record<string, unknown>) => unknown
 
 type SpeedClient = any
 
@@ -49,6 +49,9 @@ async function measureAsync<T>(
 
 describe.skip('Batch Multi-Query E2E - PostgreSQL', () => {
   beforeAll(async () => {
+    const extensionPath = '../generated/extension-postgres-v6'
+    const generatedExtension = await import(extensionPath)
+    speedExtension = generatedExtension.speedExtension
     setGlobalDialect('postgres')
     db = await createTestDB('postgres', 7)
     pgClient = postgres(PG_URL)

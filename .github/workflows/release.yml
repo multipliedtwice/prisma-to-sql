@@ -40,6 +40,20 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Install Prisma 6 test fixtures
+        run: >
+          npm install --no-save --package-lock=false --legacy-peer-deps
+          prisma@6.19.3
+          @prisma/client@6.19.3
+          @prisma/internals@6.19.3
+          @prisma/generator-helper@6.19.3
+
+      - name: Generate test clients
+        run: npm run test:generate-clients
+
+      - name: Restore project dependencies
+        run: npm ci
+
       - name: Test with coverage
         run: npm run test:coverage -- --run
 

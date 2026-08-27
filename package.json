@@ -34,6 +34,7 @@
     "docs:preview": "yarn --cwd docs-site preview",
     "test": "vitest --config=vitest.config.ts",
     "test:ordering-types": "vitest --config=vitest.config.ts run tests/integration/versioned-ordering-types.test.ts",
+    "test:generate-clients": "node --import tsx tests/helpers/generate-test-clients.ts",
     "test:coverage": "vitest --coverage",
     "test:e2e": "vitest run tests/e2e",
     "bench": "npx tsx tests/helpers/run-benchmarks.ts",
