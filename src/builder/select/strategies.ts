@@ -2,6 +2,7 @@
  * ═══════════════════════════════════════════════════════════
  * INCLUDE STRATEGIES
  * ═══════════════════════════════════════════════════════════
+ * Durable decisions/formulas/change protocol: PERFORMANCE.md.
  *
  * Three strategies handle to-many/to-one include shapes:
  *
@@ -83,7 +84,7 @@
  *     1   |       yes        |       yes        | where-in (guard) ← fixes
  *                                                              the production
  *                                                              26s case
- *    ≥2   |       no         |       no         | cost picks W or C
+ *    ≥2   |       no         |       no         | where-in (empirical)
  *    ≥2   |       no         |       yes        | where-in (guard)
  *    ≥2   |       yes        |       no         | correlated (rule)
  *    ≥2   |       yes        |       yes        | where-in (guard overrides)
@@ -103,14 +104,15 @@
  *  2. singleParent + canFlatJoin + depth≤2  → flat-join
  *  3. large-child guard fires               → where-in
  *  4. childPagination + depth ≥ 2           → correlated
- *  5. childPagination + depth=1 + childWhere → where-in
- *  6. childPagination + depth=1             → where-in
+ *  5. no childPagination + depth ≥ 2        → where-in
+ *  6. childPagination + depth=1 + childWhere → where-in
+ *  7. childPagination + depth=1             → where-in
  *      (note: the old `selectNarrowing → fallback` rule was deleted;
  *       it caused the user's 26s production case and won a 0.49ms
  *       benchmark scenario at best)
- *  7. depth=1 + childWhere                  → where-in
- *  8. costC < costW                         → correlated
- *  9. else                                  → where-in
+ *  8. depth=1 + childWhere                  → where-in
+ *  9. costC < costW                         → correlated
+ * 10. else                                  → where-in
  *
  *
  * ═══════════════════════════════════════════════════════════

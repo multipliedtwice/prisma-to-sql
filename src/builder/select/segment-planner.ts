@@ -188,7 +188,7 @@ export function planQueryStrategy(params: {
     return emptyPlan
   }
 
-  if (dialect === 'postgres') {
+  {
     const includeSpec = extractIncludeSpec(args, model)
 
     if (Object.keys(includeSpec).length > 0) {
@@ -199,13 +199,15 @@ export function planQueryStrategy(params: {
       const takeValue =
         isPlainObject(args) && typeof args.take === 'number' ? args.take : null
 
-      const canFlatJoin = canUseFlatJoinForAll(
-        includeSpec,
-        model,
-        allModels,
-        false,
-        modelMap,
-      )
+      const canFlatJoin =
+        dialect === 'postgres' &&
+        canUseFlatJoinForAll(
+          includeSpec,
+          model,
+          allModels,
+          false,
+          modelMap,
+        )
       const hasChildPag = hasChildPaginationAnywhere(
         includeSpec,
         model,
@@ -224,6 +226,7 @@ export function planQueryStrategy(params: {
         hasPagination,
         canFlatJoin,
         hasChildPagination: hasChildPag,
+        dialect,
         debug,
         modelMap,
       })

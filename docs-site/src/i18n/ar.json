@@ -100,113 +100,9 @@
   },
   "performance": {
     "title": "كم أسرع؟ معايير أداء حقيقية",
-    "subtitle": "مقارنة شاملة عبر Prisma v6 و v7 و Drizzle ORM و Prisma-SQL",
+    "subtitle": "مقارنة شاملة عبر Prisma v6 و v7 و v8 و Drizzle ORM و Prisma-SQL",
     "environment": "بيئة القياس: MacBook Pro M1 • PostgreSQL 15 • SQLite 3.43 • 137 حالة اختبار لكل قاعدة بيانات",
-    "databases": [
-      {
-        "name": "PostgreSQL",
-        "color": "accent",
-        "subtitle": "المتوسط عبر 57 حالة اختبار",
-        "comparisons": [
-          {
-            "label": "Prisma v6",
-            "time": "2.10ms",
-            "width": 100,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "isBaseline": true
-          },
-          {
-            "label": "Prisma v7",
-            "time": "1.95ms",
-            "width": 93,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.08×"
-          },
-          {
-            "label": "Drizzle ORM",
-            "time": "1.40ms",
-            "width": 67,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.50×"
-          },
-          {
-            "label": "Prisma-SQL ⚡",
-            "time": "0.90ms",
-            "width": 43,
-            "bgColor": "bg-gradient-to-r from-accent to-green-600",
-            "color": "text-accent",
-            "speedup": "2.34×"
-          }
-        ],
-        "highlights": [
-          {
-            "label": "استعلامات DISTINCT",
-            "value": "6.3×",
-            "description": "مقارنة بـ Prisma v6"
-          },
-          {
-            "label": "مرشحات العلاقات",
-            "value": "5.5×",
-            "description": "مقارنة بـ Prisma v6 (\"none\"-فلتر)"
-          }
-        ]
-      },
-      {
-        "name": "SQLite",
-        "color": "purple",
-        "subtitle": "المتوسط عبر 56 حالة اختبار",
-        "comparisons": [
-          {
-            "label": "Prisma v6",
-            "time": "5.48ms",
-            "width": 100,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "isBaseline": true
-          },
-          {
-            "label": "Prisma v7",
-            "time": "4.12ms",
-            "width": 75,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.33×"
-          },
-          {
-            "label": "Drizzle ORM",
-            "time": "2.11ms",
-            "width": 39,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "2.60×"
-          },
-          {
-            "label": "Prisma-SQL ⚡",
-            "time": "0.73ms",
-            "width": 13,
-            "bgColor": "bg-gradient-to-r from-purple-500 to-pink-600",
-            "color": "text-purple-600",
-            "speedup": "7.50×"
-          }
-        ],
-        "highlights": [
-          {
-            "label": "استعلامات بسيطة",
-            "value": "12.6×",
-            "description": "مقارنة بـ Prisma v6"
-          },
-          {
-            "label": "مرشحات العلاقات",
-            "value": "69.7×",
-            "description": "مقارنة بـ Prisma v6 (\"none\"-فلتر)"
-          }
-        ]
-      }
-    ],
-    "footer": "المعايير مبنية على 137 اختبار E2E لكل قاعدة بيانات. Prisma v6.16.3, Prisma v7.2.0, Drizzle ORM latest.",
+    "footer": "المعايير مبنية على 137 اختبار E2E لكل قاعدة بيانات. Prisma v6.19.3, Prisma v7.10.0, Drizzle ORM latest.",
     "footerLink": "عرض بيانات القياس الكاملة"
   },
   "howItWorks": {
@@ -416,9 +312,9 @@
         "description": "PostgreSQL وSQLite"
       },
       {
-        "value": "3",
+        "value": "4",
         "label": "مقارنات ORM",
-        "description": "Prisma v6/v7, Drizzle"
+        "description": "Prisma v6/v7/v8, Drizzle"
       }
     ],
     "validation": {
@@ -443,7 +339,7 @@
         },
         {
           "title": "قياس الأداء",
-          "description": "قياس زمن التنفيذ عبر 5 تشغيلات تمهيدية ثم متوسط 10–50 تكرارًا لكل اختبار. المقارنة مع Prisma v6 وPrisma v7 وDrizzle ORM."
+          "description": "قياس زمن التنفيذ عبر 5 تشغيلات تمهيدية ثم متوسط 10–50 تكرارًا لكل اختبار. المقارنة مع Prisma v6 وPrisma v7 وPrisma v8 وDrizzle ORM."
         }
       ]
     },
@@ -491,7 +387,7 @@
           },
           {
             "label": "مقارنة متعددة ORM",
-            "description": "Prisma v6, v7, Drizzle, SQL المُولّد"
+            "description": "Prisma v6, v7, v8, Drizzle, SQL المُولّد"
           },
           {
             "label": "زمن توليد SQL",
@@ -595,15 +491,15 @@
         {
           "number": "5",
           "title": "قياس الأداء",
-          "description": "بعد التحقق، تقيس 5–50 تكرارًا متوسط زمن التنفيذ. تشمل النتائج: Prisma v6 وPrisma v7 وDrizzle ORM وSQL المُولّد وعبء توليد SQL."
+          "description": "بعد التحقق، تقيس 5–50 تكرارًا متوسط زمن التنفيذ. تشمل النتائج: Prisma v6 وPrisma v7 وPrisma v8 وDrizzle ORM وSQL المُولّد وعبء توليد SQL."
         }
       ]
     },
     "multiVersion": {
       "title": "تحقق متعدد الإصدارات",
-      "description": "يعمل كل اختبار على Prisma v6 وv7 لضمان التوافق عبر الإصدارات:",
+      "description": "يعمل كل اختبار على Prisma v6 وv7 وv8 لضمان التوافق عبر الإصدارات:",
       "v6": {
-        "title": "Prisma v6 (6.16.3)",
+        "title": "Prisma v6 (6.19.3)",
         "items": [
           "استخدام PrismaClient مباشرة",
           "بنية محرك قديمة",
@@ -611,11 +507,19 @@
         ]
       },
       "v7": {
-        "title": "Prisma v7 (7.2.0)",
+        "title": "Prisma v7 (7.10.0)",
         "items": [
           "بنية قائمة على adapters",
           "@prisma/adapter-pg & adapter-better-sqlite3",
           "تحسينات محرك جديدة"
+        ]
+      },
+      "v8": {
+        "title": "Prisma v8 (8.1.0-dev.1)",
+        "items": [
+          "Prisma v8",
+          "@prisma/adapter-*",
+          "PostgreSQL + SQLite"
         ]
       }
     },
@@ -625,8 +529,10 @@
       "files": [
         "benchmark-results/v6-postgres-latest.json",
         "benchmark-results/v7-postgres-latest.json",
+        "benchmark-results/v8-postgres-latest.json",
         "benchmark-results/v6-sqlite-latest.json",
-        "benchmark-results/v7-sqlite-latest.json"
+        "benchmark-results/v7-sqlite-latest.json",
+        "benchmark-results/v8-sqlite-latest.json"
       ],
       "footer": "يحتوي كل ملف على: اسم الاختبار، زمن Prisma، زمن SQL المُولّد، زمن Drizzle، نسب التسريع، وطابع ISO."
     },

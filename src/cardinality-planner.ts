@@ -1547,6 +1547,7 @@ async function measureJsonOverhead(params: {
 async function collectPostgresStatsFromCatalog(params: {
   executor: Executor
   datamodel: DMMF.Datamodel
+  rowCounts?: ReadonlyMap<string, number>
   deadlineMs?: number
 }): Promise<{ stats: RelationStatsMap; timings: Record<string, EdgeTiming> }> {
   const { executor, datamodel, deadlineMs } = params
@@ -1607,13 +1608,16 @@ async function collectPostgresStatsFromCatalog(params: {
     DEFAULT_STATEMENT_TIMEOUT_MS,
     deadline,
   )
-  const rowCounts = new Map<string, number>()
+  const rowCounts = new Map(params.rowCounts)
 
   for (const row of tableStats) {
     const schemaName = String(row.schema_name)
     const tableName = String(row.table_name)
     const count = toNumberOrZero(row.row_count)
-    rowCounts.set(`${schemaName}.${tableName}`, count)
+    // PostgreSQL uses -1 for a table that has never been analyzed. Treat it
+    // as unknown; dividing two -1 estimates fabricates fan-out=1/coverage=1.
+    const key = `${schemaName}.${tableName}`
+    if (count >= 0 && !rowCounts.has(key)) rowCounts.set(key, count)
   }
 
   for (const edge of edges) {
@@ -2265,6 +2269,7 @@ async function collectRelationCardinalities(params: {
     const result = await collectPostgresStatsFromCatalog({
       executor,
       datamodel,
+      rowCounts,
       deadlineMs,
     })
 

@@ -1,16 +1,98 @@
 ---
+import {
+  dialectLabel,
+  loadBenchmarkResults,
+  prismaVersionLabel,
+  type BenchmarkDialect,
+  type BenchmarkResult,
+} from '../lib/benchmark-data'
+
 interface Props {
-  t: any;
+  t: any
 }
 
-const { t } = Astro.props;
+const { t } = Astro.props
 
-const colorMap = {
-  accent: { text: 'text-accent', border: 'border-accent' },
-  blue: { text: 'text-blue-600', border: 'border-blue-500' },
-  purple: { text: 'text-purple-600', border: 'border-purple-500' },
-  pink: { text: 'text-pink-600', border: 'border-pink-500' }
-} as const;
+interface DialectTheme {
+  text: string
+  border: string
+  bar: string
+  badge: string
+}
+
+interface PerformanceCard {
+  name: string
+  subtitle: string
+  theme: DialectTheme
+  rows: {
+    label: string
+    file: string
+    width: number
+    speedup: string
+    drizzleSpeedup: string | null
+    tests: number
+    timestamp: string
+  }[]
+  best: BenchmarkResult | null
+}
+
+const results = loadBenchmarkResults()
+const dialects: BenchmarkDialect[] = ['postgres', 'sqlite']
+
+const themeByDialect: Record<BenchmarkDialect, DialectTheme> = {
+  postgres: {
+    text: 'text-accent',
+    border: 'border-accent',
+    bar: 'bg-gradient-to-r from-accent to-green-600',
+    badge: 'bg-green-50 text-green-700',
+  },
+  sqlite: {
+    text: 'text-purple-600',
+    border: 'border-purple-500',
+    bar: 'bg-gradient-to-r from-purple-500 to-pink-600',
+    badge: 'bg-purple-50 text-purple-700',
+  },
+}
+
+function fmtX(value: number): string {
+  return `${value.toFixed(2)}×`
+}
+
+const cards: PerformanceCard[] = dialects
+  .map(dialect => {
+    const dialectResults = results
+      .filter(result => result.dialect === dialect)
+      .sort((a, b) => a.version - b.version)
+
+    const maxSpeedup = Math.max(1, ...dialectResults.map(result => result.avgSpeedupVsPrisma))
+    let best: BenchmarkResult | null = null
+    for (const result of dialectResults) {
+      if (!best || result.avgSpeedupVsPrisma > best.avgSpeedupVsPrisma) best = result
+    }
+    const casesPerVersionRun = dialectResults[0]?.tests.length ?? 0
+
+    return {
+      name: dialectLabel(dialect),
+      subtitle: `${dialectResults.length} latest version runs • ${casesPerVersionRun} query cases per run`,
+      theme: themeByDialect[dialect],
+      rows: dialectResults.map(result => ({
+        label: prismaVersionLabel(result.version),
+        file: `benchmark-results/v${result.version}-${result.dialect}-latest.json`,
+        width: Math.max(12, Math.round(result.avgSpeedupVsPrisma / maxSpeedup * 100)),
+        speedup: fmtX(result.avgSpeedupVsPrisma),
+        drizzleSpeedup: result.avgSpeedupVsDrizzle > 0 ? fmtX(result.avgSpeedupVsDrizzle) : null,
+        tests: result.tests.length,
+        timestamp: result.timestamp
+          ? new Date(result.timestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+          : '',
+      })),
+      best,
+    }
+  })
+  .filter(card => card.rows.length > 0)
+
+const hasBenchmarkData = cards.length > 0
+const generatedSummary = `Generated from ${results.length} latest benchmark JSON files in this checkout. The detailed table below uses the same data, a 1ms practical-significance threshold, and separate runtime/prerendered methodology.`
 ---
 
 <section class="py-12 sm:py-16 lg:py-20 bg-white">
@@ -18,34 +100,38 @@ const colorMap = {
     <div class="text-center mb-10 sm:mb-14">
       <h2 class="text-3xl sm:text-4xl font-bold text-primary mb-3">{t.performance.title}</h2>
       <p class="text-lg sm:text-xl text-gray-600 px-4">{t.performance.subtitle}</p>
-      <p class="text-xs sm:text-sm text-gray-500 mt-2 px-4">{t.performance.environment}</p>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      {t.performance.databases.map((db: any) => {
-        const theme = colorMap[db.color as keyof typeof colorMap] ?? colorMap.accent;
+    {!hasBenchmarkData && (
+      <div class="text-center text-gray-500 py-12">
+        <p>No benchmark JSON files found.</p>
+      </div>
+    )}
 
-        return (
-          <article class={`rounded-2xl border-2 ${theme.border} bg-white p-6 sm:p-8`}>
+    {hasBenchmarkData && (
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {cards.map(card => (
+          <article class={`rounded-2xl border-2 ${card.theme.border} bg-white p-6 sm:p-8`}>
             <header class="mb-6">
-              <h3 class={`text-2xl sm:text-3xl font-bold ${theme.text} mb-2`}>{db.name}</h3>
-              <p class="text-sm text-gray-600">{db.subtitle}</p>
+              <h3 class={`text-2xl sm:text-3xl font-bold ${card.theme.text} mb-2`}>{card.name}</h3>
+              <p class="text-sm text-gray-600">{card.subtitle}</p>
             </header>
 
             <div class="space-y-4">
-              {db.comparisons.map((comparison: any) => (
+              {card.rows.map(row => (
                 <div class="rounded-xl">
-                  <div class="flex items-baseline justify-between gap-3 mb-2">
-                    <div class={`text-sm ${comparison.isBaseline ? 'font-semibold' : 'font-bold'} text-gray-900`}>
-                      {comparison.label}
+                  <div class="flex items-start justify-between gap-3 mb-2">
+                    <div>
+                      <div class="text-sm font-bold text-gray-900">{row.label}</div>
+                      <code class="text-[11px] text-gray-500">{row.file}</code>
                     </div>
-                    <div class="flex items-baseline gap-2">
-                      <div class={`text-sm ${comparison.isBaseline ? 'font-semibold' : 'font-bold'} tabular-nums ${comparison.color}`}>
-                        {comparison.time}
+                    <div class="text-right">
+                      <div class={`text-sm font-bold tabular-nums ${card.theme.text}`}>
+                        {row.speedup} vs Prisma
                       </div>
-                      {comparison.speedup && (
+                      {row.drizzleSpeedup && (
                         <div class="text-xs font-medium text-gray-500">
-                          {comparison.speedup} faster
+                          {row.drizzleSpeedup} vs Drizzle
                         </div>
                       )}
                     </div>
@@ -53,39 +139,44 @@ const colorMap = {
 
                   <div class="h-2.5 rounded-full bg-gray-200">
                     <div
-                      class={`${comparison.bgColor} h-2.5 rounded-full transition-all duration-500`}
-                      style={`width: ${comparison.width}%`}
+                      class={`${card.theme.bar} h-2.5 rounded-full transition-all duration-500`}
+                      style={`width: ${row.width}%`}
                       role="progressbar"
-                      aria-valuenow={comparison.width}
+                      aria-valuenow={row.width}
                       aria-valuemin="0"
                       aria-valuemax="100"
-                      aria-label={`${comparison.label}: ${comparison.time}`}
+                      aria-label={`${row.label}: ${row.speedup} average speedup vs Prisma`}
                     ></div>
+                  </div>
+
+                  <div class="mt-2 flex flex-wrap justify-between gap-2 text-xs text-gray-500">
+                    <span>{row.tests} measured query cases</span>
+                    {row.timestamp && <span>{row.timestamp}</span>}
                   </div>
                 </div>
               ))}
             </div>
 
-            {db.highlights && (
+            {card.best && (
               <div class="mt-6 pt-6 border-t border-gray-200">
-                <div class="grid grid-cols-2 gap-4">
-                  {db.highlights.map((highlight: any) => (
-                    <div class="text-center">
-                      <div class={`text-2xl font-bold ${theme.text}`}>{highlight.value}</div>
-                      <div class="text-xs text-gray-600 mt-1">{highlight.label}</div>
-                      <div class="text-xs text-gray-500">{highlight.description}</div>
-                    </div>
-                  ))}
+                <div class={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${card.theme.badge}`}>
+                  Best current average: {fmtX(card.best.avgSpeedupVsPrisma)} vs Prisma in {prismaVersionLabel(card.best.version)}
                 </div>
               </div>
             )}
           </article>
-        );
-      })}
-    </div>
+        ))}
+      </div>
+    )}
 
     <p class="text-xs sm:text-sm text-gray-600 mt-8 text-center px-4">
-      {t.performance.footer}
+      {generatedSummary}
+      <a
+        href="#benchmarks"
+        class="ml-2 text-accent hover:text-green-700 underline decoration-2 underline-offset-2"
+      >
+        View detailed benchmark table →
+      </a>
       <a
         target="_blank"
         href="https://github.com/multipliedtwice/prisma-to-sql/tree/main/benchmark-results"

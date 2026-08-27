@@ -1,10 +1,28 @@
 # prisma-sql
 
-<img width="250" height="170" alt="image" src="https://github.com/user-attachments/assets/3f9233f2-5d5c-41e3-b1cd-ced7ce0b54c2" />
+[![CI](https://github.com/multipliedtwice/prisma-to-sql/actions/workflows/release.yml/badge.svg)](https://github.com/multipliedtwice/prisma-to-sql/actions/workflows/release.yml)
+[![codecov](https://codecov.io/gh/multipliedtwice/prisma-to-sql/graph/badge.svg)](https://codecov.io/gh/multipliedtwice/prisma-to-sql)
+[![npm](https://img.shields.io/npm/v/prisma-sql.svg)](https://www.npmjs.com/package/prisma-sql)
+[![license](https://img.shields.io/npm/l/prisma-sql.svg)](LICENSE)
 
-Prerender Prisma queries to SQL and execute them directly via `postgres.js` or `better-sqlite3`.
+[Docs](https://multipliedtwice.github.io/prisma-to-sql/) ·
+[Benchmarks](#benchmarks) ·
+[npm](https://www.npmjs.com/package/prisma-sql) ·
+[Performance notes](PERFORMANCE.md) ·
+[Contributing](CONTRIBUTING.md)
 
-**Same Prisma API. Same Prisma types. Lower read overhead.**
+<img width="250" height="170" alt="prisma-sql logo" src="https://github.com/user-attachments/assets/3f9233f2-5d5c-41e3-b1cd-ced7ce0b54c2" />
+
+`prisma-sql` accelerates supported Prisma read queries by generating SQL and executing it directly with `postgres.js` or `better-sqlite3`.
+
+It keeps Prisma's API and generated types, while supported reads bypass Prisma's read execution path. The current benchmark set compares Prisma v6 (6.19.3), v7 (7.10.0), and v8 (8.1.0-dev.1) across PostgreSQL and SQLite; results depend on query shape, data size, and indexing.
+
+Why it can be faster:
+
+- shape- and cardinality-aware planning chooses flat joins, where-in segmented loading, or correlated plans
+- PostgreSQL can use `postgres.js` `.forEach` streaming and query pipelining for supported batches
+- SQLite uses `better-sqlite3` prepared statements for generated reads
+- hot paths can be prebaked with optional `@optimize`
 
 ```ts
 import { PrismaClient } from '@prisma/client'
@@ -38,7 +56,7 @@ const dashboard = await prisma.$batch((batch) => ({
 
 ## What it does
 
-`prisma-sql` accelerates Prisma **read** queries by skipping Prisma's read execution path and running generated SQL directly through a database-native client.
+`prisma-sql` accelerates supported Prisma **read** queries by skipping Prisma's read execution path and running generated SQL directly through a database-native client.
 
 It keeps Prisma Client for:
 
@@ -1294,6 +1312,18 @@ Typical gains are strongest when:
 - large to-many includes can use where-in segmented loading
 
 Run your own benchmarks on production-shaped data.
+
+### Benchmarks
+
+The GitHub Pages benchmark view is generated from the latest JSON files in [`benchmark-results`](benchmark-results).
+
+Current checked-in comparisons cover:
+
+- Prisma v6 (6.19.3) on PostgreSQL and SQLite
+- Prisma v7 (7.10.0) on PostgreSQL and SQLite
+- Prisma v8 (8.1.0-dev.1) on PostgreSQL and SQLite
+
+Open the [detailed benchmark table](https://multipliedtwice.github.io/prisma-to-sql/#benchmarks) for per-query timings, confidence intervals, Drizzle comparison, and the 1ms practical-significance threshold.
 
 ## Troubleshooting
 

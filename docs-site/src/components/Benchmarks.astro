@@ -1,45 +1,18 @@
 ---
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
-import { resolve, join } from 'node:path'
+import {
+  dialectLabel,
+  loadBenchmarkResults,
+  prismaVersionLabel,
+  type BenchmarkResult,
+  type BenchmarkStats,
+  type BenchmarkTest,
+} from '../lib/benchmark-data'
 
 interface Props {
   t: any
 }
 
 const { t } = Astro.props
-
-interface BenchmarkStats {
-  mean: number
-  median: number
-  stdDev: number
-  min: number
-  max: number
-  cv: number
-  p95: number
-  p99: number
-  iterations: number
-}
-
-interface BenchmarkTest {
-  name: string
-  prismaMs: number
-  extendedMs: number
-  drizzleMs: number
-  speedupVsPrisma: number
-  speedupVsDrizzle: number
-  prismaStats: BenchmarkStats
-  extendedStats: BenchmarkStats
-  drizzleStats?: BenchmarkStats
-}
-
-interface BenchmarkResult {
-  version: number
-  dialect: 'postgres' | 'sqlite'
-  tests: BenchmarkTest[]
-  avgSpeedupVsPrisma: number
-  avgSpeedupVsDrizzle: number
-  timestamp: string
-}
 
 interface Significance {
   tStat: number
@@ -122,40 +95,7 @@ function tpl(template: string, vars: Record<string, string | number>): string {
   return out
 }
 
-const candidatePaths = [
-  resolve(process.cwd(), 'benchmark-results'),
-  resolve(process.cwd(), '..', 'benchmark-results'),
-  resolve(process.cwd(), '..', '..', 'benchmark-results'),
-]
-
-let benchmarkDir = ''
-for (const p of candidatePaths) {
-  if (existsSync(p)) { benchmarkDir = p; break }
-}
-
-const results: BenchmarkResult[] = []
-
-if (benchmarkDir) {
-  const latestPattern = /^v(\d+)-(\w+)-latest\.json$/
-  const fileEntries = readdirSync(benchmarkDir)
-    .filter(f => latestPattern.test(f))
-    .map(f => {
-      const fullPath = join(benchmarkDir, f)
-      const stat = statSync(fullPath)
-      const match = f.match(latestPattern)!
-      return { path: fullPath, mtime: stat.mtimeMs, key: `v${match[1]}-${match[2]}` }
-    })
-
-  const byKey = new Map<string, typeof fileEntries[0]>()
-  for (const entry of fileEntries) {
-    const existing = byKey.get(entry.key)
-    if (!existing || entry.mtime > existing.mtime) byKey.set(entry.key, entry)
-  }
-
-  for (const entry of [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key))) {
-    try { results.push(JSON.parse(readFileSync(entry.path, 'utf-8'))) } catch {}
-  }
-}
+const results: BenchmarkResult[] = loadBenchmarkResults()
 
 interface ProcessedTest {
   test: BenchmarkTest
@@ -174,6 +114,7 @@ interface ProcessedResult {
   tabId: string
   tabLabel: string
   tabLabelShort: string
+  versionLabel: string
   significantWins: number
   significantRegressions: number
   withinNoise: number
@@ -197,12 +138,13 @@ const processed: ProcessedResult[] = results.map(r => {
   })
 
   const tabId = `${r.dialect}-v${r.version}`
-  const dialectLabel = r.dialect === 'postgres' ? 'PostgreSQL' : 'SQLite'
+  const databaseLabel = dialectLabel(r.dialect)
   const tabLabelShort = r.dialect === 'postgres' ? 'PG' : 'SQLite'
+  const versionLabel = prismaVersionLabel(r.version)
 
   return {
-    result: r, tests, hasDrizzle, tabId,
-    tabLabel: `${dialectLabel} v${r.version}`,
+    result: r, tests, hasDrizzle, tabId, versionLabel,
+    tabLabel: `${databaseLabel} ${versionLabel}`,
     tabLabelShort: `${tabLabelShort} v${r.version}`,
     significantWins: tests.filter(t => t.vsPrisma.practicallySignificant && t.test.speedupVsPrisma >= 1.0).length,
     significantRegressions: tests.filter(t => t.vsPrisma.practicallySignificant && t.test.speedupVsPrisma < 1.0).length,
@@ -272,7 +214,7 @@ const b = t.benchmarks
             <div class="flex flex-wrap items-baseline gap-3 mb-6">
               <h3 class="text-2xl font-bold">
                 {p.result.dialect === 'postgres' ? 'PostgreSQL' : 'SQLite'}
-                <span class="text-gray-500 font-normal text-lg ml-2">Prisma v{p.result.version}</span>
+                <span class="text-gray-500 font-normal text-lg ml-2">{p.versionLabel}</span>
               </h3>
               <div class="flex flex-wrap gap-3 text-sm">
                 <span class="bg-green-900/50 text-green-400 px-3 py-1 rounded-full">

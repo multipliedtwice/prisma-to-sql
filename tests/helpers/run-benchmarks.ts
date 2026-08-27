@@ -1,6 +1,12 @@
 import { execSync } from 'child_process'
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs'
 import path from 'path'
+import {
+  PRISMA_PACKAGES,
+  PRISMA_VERSIONS,
+  updatePrismaPackages,
+  type PrismaVersion,
+} from './prisma-versions'
 
 type CapturedQuery = {
   sql: string
@@ -23,7 +29,7 @@ interface BenchmarkTest {
 }
 
 interface BenchmarkResult {
-  version: number
+  version: PrismaVersion
   dialect: 'postgres' | 'sqlite'
   tests: BenchmarkTest[]
   avgSpeedupVsPrisma: number
@@ -37,7 +43,7 @@ interface Regression {
   opponent: string
   opponentMs: number
   speedup: number
-  sourceVersion: 6 | 7
+  sourceVersion: PrismaVersion
   source: BenchmarkTest
 }
 
@@ -49,36 +55,16 @@ async function ensureResultsDir() {
   }
 }
 
-async function switchPrismaVersion(version: 6 | 7) {
+async function switchPrismaVersion(version: PrismaVersion) {
   console.log(`\n${'='.repeat(60)}`)
   console.log(`Switching to Prisma v${version}...`)
   console.log('='.repeat(60))
 
   const packageJsonPath = path.join(process.cwd(), 'package.json')
   const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+  const updatedPkg = updatePrismaPackages(pkg, version)
 
-  const prismaVersion = version === 6 ? '6.19.2' : '7.4.1'
-  const adapterVersion = version === 6 ? '^6.19.2' : '^7.4.1'
-
-  delete pkg.dependencies?.['@prisma/client']
-  delete pkg.dependencies?.prisma
-  delete pkg.devDependencies?.['@prisma/client']
-  delete pkg.devDependencies?.prisma
-  delete pkg.dependencies?.['@prisma/client-v7']
-  delete pkg.dependencies?.['prisma-v7']
-
-  pkg.devDependencies = pkg.devDependencies || {}
-  pkg.devDependencies['@prisma/client'] = prismaVersion
-  pkg.devDependencies.prisma = prismaVersion
-  pkg.devDependencies['@prisma/adapter-better-sqlite3'] = adapterVersion
-  pkg.devDependencies['@prisma/adapter-pg'] = adapterVersion
-
-  pkg.dependencies = pkg.dependencies || {}
-  pkg.dependencies['@prisma/generator-helper'] =
-    version === 6 ? '^6.19.2' : '^7.4.1'
-  pkg.dependencies['@prisma/internals'] = version === 6 ? '^6.19.2' : '^7.4.1'
-
-  writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n')
+  writeFileSync(packageJsonPath, JSON.stringify(updatedPkg, null, 2) + '\n')
 
   console.log('Installing dependencies...')
   execSync('npm install', { stdio: 'inherit' })
@@ -86,7 +72,7 @@ async function switchPrismaVersion(version: 6 | 7) {
 }
 
 async function runBenchmark(
-  version: 6 | 7,
+  version: PrismaVersion,
   dialect: 'postgres' | 'sqlite',
 ): Promise<BenchmarkResult> {
   console.log(`\n${'='.repeat(60)}`)
@@ -108,7 +94,7 @@ async function runBenchmark(
 
   try {
     execSync(
-      `npx vitest run ${testFile} --config vitest.config.e2e.ts --reporter=dot`,
+      `./node_modules/.bin/vitest run ${testFile} --config vitest.config.e2e.ts --reporter=dot`,
       {
         env,
         stdio: 'inherit',
@@ -222,11 +208,20 @@ function printRegressionDetails(r: Regression) {
   printCapturedSection('Extended queries', log.extendedQueries)
 }
 
+function printTableRow(cells: string[], widths: number[]) {
+  console.log(
+    `| ${cells.map((cell, index) => cell.padEnd(widths[index])).join(' | ')} |`,
+  )
+}
+
 function printComparison(results: BenchmarkResult[]) {
   const NOISE_THRESHOLD_MS = 1.0
+  const benchmarkLabels = PRISMA_VERSIONS.map(
+    (version) => PRISMA_PACKAGES[version].label,
+  ).join(' vs ')
 
   console.log('\n' + '='.repeat(140))
-  console.log('BENCHMARK RESULTS - Prisma v6 vs v7 vs prisma-sql')
+  console.log(`BENCHMARK RESULTS - ${benchmarkLabels} vs prisma-sql`)
   console.log('='.repeat(140))
 
   const byDialect = results.reduce(
@@ -242,109 +237,121 @@ function printComparison(results: BenchmarkResult[]) {
     console.log(`\n${dialect.toUpperCase()} Results:`)
     console.log('-'.repeat(140))
 
-    const v6 = dialectResults.find((r) => r.version === 6)
-    const v7 = dialectResults.find((r) => r.version === 7)
+    const versionResults = PRISMA_VERSIONS.flatMap((version) => {
+      const result = dialectResults.find((candidate) => {
+        return candidate.version === version
+      })
+      return result ? [result] : []
+    })
 
-    if (!v6 || !v7) continue
+    if (versionResults.length !== PRISMA_VERSIONS.length) continue
 
-    console.log(
-      '| Test                                     | Prisma v6 | Prisma v7 | SQL (v6)  | SQL (v7)  | Drizzle  | v6 Speedup | v7 Speedup | vs Drizzle |',
+    const columns = [
+      'Test',
+      ...PRISMA_VERSIONS.map((version) => {
+        return version === 8 ? 'Prisma v8 dev' : `Prisma v${version}`
+      }),
+      ...PRISMA_VERSIONS.map((version) => {
+        return version === 8 ? 'SQL (v8 dev)' : `SQL (v${version})`
+      }),
+      'Drizzle',
+      ...PRISMA_VERSIONS.map((version) => `v${version} Speedup`),
+      'vs Drizzle',
+    ]
+    const tableRows: string[][] = []
+
+    const testNames = new Set(
+      versionResults.flatMap((result) => {
+        return result.tests.map((test) => test.name)
+      }),
     )
-    console.log(
-      '|------------------------------------------|-----------|-----------|-----------|-----------|----------|------------|------------|------------|',
-    )
-
-    const testNames = new Set([
-      ...v6.tests.map((t) => t.name),
-      ...v7.tests.map((t) => t.name),
-    ])
 
     const regressions: Regression[] = []
 
     for (const testName of testNames) {
-      const v6Test = v6.tests.find((t) => t.name === testName)
-      const v7Test = v7.tests.find((t) => t.name === testName)
+      const versionTests = versionResults.flatMap((result) => {
+        const test = result.tests.find((candidate) => {
+          return candidate.name === testName
+        })
+        return test ? [test] : []
+      })
+      if (versionTests.length !== versionResults.length) continue
 
-      if (!v6Test || !v7Test) continue
-
-      const name = testName.padEnd(40)
-      const v6Time = (v6Test.prismaMs?.toFixed(2) + 'ms').padStart(9)
-      const v7Time = (v7Test.prismaMs?.toFixed(2) + 'ms').padStart(9)
-      const v6SqlTime = (v6Test.extendedMs?.toFixed(2) + 'ms').padStart(9)
-      const v7SqlTime = (v7Test.extendedMs?.toFixed(2) + 'ms').padStart(9)
+      const drizzleTest = versionTests[0]
       const drizzleTime =
-        v6Test.drizzleMs > 0
-          ? (v6Test.drizzleMs?.toFixed(2) + 'ms').padStart(8)
-          : 'N/A'.padStart(8)
-      const v6Speedup = (v6Test.speedupVsPrisma?.toFixed(2) + 'x').padStart(10)
-      const v7Speedup = (v7Test.speedupVsPrisma?.toFixed(2) + 'x').padStart(10)
+        drizzleTest.drizzleMs > 0 ? fmtMs(drizzleTest.drizzleMs) : 'N/A'
       const drizzleSpeedup =
-        v6Test.speedupVsDrizzle > 0
-          ? (v6Test.speedupVsDrizzle?.toFixed(2) + 'x').padStart(10)
-          : 'N/A'.padStart(10)
+        drizzleTest.speedupVsDrizzle > 0
+          ? fmtX(drizzleTest.speedupVsDrizzle)
+          : 'N/A'
 
-      console.log(
-        `| ${name} | ${v6Time} | ${v7Time} | ${v6SqlTime} | ${v7SqlTime} | ${drizzleTime} | ${v6Speedup} | ${v7Speedup} | ${drizzleSpeedup} |`,
-      )
+      tableRows.push([
+        testName,
+        ...versionTests.map((test) => fmtMs(test.prismaMs)),
+        ...versionTests.map((test) => fmtMs(test.extendedMs)),
+        drizzleTime,
+        ...versionTests.map((test) => fmtX(test.speedupVsPrisma)),
+        drizzleSpeedup,
+      ])
+
+      versionTests.forEach((test, index) => {
+        const version = PRISMA_VERSIONS[index]
+        if (
+          test.speedupVsPrisma < 1.0 &&
+          test.extendedMs - test.prismaMs >= NOISE_THRESHOLD_MS
+        ) {
+          regressions.push({
+            name: testName,
+            extendedMs: test.extendedMs,
+            opponent: `Prisma v${version}`,
+            opponentMs: test.prismaMs,
+            speedup: test.speedupVsPrisma,
+            sourceVersion: version,
+            source: test,
+          })
+        }
+      })
 
       if (
-        v6Test.speedupVsPrisma < 1.0 &&
-        v6Test.extendedMs - v6Test.prismaMs >= NOISE_THRESHOLD_MS
+        drizzleTest.drizzleMs > 0 &&
+        drizzleTest.speedupVsDrizzle < 1.0 &&
+        drizzleTest.extendedMs - drizzleTest.drizzleMs >= NOISE_THRESHOLD_MS
       ) {
         regressions.push({
           name: testName,
-          extendedMs: v6Test.extendedMs,
-          opponent: 'Prisma v6',
-          opponentMs: v6Test.prismaMs,
-          speedup: v6Test.speedupVsPrisma,
-          sourceVersion: 6,
-          source: v6Test,
-        })
-      }
-
-      if (
-        v7Test.speedupVsPrisma < 1.0 &&
-        v7Test.extendedMs - v7Test.prismaMs >= NOISE_THRESHOLD_MS
-      ) {
-        regressions.push({
-          name: testName,
-          extendedMs: v7Test.extendedMs,
-          opponent: 'Prisma v7',
-          opponentMs: v7Test.prismaMs,
-          speedup: v7Test.speedupVsPrisma,
-          sourceVersion: 7,
-          source: v7Test,
-        })
-      }
-
-      if (
-        v6Test.drizzleMs > 0 &&
-        v6Test.speedupVsDrizzle < 1.0 &&
-        v6Test.extendedMs - v6Test.drizzleMs >= NOISE_THRESHOLD_MS
-      ) {
-        regressions.push({
-          name: testName,
-          extendedMs: v6Test.extendedMs,
+          extendedMs: drizzleTest.extendedMs,
           opponent: 'Drizzle',
-          opponentMs: v6Test.drizzleMs,
-          speedup: v6Test.speedupVsDrizzle,
+          opponentMs: drizzleTest.drizzleMs,
+          speedup: drizzleTest.speedupVsDrizzle,
           sourceVersion: 6,
-          source: v6Test,
+          source: drizzleTest,
         })
       }
     }
 
+    const widths = columns.map((column, index) => {
+      const minimumWidth = index === 0 ? 40 : 0
+      return Math.max(
+        minimumWidth,
+        column.length,
+        ...tableRows.map((row) => row[index].length),
+      )
+    })
+    printTableRow(columns, widths)
+    printTableRow(widths.map((width) => '-'.repeat(width)), widths)
+    tableRows.forEach((row) => printTableRow(row, widths))
+
     console.log('\n' + '-'.repeat(140))
     console.log('Summary:')
-    console.log(
-      `  prisma-sql vs Prisma v6: ${v6.avgSpeedupVsPrisma?.toFixed(2)}x faster`,
-    )
-    console.log(
-      `  prisma-sql vs Prisma v7: ${v7.avgSpeedupVsPrisma?.toFixed(2)}x faster`,
-    )
-    if (v6.avgSpeedupVsDrizzle > 0) {
+    versionResults.forEach((result) => {
       console.log(
-        `  prisma-sql vs Drizzle:   ${v6.avgSpeedupVsDrizzle?.toFixed(2)}x faster`,
+        `  prisma-sql vs ${PRISMA_PACKAGES[result.version].label}: ${fmtX(result.avgSpeedupVsPrisma)} faster`,
+      )
+    })
+    const drizzleResult = versionResults[0]
+    if (drizzleResult.avgSpeedupVsDrizzle > 0) {
+      console.log(
+        `  prisma-sql vs Drizzle: ${fmtX(drizzleResult.avgSpeedupVsDrizzle)} faster`,
       )
     }
 
@@ -384,8 +391,10 @@ async function cleanupGeneratedSchemas() {
   const schemasToClean = [
     'schema-postgres.prisma',
     'schema-postgres-v7.prisma',
+    'schema-postgres-v8.prisma',
     'schema-sqlite.prisma',
     'schema-sqlite-v7.prisma',
+    'schema-sqlite-v8.prisma',
   ]
 
   for (const schema of schemasToClean) {
@@ -395,36 +404,92 @@ async function cleanupGeneratedSchemas() {
   }
 }
 
+interface PackageState {
+  packageJson: string
+  packageLock: string
+}
+
+function capturePackageState(): PackageState {
+  return {
+    packageJson: readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'),
+    packageLock: readFileSync(
+      path.join(process.cwd(), 'package-lock.json'),
+      'utf-8',
+    ),
+  }
+}
+
+function restorePackageState(state: PackageState) {
+  const packageJsonPath = path.join(process.cwd(), 'package.json')
+  const packageLockPath = path.join(process.cwd(), 'package-lock.json')
+
+  writeFileSync(packageJsonPath, state.packageJson)
+  writeFileSync(packageLockPath, state.packageLock)
+
+  try {
+    execSync('npm install', { stdio: 'inherit' })
+  } finally {
+    writeFileSync(packageJsonPath, state.packageJson)
+    writeFileSync(packageLockPath, state.packageLock)
+  }
+}
+
 async function main() {
-  await ensureResultsDir()
+  const packageState = capturePackageState()
+  let benchmarkFailed = false
+  let benchmarkError: unknown
+  let finalizationError: unknown
 
-  const dialects: Array<'postgres' | 'sqlite'> = ['postgres', 'sqlite']
-  const versions: Array<6 | 7> = [6, 7]
-  const allResults: BenchmarkResult[] = []
+  try {
+    await ensureResultsDir()
 
-  for (const version of versions) {
-    await switchPrismaVersion(version)
+    const dialects: Array<'postgres' | 'sqlite'> = ['postgres', 'sqlite']
+    const allResults: BenchmarkResult[] = []
 
-    for (const dialect of dialects) {
-      const result = await runBenchmark(version, dialect)
-      allResults.push(result)
+    for (const version of PRISMA_VERSIONS) {
+      await switchPrismaVersion(version)
+
+      for (const dialect of dialects) {
+        const result = await runBenchmark(version, dialect)
+        allResults.push(result)
+      }
     }
+
+    const summaryPath = path.join(
+      RESULTS_DIR,
+      `summary-${new Date().toISOString().split('T')[0]}.json`,
+    )
+    writeFileSync(summaryPath, JSON.stringify(allResults, null, 2))
+
+    printComparison(allResults)
+
+    console.log('\n' + '='.repeat(140))
+    console.log(`✓ Results saved to: ${summaryPath}`)
+    console.log('='.repeat(140) + '\n')
+  } catch (error) {
+    benchmarkFailed = true
+    benchmarkError = error
   }
 
-  const summaryPath = path.join(
-    RESULTS_DIR,
-    `summary-${new Date().toISOString().split('T')[0]}.json`,
-  )
-  writeFileSync(summaryPath, JSON.stringify(allResults, null, 2))
+  try {
+    console.log('Cleaning up generated schemas...')
+    await cleanupGeneratedSchemas()
+  } catch (error) {
+    finalizationError = error
+    console.error('Schema cleanup failed:', error)
+  }
 
-  printComparison(allResults)
+  try {
+    console.log('Restoring package state...')
+    restorePackageState(packageState)
+  } catch (error) {
+    if (finalizationError === undefined) finalizationError = error
+    console.error('Package state restoration failed:', error)
+  }
 
-  console.log('\n' + '='.repeat(140))
-  console.log(`✓ Results saved to: ${summaryPath}`)
-  console.log('='.repeat(140) + '\n')
+  if (benchmarkFailed) throw benchmarkError
+  if (finalizationError !== undefined) throw finalizationError
 
-  console.log('Cleaning up generated schemas...')
-  await cleanupGeneratedSchemas()
   console.log('✓ Cleanup complete\n')
 }
 

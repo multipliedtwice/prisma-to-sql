@@ -102,113 +102,9 @@
   },
   "performance": {
     "title": "Насколько быстрее? Реальные бенчмарки",
-    "subtitle": "Комплексное сравнение Prisma v6, v7, Drizzle ORM и Prisma-SQL",
+    "subtitle": "Комплексное сравнение Prisma v6, v7, v8, Drizzle ORM и Prisma-SQL",
     "environment": "Среда бенчмарков: MacBook Pro M1 • PostgreSQL 15 • SQLite 3.43 • 137 тест-кейсов на каждую базу данных",
-    "databases": [
-      {
-        "name": "PostgreSQL",
-        "color": "accent",
-        "subtitle": "Среднее по 57 тест-кейсам",
-        "comparisons": [
-          {
-            "label": "Prisma v6",
-            "time": "2.10ms",
-            "width": 100,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "isBaseline": true
-          },
-          {
-            "label": "Prisma v7",
-            "time": "1.95ms",
-            "width": 93,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.08×"
-          },
-          {
-            "label": "Drizzle ORM",
-            "time": "1.40ms",
-            "width": 67,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.50×"
-          },
-          {
-            "label": "Prisma-SQL ⚡",
-            "time": "0.90ms",
-            "width": 43,
-            "bgColor": "bg-gradient-to-r from-accent to-green-600",
-            "color": "text-accent",
-            "speedup": "2.34×"
-          }
-        ],
-        "highlights": [
-          {
-            "label": "DISTINCT-запросы",
-            "value": "6.3×",
-            "description": "vs Prisma v6"
-          },
-          {
-            "label": "Фильтры связей",
-            "value": "5.5×",
-            "description": "vs Prisma v6 (\"none\"-фильтр)"
-          }
-        ]
-      },
-      {
-        "name": "SQLite",
-        "color": "purple",
-        "subtitle": "Среднее по 56 тест-кейсам",
-        "comparisons": [
-          {
-            "label": "Prisma v6",
-            "time": "5.48ms",
-            "width": 100,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "isBaseline": true
-          },
-          {
-            "label": "Prisma v7",
-            "time": "4.12ms",
-            "width": 75,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.33×"
-          },
-          {
-            "label": "Drizzle ORM",
-            "time": "2.11ms",
-            "width": 39,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "2.60×"
-          },
-          {
-            "label": "Prisma-SQL ⚡",
-            "time": "0.73ms",
-            "width": 13,
-            "bgColor": "bg-gradient-to-r from-purple-500 to-pink-600",
-            "color": "text-purple-600",
-            "speedup": "7.50×"
-          }
-        ],
-        "highlights": [
-          {
-            "label": "Простые запросы",
-            "value": "12.6×",
-            "description": "vs Prisma v6"
-          },
-          {
-            "label": "Фильтры связей",
-            "value": "69.7×",
-            "description": "vs Prisma v6 (\"none\"-фильтр)"
-          }
-        ]
-      }
-    ],
-    "footer": "Бенчмарки основаны на 137 E2E тестах на каждую базу данных. Prisma v6.16.3, Prisma v7.2.0, Drizzle ORM latest.",
+    "footer": "Бенчмарки основаны на 137 E2E тестах на каждую базу данных. Prisma v6.19.3, Prisma v7.10.0, Drizzle ORM latest.",
     "footerLink": "Посмотреть полные данные бенчмарка"
   },
   "howItWorks": {
@@ -418,9 +314,9 @@
         "description": "PostgreSQL и SQLite"
       },
       {
-        "value": "3",
+        "value": "4",
         "label": "Бенчмарки ORM",
-        "description": "Prisma v6/v7, Drizzle"
+        "description": "Prisma v6/v7/v8, Drizzle"
       }
     ],
     "validation": {
@@ -493,7 +389,7 @@
           },
           {
             "label": "Сравнение нескольких ORM",
-            "description": "Prisma v6, v7, Drizzle, Generated SQL"
+            "description": "Prisma v6, v7, v8, Drizzle, Generated SQL"
           },
           {
             "label": "Время генерации SQL",
@@ -597,15 +493,15 @@
         {
           "number": "5",
           "title": "Измерение производительности",
-          "description": "После валидации 5-50 итераций измеряют среднее время выполнения. Результаты включают: Prisma v6, Prisma v7, Drizzle ORM, Generated SQL и накладные расходы генерации SQL."
+          "description": "После валидации 5-50 итераций измеряют среднее время выполнения. Результаты включают: Prisma v6, Prisma v7, Prisma v8, Drizzle ORM, Generated SQL и накладные расходы генерации SQL."
         }
       ]
     },
     "multiVersion": {
       "title": "Мультиверсионная валидация",
-      "description": "Каждый тест запускается как с Prisma v6, так и с v7 для гарантии совместимости между версиями:",
+      "description": "Каждый тест запускается с Prisma v6, v7 и v8 для гарантии совместимости между версиями:",
       "v6": {
-        "title": "Prisma v6 (6.16.3)",
+        "title": "Prisma v6 (6.19.3)",
         "items": [
           "Прямое использование PrismaClient",
           "Устаревшая архитектура движка",
@@ -613,11 +509,19 @@
         ]
       },
       "v7": {
-        "title": "Prisma v7 (7.2.0)",
+        "title": "Prisma v7 (7.10.0)",
         "items": [
           "Архитектура на основе адаптеров",
           "@prisma/adapter-pg и adapter-better-sqlite3",
           "Новые оптимизации движка"
+        ]
+      },
+      "v8": {
+        "title": "Prisma v8 (8.1.0-dev.1)",
+        "items": [
+          "Prisma v8",
+          "@prisma/adapter-*",
+          "PostgreSQL + SQLite"
         ]
       }
     },
@@ -627,8 +531,10 @@
       "files": [
         "benchmark-results/v6-postgres-latest.json",
         "benchmark-results/v7-postgres-latest.json",
+        "benchmark-results/v8-postgres-latest.json",
         "benchmark-results/v6-sqlite-latest.json",
-        "benchmark-results/v7-sqlite-latest.json"
+        "benchmark-results/v7-sqlite-latest.json",
+        "benchmark-results/v8-sqlite-latest.json"
       ],
       "footer": "Каждый файл содержит: название теста, время выполнения Prisma, время генерации SQL, время Drizzle, коэффициенты ускорения и ISO временную метку."
     },

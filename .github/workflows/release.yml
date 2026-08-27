@@ -40,6 +40,16 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Test with coverage
+        run: npm run test:coverage -- --run
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          fail_ci_if_error: true
+          files: ./coverage/lcov.info
+
   ordering-types:
     runs-on: ubuntu-latest
     strategy:

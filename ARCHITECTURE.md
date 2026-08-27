@@ -39,6 +39,7 @@ planner.generated.ts           result-transformers.ts
 ### Strategy selection (`builder/select/`)
 
 The core problem: same args, many valid execution plans. Chosen per include tree.
+Strategy invariants, formulas, historical evidence, and change protocol live in [PERFORMANCE.md](PERFORMANCE.md).
 
 | File | Role |
 | --- | --- |

@@ -487,9 +487,12 @@ export function pickIncludeStrategy(params: {
   hasPagination: boolean
   canFlatJoin: boolean
   hasChildPagination: boolean
+  dialect?: 'postgres' | 'sqlite'
   debug?: boolean
   modelMap?: Map<string, Model>
 }): IncludeStrategy {
+  // Decision order and constants are contract. Update PERFORMANCE.md and
+  // focused benchmarks/tests with every strategy change.
   const {
     includeSpec,
     model,
@@ -525,13 +528,16 @@ export function pickIncludeStrategy(params: {
     }
   }
 
-  const guardResult = checkLargeChildGuard({
-    includeSpec,
-    model,
-    schemas,
-    takeValue,
-    modelMap,
-  })
+  const guardResult =
+    params.dialect === 'sqlite'
+      ? null
+      : checkLargeChildGuard({
+          includeSpec,
+          model,
+          schemas,
+          takeValue,
+          modelMap,
+        })
   if (guardResult === 'where-in') {
     if (debug)
       console.log(`  [strategy] ${model.name}: large-child guard → where-in`)

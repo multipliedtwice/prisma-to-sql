@@ -4,16 +4,20 @@ import { getDMMF } from '@prisma/internals'
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import type { DMMF } from '@prisma/generator-helper'
+import {
+  parsePrismaVersion,
+  type PrismaVersion,
+} from './prisma-versions'
 
-function detectPrismaVersion(): number {
+function detectPrismaVersion(): PrismaVersion {
   if (process.env.PRISMA_VERSION) {
-    return parseInt(process.env.PRISMA_VERSION, 10)
+    return parsePrismaVersion(process.env.PRISMA_VERSION)
   }
   try {
     const pkg = require(
       resolve(process.cwd(), 'node_modules', 'prisma', 'package.json'),
     )
-    return parseInt(pkg.version.split('.')[0], 10) >= 7 ? 7 : 6
+    return parsePrismaVersion(pkg.version.split('.')[0])
   } catch {
     return 6
   }
@@ -21,7 +25,7 @@ function detectPrismaVersion(): number {
 
 const PRISMA_VERSION = detectPrismaVersion()
 
-function preprocessSchemaForV7(schema: string): string {
+function preprocessSchemaForModernPrisma(schema: string): string {
   return schema.replace(/^\s*url\s*=\s*.*$/gm, '')
 }
 
@@ -61,7 +65,7 @@ async function loadDmmfForDialect(
   }
 
   if (PRISMA_VERSION >= 7) {
-    datamodel = preprocessSchemaForV7(datamodel)
+    datamodel = preprocessSchemaForModernPrisma(datamodel)
   }
 
   const dmmf = await getDMMF({ datamodel })

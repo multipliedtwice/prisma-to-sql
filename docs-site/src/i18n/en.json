@@ -1,7 +1,7 @@
 {
   "meta": {
-    "title": "Fix Slow Prisma Queries: 2–7× Faster Reads (Up to 53.5×) | Prisma-SQL",
-    "description": "Is Prisma slow? Speed up slow Prisma reads by 2–7× without refactors. Bypass Prisma’s read execution path with direct SQL execution in PostgreSQL and SQLite (up to 53.5× on SQLite relation filters). Production-ready optimization for read-heavy Prisma workloads.",
+    "title": "Prisma-SQL: Faster Supported Prisma Reads",
+    "description": "prisma-sql accelerates supported Prisma read queries by generating SQL and executing it directly through postgres.js or better-sqlite3. Current benchmarks compare Prisma v6, v7, and v8 across PostgreSQL and SQLite.",
     "keywords": "slow prisma, prisma slow, prisma performance, fix slow prisma, speed up prisma, prisma optimization, prisma query speed, slow prisma queries, prisma performance issues, make prisma faster, postgresql, sqlite"
   },
   "header": {
@@ -10,26 +10,26 @@
   "hero": {
     "badge": "🚀 The Solution for Slow Prisma",
     "title": "Fix Slow Prisma Queries",
-    "titleHighlight": "Make Your API 2–7× Faster (Up to 53.5×)",
-    "description": "Is Prisma slow? You're not alone. Love Prisma's DX but need better performance?",
-    "descriptionBold": "Speed up slow Prisma queries by 2–7×",
-    "descriptionSuffix": "(up to 53.5× on SQLite relation filters) without changing any existing queries.",
+    "titleHighlight": "With Direct SQL Execution",
+    "description": "Love Prisma's DX but need lower read overhead on supported query shapes?",
+    "descriptionBold": "Current benchmark JSON shows average speedups across Prisma v6, v7, and v8",
+    "descriptionSuffix": "for supported PostgreSQL and SQLite reads; individual query shapes vary.",
     "cta1": "Speed Up Prisma Now",
     "cta2": "See How It Works",
     "trustBadges": [
-      "Faster Prisma Reads",
+      "Faster Supported Reads",
       "No Query Changes",
-      "Production-Ready",
-      "137 E2E Tests"
+      "Current Benchmark JSON",
+      "PostgreSQL & SQLite"
     ],
     "codeTitle": "Fix slow Prisma in one line",
     "codeSnippet": "import { PrismaClient, Prisma } from '@prisma/client'\nimport { speedExtension, convertDMMFToModels } from 'prisma-sql'\nimport postgres from 'postgres'\n\nconst sql = postgres(process.env.DATABASE_URL)\nconst models = convertDMMFToModels(Prisma.dmmf.datamodel)\n\nconst prisma = new PrismaClient().$extends(\n  speedExtension({ postgres: sql, models })\n)\n\nconst users = await prisma.user.findMany({\n  where: { status: 'ACTIVE' },\n  include: { posts: true }\n})"
   },
   "stats": [
     {
-      "value": "2–7×",
-      "label": "Faster Prisma Reads",
-      "subtitle": "Typical speedup",
+      "value": "v6–v8",
+      "label": "Prisma Coverage",
+      "subtitle": "PostgreSQL and SQLite benchmark matrix",
       "color": "text-accent"
     },
     {
@@ -39,9 +39,9 @@
       "color": "text-blue-600"
     },
     {
-      "value": "137",
-      "label": "E2E Tests",
-      "subtitle": "Verified solution",
+      "value": "6",
+      "label": "Benchmark Files",
+      "subtitle": "Prisma v6/v7/v8 × PG/SQLite",
       "color": "text-purple-600"
     },
     {
@@ -98,117 +98,13 @@
         "iconPath": "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
       }
     ],
-    "conclusion": "This extension complements Prisma by offering a faster path for read queries. You keep everything you love about Prisma while getting 2–7× faster reads in typical cases (and up to 53.5× in SQLite relation filters) when performance matters."
+    "conclusion": "This extension complements Prisma by offering a faster path for supported read queries. You keep Prisma for schema, migrations, writes, and generated types while generated SQL handles selected hot reads through database-native clients."
   },
   "performance": {
     "title": "How Much Faster? Real Benchmarks",
-    "subtitle": "Comprehensive comparison across Prisma v6, v7, Drizzle ORM, and Prisma-SQL",
-    "environment": "Benchmark environment: MacBook Pro M1 • PostgreSQL 15 • SQLite 3.43 • 137 test cases per database",
-    "databases": [
-      {
-        "name": "PostgreSQL",
-        "color": "accent",
-        "subtitle": "Average across 57 test cases",
-        "comparisons": [
-          {
-            "label": "Prisma v6",
-            "time": "2.10ms",
-            "width": 100,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "isBaseline": true
-          },
-          {
-            "label": "Prisma v7",
-            "time": "1.95ms",
-            "width": 93,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.08×"
-          },
-          {
-            "label": "Drizzle ORM",
-            "time": "1.40ms",
-            "width": 67,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.50×"
-          },
-          {
-            "label": "Prisma-SQL ⚡",
-            "time": "0.90ms",
-            "width": 43,
-            "bgColor": "bg-gradient-to-r from-accent to-green-600",
-            "color": "text-accent",
-            "speedup": "2.34×"
-          }
-        ],
-        "highlights": [
-          {
-            "label": "Distinct Queries",
-            "value": "6.3×",
-            "description": "vs Prisma v6"
-          },
-          {
-            "label": "Relation Filters",
-            "value": "5.5×",
-            "description": "vs Prisma v6 (none)"
-          }
-        ]
-      },
-      {
-        "name": "SQLite",
-        "color": "purple",
-        "subtitle": "Average across 56 test cases",
-        "comparisons": [
-          {
-            "label": "Prisma v6",
-            "time": "5.48ms",
-            "width": 100,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "isBaseline": true
-          },
-          {
-            "label": "Prisma v7",
-            "time": "4.12ms",
-            "width": 75,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "1.33×"
-          },
-          {
-            "label": "Drizzle ORM",
-            "time": "2.11ms",
-            "width": 39,
-            "bgColor": "bg-gray-400",
-            "color": "text-gray-700",
-            "speedup": "2.60×"
-          },
-          {
-            "label": "Prisma-SQL ⚡",
-            "time": "0.73ms",
-            "width": 13,
-            "bgColor": "bg-gradient-to-r from-purple-500 to-pink-600",
-            "color": "text-purple-600",
-            "speedup": "7.50×"
-          }
-        ],
-        "highlights": [
-          {
-            "label": "Simple Queries",
-            "value": "12.6×",
-            "description": "vs Prisma v6"
-          },
-          {
-            "label": "Relation Filters",
-            "value": "69.7×",
-            "description": "vs Prisma v6 (none)"
-          }
-        ]
-      }
-    ],
-    "footer": "Benchmarks based on 137 E2E tests per database. Prisma v6.16.3, Prisma v7.2.0, Drizzle ORM latest.",
+    "subtitle": "Latest benchmark JSON comparison across Prisma v6, v7, v8, Drizzle ORM, and prisma-sql",
+    "environment": "Data source: benchmark-results/v6|v7|v8 × postgres|sqlite latest JSON files in this checkout",
+    "footer": "Summary generated from the latest benchmark JSON files in benchmark-results.",
     "footerLink": "View complete benchmark data"
   },
   "howItWorks": {
@@ -252,7 +148,7 @@
       },
       {
         "title": "Production-Tested Solution",
-        "description": "137 E2E tests validate compatibility with recent Prisma versions. Used to accelerate Prisma reads in production apps.",
+        "description": "Current parity tests validate supported reads across recent Prisma versions. Use it for production apps after checking compatibility with your Prisma version and workload.",
         "color": "purple",
         "iconPath": "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
       },
@@ -365,7 +261,7 @@
       },
       {
         "question": "Does this work in production?",
-        "answer": "Yes. It is validated with 137 E2E tests and designed to be used in production. Always verify compatibility with your Prisma version and run your own regression tests before rollout."
+        "answer": "Yes, it is designed for production use on supported read paths. Always verify compatibility with your Prisma version and run your own regression tests before rollout."
       },
       {
         "question": "What causes slower Prisma aggregations?",
@@ -375,37 +271,37 @@
   },
   "cta": {
     "title": "Ready to Speed Up Prisma?",
-    "subtitle": "Join developers optimizing Prisma reads: 2–7× faster (up to 53.5×)",
+    "subtitle": "Check the current benchmark table for supported PostgreSQL and SQLite reads",
     "button1": "Install Prisma-SQL",
     "button2": "View on GitHub"
   },
   "footer": {
-    "copyright": "© 2026 Prisma-SQL - Speed up Prisma reads by 2–7× (up to 53.5×)",
+    "copyright": "© 2026 Prisma-SQL - Faster supported Prisma reads",
     "tagline": "Making Prisma even better"
   },
   "testingCallout": {
     "badge": "✓ Validated",
     "title": "How do we ensure correctness?",
-    "description": "Every query is validated against Prisma with 137 end-to-end tests across PostgreSQL and SQLite",
+    "description": "Supported queries are validated against Prisma across PostgreSQL and SQLite, with benchmark reports covering Prisma v6, v7, v8, Drizzle, and generated SQL.",
     "link": "View Testing Methodology →"
   },
   "testing": {
     "meta": {
       "title": "Testing Methodology - Prisma-SQL",
-      "description": "Comprehensive testing approach validating 137 E2E tests ensure generated SQL matches Prisma output exactly",
+      "description": "Supported queries are validated against Prisma across PostgreSQL and SQLite, and benchmark reports compare Prisma v6, v7, v8, Drizzle, and generated SQL.",
       "keywords": "prisma testing, sql validation, e2e tests, orm testing, database testing"
     },
     "hero": {
       "badge": "🧪 Quality Assurance",
       "title": "Testing",
       "titleHighlight": "Methodology",
-      "subtitle": "137 end-to-end tests validate every generated SQL query matches Prisma's output exactly"
+      "subtitle": "Current validation covers supported reads across PostgreSQL and SQLite, with benchmark reports for Prisma v6, v7, v8, Drizzle, and generated SQL."
     },
     "stats": [
       {
-        "value": "137",
-        "label": "E2E Tests",
-        "description": "Every query validated"
+        "value": "Current",
+        "label": "E2E Suite",
+        "description": "Query parity validated"
       },
       {
         "value": "100%",
@@ -418,9 +314,9 @@
         "description": "PostgreSQL & SQLite"
       },
       {
-        "value": "3",
+        "value": "4",
         "label": "ORM Benchmarks",
-        "description": "Prisma v6/v7, Drizzle"
+        "description": "Prisma v6/v7/v8, Drizzle"
       }
     ],
     "validation": {
@@ -445,7 +341,7 @@
         },
         {
           "title": "Benchmark Performance",
-          "description": "Measure execution time with 5 warmup runs, then average 10-50 iterations per test. Compare against Prisma v6, Prisma v7, and Drizzle ORM."
+          "description": "Measure execution time with 5 warmup runs, then average 10-50 iterations per test. Compare against Prisma v6, Prisma v7, Prisma v8, and Drizzle ORM."
         }
       ]
     },
@@ -493,7 +389,7 @@
           },
           {
             "label": "Multi-ORM Comparison",
-            "description": "Prisma v6, v7, Drizzle, Generated SQL"
+            "description": "Prisma v6, v7, v8, Drizzle, Generated SQL"
           },
           {
             "label": "SQL Generation Time",
@@ -597,15 +493,15 @@
         {
           "number": "5",
           "title": "Performance Measurement",
-          "description": "After validation, 5-50 iterations measure average execution time. Results include: Prisma v6, Prisma v7, Drizzle ORM, Generated SQL, and SQL generation overhead."
+          "description": "After validation, 5-50 iterations measure average execution time. Results include: Prisma v6, Prisma v7, Prisma v8, Drizzle ORM, Generated SQL, and SQL generation overhead."
         }
       ]
     },
     "multiVersion": {
       "title": "Multi-Version Validation",
-      "description": "Every test runs against both Prisma v6 and v7 to ensure compatibility across versions:",
+      "description": "Every benchmarked test runs across Prisma v6, v7, and v8 where supported:",
       "v6": {
-        "title": "Prisma v6 (6.16.3)",
+        "title": "Prisma v6 (6.19.3)",
         "items": [
           "Direct PrismaClient usage",
           "Legacy engine architecture",
@@ -613,11 +509,19 @@
         ]
       },
       "v7": {
-        "title": "Prisma v7 (7.2.0)",
+        "title": "Prisma v7 (7.10.0)",
         "items": [
           "Adapter-based architecture",
           "@prisma/adapter-pg & adapter-better-sqlite3",
           "New engine optimizations"
+        ]
+      },
+      "v8": {
+        "title": "Prisma v8 (8.1.0-dev.1)",
+        "items": [
+          "Prisma v8 dev release coverage",
+          "Adapter-based architecture",
+          "PostgreSQL and SQLite benchmark parity"
         ]
       }
     },
@@ -627,14 +531,16 @@
       "files": [
         "benchmark-results/v6-postgres-latest.json",
         "benchmark-results/v7-postgres-latest.json",
+        "benchmark-results/v8-postgres-latest.json",
         "benchmark-results/v6-sqlite-latest.json",
-        "benchmark-results/v7-sqlite-latest.json"
+        "benchmark-results/v7-sqlite-latest.json",
+        "benchmark-results/v8-sqlite-latest.json"
       ],
       "footer": "Each file contains: test name, Prisma execution time, generated SQL time, Drizzle time, speedup ratios, and ISO timestamp."
     },
     "cta": {
       "title": "Explore the Full Test Suite",
-      "subtitle": "All 137 tests are open source. Review the test code, benchmarks, and validation logic.",
+      "subtitle": "The validation suite and benchmark reports are open source. Review the test code, benchmark data, and parity checks.",
       "button1": "View Test Suite →",
       "button2": "See Benchmarks"
     }
@@ -642,7 +548,7 @@
   "sqlPrevention": {
     "meta": {
       "title": "SQL Injection Prevention - Prisma-SQL Security",
-      "description": "SQL injection prevention methodology using parameter binding, schema-based validation, and 137 security-focused tests (current suite)",
+      "description": "SQL injection prevention methodology using parameter binding, schema-based validation, and the current security-focused test suite",
       "keywords": "sql injection prevention, parameterized queries, sql security, database security, prisma security"
     },
     "hero": {
@@ -668,9 +574,9 @@
         "description": "Placeholders map to params 1:1"
       },
       {
-        "value": "137",
+        "value": "Current",
         "label": "Security Tests",
-        "description": "Injection attempt coverage (current suite)"
+        "description": "Injection attempt coverage"
       }
     ],
     "threat": {
@@ -802,7 +708,7 @@
     },
     "testCoverage": {
       "title": "Comprehensive Security Test Coverage",
-      "subtitle": "137 tests validate protection against common SQL injection vectors and edge cases (current suite)",
+      "subtitle": "The current suite validates protection against common SQL injection vectors and edge cases",
       "categories": [
         {
           "title": "Value Parameterization (basic.test.ts)",
@@ -934,7 +840,7 @@
     "securityCallout": {
       "badge": "🔒 Verified Secure",
       "title": "How do we prevent SQL injection?",
-      "description": "Multi-layer validation with parameter binding, schema-based field checks, and 137 security tests (current suite)",
+      "description": "Multi-layer validation with parameter binding, schema-based field checks, and the current security test suite",
       "link": "View Security Details →"
     },
     "cta": {

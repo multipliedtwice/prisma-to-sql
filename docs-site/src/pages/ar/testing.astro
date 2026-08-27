@@ -6,6 +6,15 @@ import ar from '../../i18n/ar.json';
 
 const t = ar;
 const locale = 'ar';
+
+interface MultiVersionEntry {
+  title: string;
+  items: string[];
+}
+
+const multiVersionKeys = ['v6', 'v7', 'v8'] as const;
+const multiVersionEntries: MultiVersionEntry[] = multiVersionKeys
+  .map(key => t.testing.multiVersion[key]);
 ---
 
 <Layout 
@@ -249,23 +258,17 @@ const locale = 'ar';
       <div class="mt-8 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl p-8 border border-purple-200">
         <h3 class="text-2xl font-bold text-purple-900 mb-4">{t.testing.multiVersion.title}</h3>
         <p class="text-purple-800 mb-4">{t.testing.multiVersion.description}</p>
-        <div class="grid md:grid-cols-2 gap-6">
-          <div class="bg-white rounded-lg p-4 border border-purple-200">
-            <h4 class="font-bold text-purple-900 mb-2">{t.testing.multiVersion.v6.title}</h4>
-            <ul class="text-sm text-purple-800 space-y-1">
-              {t.testing.multiVersion.v6.items.map((item: string) => (
-                <li>• {item}</li>
-              ))}
-            </ul>
-          </div>
-          <div class="bg-white rounded-lg p-4 border border-purple-200">
-            <h4 class="font-bold text-purple-900 mb-2">{t.testing.multiVersion.v7.title}</h4>
-            <ul class="text-sm text-purple-800 space-y-1">
-              {t.testing.multiVersion.v7.items.map((item: string) => (
-                <li>• {item}</li>
-              ))}
-            </ul>
-          </div>
+        <div class="grid md:grid-cols-3 gap-6">
+          {multiVersionEntries.map((version) => (
+            <div class="bg-white rounded-lg p-4 border border-purple-200">
+              <h4 class="font-bold text-purple-900 mb-2">{version.title}</h4>
+              <ul class="text-sm text-purple-800 space-y-1">
+                {version.items.map((item: string) => (
+                  <li>• {item}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       </div>
     </div>

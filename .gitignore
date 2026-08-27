@@ -17,8 +17,11 @@ tests/e2e/node_modules
 .scannerwork
 tests/prisma/db.sqlite
 tests/prisma/schema-postgres-v7.prisma
+tests/prisma/schema-postgres-v8.prisma
 tests/prisma/schema-postgres.prisma
 tests/prisma/schema-sqlite.prisma
+tests/prisma/schema-sqlite-v7.prisma
+tests/prisma/schema-sqlite-v8.prisma
 tests/prisma/schema-sqlite.prisma
 tests/prisma/schema.prisma
 docs

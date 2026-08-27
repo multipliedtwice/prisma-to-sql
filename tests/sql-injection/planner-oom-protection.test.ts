@@ -485,6 +485,66 @@ async function testStaleLowParentEstimates() {
   )
 }
 
+async function testUnknownCatalogRowsStayUnknown() {
+  console.log('test: negative catalog reltuples stay unknown')
+  const { executor } = makeExecutor(
+    {
+      modelStatsRows: [
+        { ...PARENT_KNOWN, reltuples: '-1', live_tup: '0' },
+        { ...CHILD_HUGE, reltuples: '-1', live_tup: '0' },
+      ],
+      catalogRows: [
+        { schema_name: 'public', table_name: 'Parent', row_count: '-1' },
+        { schema_name: 'public', table_name: 'Child', row_count: '-1' },
+      ],
+    },
+    { sessionBound: true },
+  )
+
+  const res = await planner.collectPlannerArtifacts({
+    executor,
+    datamodel: dmModels(),
+    dialect: 'postgres',
+    mode: 'fast',
+    totalBudgetMs: 30000,
+  })
+  const stats = res.relationStats.Parent.children
+
+  ok(stats.avg === 1, 'unknown rows keep conservative average placeholder')
+  ok(stats.coverage === 0, 'unknown rows are not marked fully covered')
+  ok(stats.max === 1, 'unknown rows do not fabricate max fan-out 5')
+}
+
+async function testValidatedModelRowsBackCatalogCardinality() {
+  console.log('test: validated model rows back catalog cardinality')
+  const { executor } = makeExecutor(
+    {
+      modelStatsRows: [
+        { ...PARENT_KNOWN, reltuples: '100', live_tup: '100' },
+        { ...CHILD_HUGE, reltuples: '4000', live_tup: '4000' },
+      ],
+      catalogRows: [
+        { schema_name: 'public', table_name: 'Parent', row_count: '-1' },
+        { schema_name: 'public', table_name: 'Child', row_count: '-1' },
+      ],
+    },
+    { sessionBound: true },
+  )
+
+  const res = await planner.collectPlannerArtifacts({
+    executor,
+    datamodel: dmModels(),
+    dialect: 'postgres',
+    mode: 'fast',
+    totalBudgetMs: 30000,
+  })
+  const stats = res.relationStats.Parent.children
+
+  ok(stats.avg === 40, 'validated model row counts produce fan-out 40')
+  ok(stats.coverage === 1, 'validated model row counts produce trusted coverage')
+  ok(stats.max === 200, 'fallback skew bound uses validated row counts')
+}
+
 async function testTablesampleClamping() {
   console.log('test: TABLESAMPLE percentage clamping')
   let sampleCalls = 0
@@ -1367,6 +1427,8 @@ test('planner OOM protections', async () => {
   fail = 0
 
   await testStaleLowParentEstimates()
+  await testUnknownCatalogRowsStayUnknown()
+  await testValidatedModelRowsBackCatalogCardinality()
   await testTablesampleClamping()
   await testSessionRestoration()
   await testTightenOnlyGuards()
