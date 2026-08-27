@@ -1,3 +1,15 @@
+# [1.92.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.91.0...v1.92.0) (2026-08-27)
+
+
+### Bug Fixes
+
+* add test client generation and Prisma 6 test fixtures installation ([706538f](https://github.com/multipliedtwice/prisma-to-sql/commit/706538fdd81f0cd749a34568b5c203ef761c81a3))
+
+
+### Features
+
+* add benchmark data handling and configuration for PostgreSQL and SQLite ([1e7166d](https://github.com/multipliedtwice/prisma-to-sql/commit/1e7166d5a20371540ea4fe107000fffc10b86f6c))
+
 # [1.91.0](https://github.com/multipliedtwice/prisma-to-sql/compare/v1.90.0...v1.91.0) (2026-08-22)
 
 
